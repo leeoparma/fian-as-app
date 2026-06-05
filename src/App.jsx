@@ -304,22 +304,45 @@ function InvestimentosTab({data,setData,currency}) {
 }
 
 // ── Aba Análise ───────────────────────────────────────────────────────────────
+const WL_CATEGORIAS = ["Todas","Banco","Infraestrutura","Fundo Imobiliário","Energia","Tecnologia","Varejo","Saúde","Agronegócio","Mineração","Petróleo","ETF","Exterior","Outros"];
+const INDICADORES_COMP = [
+  {key:"preco",label:"Preço",fmt:v=>v!=null?"R$ "+Number(v).toFixed(2):"—"},
+  {key:"pl",label:"P/L",fmt:v=>v!=null?Number(v).toFixed(1)+"x":"—"},
+  {key:"pvp",label:"P/VP",fmt:v=>v!=null?Number(v).toFixed(2)+"x":"—"},
+  {key:"dy",label:"DY",fmt:v=>v!=null?Number(v).toFixed(2)+"%":"—"},
+  {key:"roe",label:"ROE",fmt:v=>v!=null?Number(v).toFixed(2)+"%":"—"},
+  {key:"divida_ebitda",label:"Dív/EBITDA",fmt:v=>v!=null?Number(v).toFixed(2)+"x":"—"},
+  {key:"cagr_lucro",label:"CAGR Lucro",fmt:v=>v!=null?Number(v).toFixed(2)+"%":"—"},
+  {key:"margem_liquida",label:"Margem Líq.",fmt:v=>v!=null?Number(v).toFixed(2)+"%":"—"},
+];
+
 function AnaliseTab({investimentos,profileId,market}) {
   const WL_KEY = `watchlist_${profileId}`;
   const [watchlist,setWatchlist] = useState(()=>lsGet(WL_KEY)||[]);
-  const [wInput,setWInput] = useState("");
-  const [wLoading,setWLoading] = useState(false);
+  const [wInput,setWInput]       = useState("");
+  const [wCategoria,setWCategoria] = useState("");
+  const [wFiltro,setWFiltro]     = useState("Todas");
+  const [wLoading,setWLoading]   = useState(false);
   const [chartTicker,setChartTicker] = useState(null);
-  const [news,setNews] = useState({});
+  const [news,setNews]           = useState({});
   const [newsLoading,setNewsLoading] = useState(false);
-  const [calcForm,setCalcForm] = useState({pc:"",pa:"",qt:""});
-  const [calcRes,setCalcRes] = useState(null);
-  const [simForm,setSimForm] = useState({ini:"",ap:"",taxa:"",meses:""});
-  const [simRes,setSimRes] = useState(null);
-  const [alocRes,setAlocRes] = useState(null);
+  // Comparador
+  const [compInput,setCompInput] = useState("");
+  const [compList,setCompList]   = useState([]);
+  const [compLoading,setCompLoading] = useState(false);
+  const [compData,setCompData]   = useState([]);
+  // Fundamentalista selector
+  const [fundTicker,setFundTicker] = useState("");
+  const [fundInput,setFundInput]   = useState("");
+  const [fundSymbol,setFundSymbol] = useState("BMFBOVESPA:PETR4");
+  // Calculadora / Simulador / Alocação
+  const [calcForm,setCalcForm]   = useState({pc:"",pa:"",qt:""});
+  const [calcRes,setCalcRes]     = useState(null);
+  const [simForm,setSimForm]     = useState({ini:"",ap:"",taxa:"",meses:""});
+  const [simRes,setSimRes]       = useState(null);
+  const [alocRes,setAlocRes]     = useState(null);
   const [alocLoading,setAlocLoading] = useState(false);
-  const [erro,setErro] = useState("");
-  const totalInvest = investimentos.reduce((a,b)=>a+b.valor,0);
+  const [erro,setErro]           = useState("");
 
   useEffect(()=>{ lsSet(WL_KEY,watchlist); },[watchlist]);
 
@@ -327,24 +350,46 @@ function AnaliseTab({investimentos,profileId,market}) {
     const t=wInput.trim().toUpperCase(); if(!t||watchlist.find(w=>w.ticker===t)){setWInput("");return;}
     setWLoading(true); setErro("");
     try {
-      const txt=await askClaude(`JSON only. Fundamentals for ${t}: {"ticker":"${t}","nome":"short","setor":"str","preco":number,"pl":number|null,"dy":number|null,"roe":number|null}`,400);
-      setWatchlist(p=>[...p,JSON.parse(txt)]);
-    } catch { setWatchlist(p=>[...p,{ticker:t,nome:t,setor:"—",preco:null,pl:null,dy:null,roe:null}]); }
+      const txt=await askClaude(`JSON only. Fundamentals for ${t}: {"ticker":"${t}","nome":"short name","setor":"str","categoria":"one of: Banco|Infraestrutura|Fundo Imobiliário|Energia|Tecnologia|Varejo|Saúde|Agronegócio|Mineração|Petróleo|ETF|Exterior|Outros","preco":number,"pl":number|null,"dy":number|null,"roe":number|null}`,400);
+      const obj = JSON.parse(txt);
+      if(wCategoria) obj.categoria = wCategoria;
+      setWatchlist(p=>[...p,obj]);
+    } catch { setWatchlist(p=>[...p,{ticker:t,nome:t,setor:"—",categoria:wCategoria||"Outros",preco:null,pl:null,dy:null,roe:null}]); }
     setWInput(""); setWLoading(false);
   }
 
   async function fetchNews() {
     if(watchlist.length===0){setErro("Adicione ativos à watchlist primeiro.");return;}
     setNewsLoading(true); setErro("");
-    const tickers = watchlist.map(w=>w.ticker).join(", ");
+    const tickers=watchlist.map(w=>w.ticker).join(", ");
     try {
-      const txt=await askClaude(`Você é um analista financeiro. Para cada um destes ativos: ${tickers}, forneça em JSON array (sem markdown): [{"ticker":"XX","noticias":[{"titulo":"str","resumo":"2 frases em pt-BR","tipo":"resultado|dividendo|fato_relevante|noticia","data":"YYYY-MM-DD ou 'recente'"}]}]. Inclua os anúncios e eventos mais relevantes e recentes de cada empresa.`,1500);
-      const arr=JSON.parse(txt);
-      const map={};
+      const txt=await askClaude(`Analista financeiro. Para cada ativo: ${tickers}, JSON array sem markdown: [{"ticker":"XX","noticias":[{"titulo":"str","resumo":"2 frases pt-BR","tipo":"resultado|dividendo|fato_relevante|noticia","data":"YYYY-MM-DD ou recente"}]}]. Eventos mais relevantes e recentes.`,1500);
+      const arr=JSON.parse(txt); const map={};
       arr.forEach(item=>{ map[item.ticker]=item.noticias; });
       setNews(map);
-    } catch(e){ setErro("Erro ao buscar notícias. Tente novamente."); }
+    } catch{ setErro("Erro ao buscar notícias."); }
     setNewsLoading(false);
+  }
+
+  async function addComp() {
+    const t=compInput.trim().toUpperCase(); if(!t||compList.includes(t)){setCompInput("");return;}
+    setCompList(p=>[...p,t]); setCompInput("");
+  }
+
+  async function compararAtivos() {
+    if(compList.length<2){setErro("Adicione pelo menos 2 ativos para comparar.");return;}
+    setCompLoading(true); setErro("");
+    try {
+      const txt=await askClaude(`JSON array only, no markdown. One object per ticker for: ${compList.join(",")}. Each: {"ticker":"","nome":"","preco":number|null,"pl":number|null,"pvp":number|null,"dy":number|null,"roe":number|null,"divida_ebitda":number|null,"cagr_lucro":number|null,"margem_liquida":number|null}`,1200);
+      setCompData(JSON.parse(txt));
+    } catch{ setErro("Erro ao comparar ativos."); }
+    setCompLoading(false);
+  }
+
+  function applyFundSymbol() {
+    const t=fundInput.trim().toUpperCase(); if(!t) return;
+    const sym=/^[A-Z]{1,5}(\.[A-Z]+)?$/.test(t)?t:"BMFBOVESPA:"+t;
+    setFundSymbol(sym); setFundTicker(t); setFundInput("");
   }
 
   function calcRent() {
@@ -374,32 +419,64 @@ function AnaliseTab({investimentos,profileId,market}) {
     setAlocLoading(false);
   }
 
-  const tipoIcons = {resultado:"📊",dividendo:"💰",fato_relevante:"📢",noticia:"📰"};
+  const tipoIcons  = {resultado:"📊",dividendo:"💰",fato_relevante:"📢",noticia:"📰"};
   const tipoColors = {resultado:"#dbeafe",dividendo:"#d1fae5",fato_relevante:"#fef3c7",noticia:"#f3f4f6"};
+  const tipoLine   = {resultado:C.invest,dividendo:C.receita,fato_relevante:"#f59e0b",noticia:"#9ca3af"};
+
+  const wlFiltrada = wFiltro==="Todas" ? watchlist : watchlist.filter(w=>(w.categoria||"Outros")===wFiltro);
+  const categoriasUsadas = ["Todas",...new Set(watchlist.map(w=>w.categoria||"Outros"))];
+
+  // melhor valor highlight para comparador
+  function isBest(key,val,arr) {
+    if(val==null) return false;
+    const vals=arr.map(a=>a[key]).filter(v=>v!=null);
+    if(vals.length<2) return false;
+    const better=["dy","roe","cagr_lucro","margem_liquida"];
+    const lower=["pl","pvp","divida_ebitda"];
+    if(better.includes(key)) return val===Math.max(...vals);
+    if(lower.includes(key)) return val===Math.min(...vals);
+    return false;
+  }
 
   return <div style={{display:"flex",flexDirection:"column",gap:"1.25rem"}}>
     {chartTicker&&<ChartModal ticker={chartTicker} onClose={()=>setChartTicker(null)}/>}
     {erro&&<p style={{fontSize:12,color:C.despesa,margin:0,padding:"8px 12px",background:"#fef2f2",borderRadius:8}}>{erro}</p>}
 
-    {/* Watchlist */}
+    {/* ── Watchlist ── */}
     <Card>
       <p style={{fontSize:14,fontWeight:700,margin:"0 0 2px"}}>Carteira de acompanhamento</p>
       <p style={{fontSize:12,color:"#6b7280",margin:"0 0 10px"}}>Clique num ativo para abrir o gráfico</p>
-      <div style={{display:"flex",gap:8,marginBottom:12}}>
+      <div style={{display:"flex",gap:8,marginBottom:8,flexWrap:"wrap"}}>
         <input value={wInput} onChange={e=>setWInput(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&addWatch()}
-          placeholder="Ex: PETR4, VALE3, AAPL..." style={{flex:1,...inputStyle,marginTop:0}}/>
-        <Btn onClick={addWatch} disabled={wLoading} color={C.invest}>{wLoading?"...":"+ Adicionar"}</Btn>
+          placeholder="Ticker (ex: PETR4)" style={{flex:1,minWidth:120,...inputStyle,marginTop:0}}/>
+        <select value={wCategoria} onChange={e=>setWCategoria(e.target.value)} style={{...inputStyle,marginTop:0,minWidth:150,flex:1}}>
+          <option value="">Categoria (auto)</option>
+          {WL_CATEGORIAS.filter(c=>c!=="Todas").map(c=><option key={c}>{c}</option>)}
+        </select>
+        <Btn onClick={addWatch} disabled={wLoading} color={C.invest} style={{whiteSpace:"nowrap"}}>{wLoading?"...":"+ Adicionar"}</Btn>
       </div>
-      {watchlist.length===0&&<p style={{fontSize:13,color:"#9ca3af"}}>Nenhum ativo adicionado.</p>}
+
+      {/* Filtro por categoria */}
+      {watchlist.length>0&&<div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:12}}>
+        {categoriasUsadas.map(cat=>(
+          <button key={cat} onClick={()=>setWFiltro(cat)} style={{
+            padding:"4px 10px",borderRadius:16,fontSize:11,cursor:"pointer",fontWeight:wFiltro===cat?600:400,
+            background:wFiltro===cat?C.invest:"#f3f4f6",color:wFiltro===cat?"#fff":"#6b7280",border:"none"
+          }}>{cat} {cat!=="Todas"?`(${watchlist.filter(w=>(w.categoria||"Outros")===cat).length})`:""}</button>
+        ))}
+      </div>}
+
+      {wlFiltrada.length===0&&<p style={{fontSize:13,color:"#9ca3af"}}>Nenhum ativo {wFiltro!=="Todas"?"nesta categoria":""} adicionado.</p>}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(148px,1fr))",gap:8}}>
-        {watchlist.map(w=><div key={w.ticker} onClick={()=>setChartTicker(w.ticker)}
+        {wlFiltrada.map(w=><div key={w.ticker} onClick={()=>setChartTicker(w.ticker)}
           style={{background:"#f9fafb",borderRadius:10,padding:"10px 12px",cursor:"pointer",border:"1px solid #e5e7eb",position:"relative",transition:"border-color .15s"}}
           onMouseEnter={e=>e.currentTarget.style.borderColor=C.invest}
           onMouseLeave={e=>e.currentTarget.style.borderColor="#e5e7eb"}>
           <button onClick={e=>{e.stopPropagation();setWatchlist(p=>p.filter(x=>x.ticker!==w.ticker));}} style={{position:"absolute",top:5,right:6,border:"none",background:"none",cursor:"pointer",fontSize:12,color:"#9ca3af"}}>✕</button>
           <p style={{margin:"0 0 1px",fontSize:13,fontWeight:700,color:C.invest}}>{w.ticker}</p>
-          <p style={{margin:"0 0 5px",fontSize:11,color:"#9ca3af",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{w.nome}</p>
-          <p style={{margin:"0 0 4px",fontSize:15,fontWeight:700,color:"#111"}}>{w.preco!=null?"R$ "+Number(w.preco).toFixed(2):"—"}</p>
+          <p style={{margin:"0 0 2px",fontSize:11,color:"#9ca3af",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{w.nome}</p>
+          {w.categoria&&<span style={{fontSize:10,background:"#f0fdf4",color:"#166534",borderRadius:4,padding:"1px 5px",display:"inline-block",marginBottom:4}}>{w.categoria}</span>}
+          <p style={{margin:"2px 0 4px",fontSize:15,fontWeight:700,color:"#111"}}>{w.preco!=null?"R$ "+Number(w.preco).toFixed(2):"—"}</p>
           <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
             {w.pl!=null&&<span style={{fontSize:10,background:"#dbeafe",color:"#1e40af",borderRadius:4,padding:"2px 5px"}}>P/L {Number(w.pl).toFixed(1)}</span>}
             {w.dy!=null&&<span style={{fontSize:10,background:"#d1fae5",color:"#065f46",borderRadius:4,padding:"2px 5px"}}>DY {Number(w.dy).toFixed(1)}%</span>}
@@ -409,21 +486,65 @@ function AnaliseTab({investimentos,profileId,market}) {
       </div>
     </Card>
 
-    {/* Alertas e Notícias */}
+    {/* ── Comparador ── */}
+    <Card>
+      <p style={{fontSize:14,fontWeight:700,margin:"0 0 2px"}}>Comparador de ativos</p>
+      <p style={{fontSize:12,color:"#6b7280",margin:"0 0 10px"}}>Adicione quantos ativos quiser e compare os indicadores lado a lado</p>
+      <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+        <input value={compInput} onChange={e=>setCompInput(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&addComp()}
+          placeholder="Ticker (ex: ITUB4)" style={{flex:1,minWidth:120,...inputStyle,marginTop:0}}/>
+        <Btn onClick={addComp} color={C.cartao} style={{whiteSpace:"nowrap"}}>+ Adicionar</Btn>
+        <Btn onClick={compararAtivos} disabled={compLoading||compList.length<2} color={C.invest} style={{whiteSpace:"nowrap"}}>{compLoading?"Comparando...":"Comparar"}</Btn>
+      </div>
+      {compList.length>0&&<div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+        {compList.map(t=><span key={t} style={{display:"flex",alignItems:"center",gap:4,background:"#dbeafe",color:"#1e40af",borderRadius:16,padding:"3px 10px",fontSize:12,fontWeight:600}}>
+          {t}
+          <button onClick={()=>{setCompList(p=>p.filter(x=>x!==t));setCompData(p=>p.filter(x=>x.ticker!==t));}} style={{border:"none",background:"none",cursor:"pointer",color:"#1e40af",fontSize:13,lineHeight:1,padding:0}}>✕</button>
+        </span>)}
+      </div>}
+      {compData.length>=2&&<div style={{overflowX:"auto",marginTop:4}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,minWidth:400}}>
+          <thead>
+            <tr style={{background:"#f9fafb"}}>
+              <th style={{textAlign:"left",padding:"8px 10px",borderBottom:"1px solid #e5e7eb",color:"#6b7280",fontWeight:600,fontSize:12}}>Indicador</th>
+              {compData.map(a=><th key={a.ticker} style={{textAlign:"right",padding:"8px 10px",borderBottom:"1px solid #e5e7eb",color:C.invest,fontWeight:700}}>
+                <div>{a.ticker}</div>
+                <div style={{fontSize:10,color:"#9ca3af",fontWeight:400}}>{a.nome}</div>
+              </th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {INDICADORES_COMP.map((ind,ri)=><tr key={ind.key} style={{background:ri%2===0?"#fff":"#f9fafb"}}>
+              <td style={{padding:"7px 10px",color:"#6b7280",borderBottom:"1px solid #f3f4f6",fontWeight:500}}>{ind.label}</td>
+              {compData.map(a=>{
+                const best=isBest(ind.key,a[ind.key],compData);
+                return <td key={a.ticker} style={{padding:"7px 10px",textAlign:"right",borderBottom:"1px solid #f3f4f6",fontWeight:best?700:400,color:best?C.receita:"#111",background:best?"#f0fdf4":"transparent"}}>
+                  {ind.fmt(a[ind.key])}
+                  {best&&<span style={{marginLeft:4,fontSize:10}}>✓</span>}
+                </td>;
+              })}
+            </tr>)}
+          </tbody>
+        </table>
+        <p style={{fontSize:11,color:"#9ca3af",marginTop:6}}>✓ Verde = melhor valor no indicador</p>
+      </div>}
+    </Card>
+
+    {/* ── Alertas ── */}
     <Card>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
         <div>
           <p style={{fontSize:14,fontWeight:700,margin:"0 0 2px"}}>🔔 Alertas e anúncios</p>
-          <p style={{fontSize:12,color:"#6b7280",margin:0}}>Resumo dos eventos recentes dos seus ativos</p>
+          <p style={{fontSize:12,color:"#6b7280",margin:0}}>Eventos recentes dos seus ativos</p>
         </div>
         <Btn onClick={fetchNews} disabled={newsLoading} color={C.banco} style={{fontSize:12,padding:"6px 12px"}}>{newsLoading?"Buscando...":"Atualizar notícias"}</Btn>
       </div>
-      {Object.keys(news).length===0&&!newsLoading&&<p style={{fontSize:13,color:"#9ca3af",marginTop:8}}>Clique em "Atualizar notícias" para buscar anúncios dos seus ativos.</p>}
+      {Object.keys(news).length===0&&!newsLoading&&<p style={{fontSize:13,color:"#9ca3af",marginTop:8}}>Clique em "Atualizar notícias" para buscar anúncios.</p>}
       {newsLoading&&<div style={{textAlign:"center",padding:"2rem",color:"#9ca3af",fontSize:13}}>Buscando notícias e anúncios...</div>}
       {Object.entries(news).map(([ticker,noticias])=><div key={ticker} style={{marginBottom:16}}>
         <p style={{fontSize:13,fontWeight:700,color:C.invest,margin:"0 0 8px"}}>{ticker}</p>
         <div style={{display:"flex",flexDirection:"column",gap:6}}>
-          {noticias.map((n,i)=><div key={i} style={{background:tipoColors[n.tipo]||"#f9fafb",borderRadius:8,padding:"8px 12px",borderLeft:`3px solid ${n.tipo==="resultado"?C.invest:n.tipo==="dividendo"?C.receita:n.tipo==="fato_relevante"?"#f59e0b":"#9ca3af"}`}}>
+          {noticias.map((n,i)=><div key={i} style={{background:tipoColors[n.tipo]||"#f9fafb",borderRadius:8,padding:"8px 12px",borderLeft:`3px solid ${tipoLine[n.tipo]||"#9ca3af"}`}}>
             <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
               <span style={{fontSize:14}}>{tipoIcons[n.tipo]||"📰"}</span>
               <span style={{fontSize:12,fontWeight:600,color:"#374151"}}>{n.titulo}</span>
@@ -435,11 +556,24 @@ function AnaliseTab({investimentos,profileId,market}) {
       </div>)}
     </Card>
 
-    {/* Indicadores TradingView */}
+    {/* ── Indicadores fundamentalistas TradingView ── */}
     <Card>
       <p style={{fontSize:14,fontWeight:700,margin:"0 0 2px"}}>Indicadores fundamentalistas</p>
       <p style={{fontSize:12,color:"#6b7280",margin:"0 0 10px"}}>Dados em tempo real do TradingView</p>
-      <TVWidget type="financials" config={{symbol:"BMFBOVESPA:PETR4",colorTheme:"light",isTransparent:false,displayMode:"regular",width:"100%",height:490,locale:"pt_BR"}}/>
+      <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+        <input value={fundInput} onChange={e=>setFundInput(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&applyFundSymbol()}
+          placeholder="Digite o ticker (ex: ITUB4, AAPL)" style={{flex:1,...inputStyle,marginTop:0}}/>
+        <Btn onClick={applyFundSymbol} color={C.invest} style={{whiteSpace:"nowrap"}}>Ver indicadores</Btn>
+      </div>
+      {fundTicker&&<p style={{fontSize:12,color:"#6b7280",margin:"0 0 8px"}}>Exibindo: <strong style={{color:C.invest}}>{fundTicker}</strong></p>}
+      {/* Watchlist como atalhos */}
+      {watchlist.length>0&&<div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:10}}>
+        {watchlist.map(w=><button key={w.ticker} onClick={()=>{setFundSymbol(/^[A-Z]{1,5}(\.[A-Z]+)?$/.test(w.ticker)?w.ticker:"BMFBOVESPA:"+w.ticker);setFundTicker(w.ticker);}} style={{
+          padding:"3px 10px",borderRadius:16,fontSize:11,cursor:"pointer",border:"1px solid #e5e7eb",
+          background:fundTicker===w.ticker?C.invest:"#f9fafb",color:fundTicker===w.ticker?"#fff":"#374151",fontWeight:fundTicker===w.ticker?700:400
+        }}>{w.ticker}</button>)}
+      </div>}
+      <TVWidget type="financials" config={{symbol:fundSymbol,colorTheme:"light",isTransparent:false,displayMode:"regular",width:"100%",height:490,locale:"pt_BR"}}/>
     </Card>
 
     <Card>
@@ -448,7 +582,7 @@ function AnaliseTab({investimentos,profileId,market}) {
       <TVWidget type="screener" config={{width:"100%",height:490,defaultColumn:"overview",defaultScreen:"most_capitalized",market,showToolbar:true,colorTheme:"light",locale:"pt_BR"}}/>
     </Card>
 
-    {/* Calculadora */}
+    {/* ── Calculadora ── */}
     <Card>
       <p style={{fontSize:14,fontWeight:700,margin:"0 0 10px"}}>Calcular rentabilidade</p>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8,marginBottom:10}}>
@@ -465,7 +599,7 @@ function AnaliseTab({investimentos,profileId,market}) {
       </div>}
     </Card>
 
-    {/* Simulador */}
+    {/* ── Simulador ── */}
     <Card>
       <p style={{fontSize:14,fontWeight:700,margin:"0 0 10px"}}>Simular juros compostos</p>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8,marginBottom:10}}>
@@ -488,7 +622,7 @@ function AnaliseTab({investimentos,profileId,market}) {
       </div>}
     </Card>
 
-    {/* Alocação */}
+    {/* ── Alocação ── */}
     <Card>
       <p style={{fontSize:14,fontWeight:700,margin:"0 0 2px"}}>Sugestão de alocação ideal</p>
       <p style={{fontSize:12,color:"#6b7280",margin:"0 0 10px"}}>Baseado nos seus investimentos cadastrados</p>
