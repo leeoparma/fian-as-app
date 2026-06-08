@@ -86,7 +86,7 @@ function calcValorAtualRF(inv){
 
 async function askClaude(prompt,maxTokens=900){
   try {
-    const res=await fetch("https://controlfinanceiro.leeo-parms.workers.dev",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:maxTokens,messages:[{role:"user",content:prompt}]})});
+    const res=await fetch("https://controlfinanceiro.leeo-parms.workers.dev",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:maxTokens,messages:[{role:"user",content:prompt}]})});
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const d=await res.json();
     if(d.error) throw new Error(d.error.message||JSON.stringify(d.error));
