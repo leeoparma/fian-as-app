@@ -1,21 +1,5 @@
 import { useState, useEffect, useRef } from "react";
 
-// ---- STORAGE POLYFILL ----
-// Usa window.storage se estiver no Claude.ai, senão usa localStorage
-const store = {
-  async get(key) {
-    if (window.storage && window.storage !== store) return window.storage.get(key);
-    const v = localStorage.getItem(key);
-    if (v === null) throw new Error("Key not found: " + key);
-    return { key, value: v };
-  },
-  async set(key, value) {
-    if (window.storage && window.storage !== store) return window.storage.set(key, value);
-    localStorage.setItem(key, value);
-    return { key, value };
-  },
-};
-
 const COLORS = {
   receita: "#1D9E75", despesa: "#D85A30", cartao: "#7F77DD",
   investimento: "#378ADD", meta: "#BA7517",
@@ -146,14 +130,14 @@ function AnaliseTab({ investimentos }) {
 
   useEffect(() => {
     (async () => {
-      try { const r = await store.get("watchlist"); if (r) setWatchlist(JSON.parse(r.value)); } catch {}
+      try { const r = await window.storage.get("watchlist"); if (r) setWatchlist(JSON.parse(r.value)); } catch {}
       watchLoaded.current = true;
     })();
   }, []);
 
   useEffect(() => {
     if (!watchLoaded.current) return;
-    store.set("watchlist", JSON.stringify(watchlist)).catch(()=>{});
+    window.storage.set("watchlist", JSON.stringify(watchlist)).catch(()=>{});
   }, [watchlist]);
 
   async function addToWatchlist() {
@@ -473,14 +457,14 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      try { const r = await store.get("financas_data"); if (r) setData(JSON.parse(r.value)); } catch {}
+      try { const r = await window.storage.get("financas_data"); if (r) setData(JSON.parse(r.value)); } catch {}
       loaded.current = true;
     })();
   }, []);
 
   useEffect(() => {
     if (!loaded.current) return;
-    store.set("financas_data", JSON.stringify(data)).catch(()=>{});
+    window.storage.set("financas_data", JSON.stringify(data)).catch(()=>{});
   }, [data]);
 
   const transacoesMes = data.transacoes.filter(t => { const d=new Date(t.data); return d.getMonth()===mesFiltro&&d.getFullYear()===anoAtual; });
