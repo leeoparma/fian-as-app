@@ -336,48 +336,128 @@ function BancosTab({data,setData,currency}){
 }
 
 // ── Lançamentos Tab ───────────────────────────────────────────────────────────
-function LancamentosTab({data,setData,currency,mes}){
+
+unction LancamentosTab({data,setData,currency,mes}){
   const [modal,setModal]=useState(null);const [form,setForm]=useState({});
   const [showNF,setShowNF]=useState(false);const [showExtratoNF,setShowExtratoNF]=useState(false);
   const [newCatD,setNewCatD]=useState("");const [newCatR,setNewCatR]=useState("");
   const [modalOrc,setModalOrc]=useState(false);const [orcForm,setOrcForm]=useState({});
   const [modalRec,setModalRec]=useState(false);const [recForm,setRecForm]=useState({});
+  // ⚡ Lançamento rápido
+  const [quickValor,setQuickValor]=useState("");
+  const [quickOrigem,setQuickOrigem]=useState("Conta Corrente");
+  const [quickCat,setQuickCat]=useState("Outros");
+  const [quickTipo,setQuickTipo]=useState("despesa");
+  const ORIGENS=["Conta Corrente","Pix","TED","DOC","Cartão Débito","Dinheiro"];
   const catD=data.catD||CAT_D_DEF,catR=data.catR||CAT_R_DEF;
+
   function addCat(tipo,nome){if(!nome.trim())return;setData(d=>({...d,[tipo==="D"?"catD":"catR"]:[...(tipo==="D"?d.catD||CAT_D_DEF:d.catR||CAT_R_DEF),nome.trim()]}));}
   const txMes=data.transacoes.filter(t=>{const d=new Date(t.data);return d.getMonth()===mes&&d.getFullYear()===ANO_ATUAL;});
-  function saveT(){if(!form.bancoId&&data.bancos.length>0){alert("Selecione um banco!");return;}const t={id:form.editId||uid(),tipo:form.tipo||"despesa",descricao:form.descricao||"Sem descrição",valor:parseFloat(form.valor)||0,categoria:form.categoria||(form.tipo==="receita"?catR[0]:catD[0]),data:form.data||hoje.toISOString().slice(0,10),bancoId:form.bancoId||null,nfImg:form.nfImg||null,nfManual:form.nfManual||false};setData(d=>({...d,transacoes:form.editId?d.transacoes.map(x=>x.id===form.editId?t:x):[...d.transacoes,t]}));setModal(null);setForm({});}
+
+  // ⚡ Salva lançamento rápido
+  function saveQuick(){
+    const v=parseFloat(quickValor);if(!v)return;
+    if(data.bancos.length===0){alert("Cadastre um banco primeiro!");return;}
+    const banco=data.bancos[0];
+    const t={id:uid(),tipo:quickTipo,descricao:`${quickOrigem}`,valor:v,
+      categoria:quickCat||(quickTipo==="receita"?catR[0]:catD[0]),
+      data:hoje.toISOString().slice(0,10),bancoId:banco.id,
+      nfImg:null,nfManual:false};
+    setData(d=>({...d,transacoes:[...d.transacoes,t]}));
+    setQuickValor("");
+  }
+
+  function saveT(){
+    if(!form.bancoId&&data.bancos.length>0){alert("Selecione um banco!");return;}
+    const t={id:form.editId||uid(),tipo:form.tipo||"despesa",descricao:form.descricao||"Sem descrição",
+      valor:parseFloat(form.valor)||0,categoria:form.categoria||(form.tipo==="receita"?catR[0]:catD[0]),
+      data:form.data||hoje.toISOString().slice(0,10),bancoId:form.bancoId||null,
+      nfImg:form.nfImg||null,nfManual:form.nfManual||false};
+    setData(d=>({...d,transacoes:form.editId?d.transacoes.map(x=>x.id===form.editId?t:x):[...d.transacoes,t]}));
+    setModal(null);setForm({});
+  }
   function saveOrc(){const o={id:orcForm.editId||uid(),categoria:orcForm.categoria||catD[0],valor:parseFloat(orcForm.valor)||0};setData(d=>({...d,orcamentos:orcForm.editId?(d.orcamentos||[]).map(x=>x.id===orcForm.editId?o:x):[...(d.orcamentos||[]),o]}));setModalOrc(false);setOrcForm({});}
   function saveRec(){const r={id:recForm.editId||uid(),tipo:recForm.tipo||"despesa",descricao:recForm.descricao||"",valor:parseFloat(recForm.valor)||0,categoria:recForm.categoria||catD[0],dia:parseInt(recForm.dia)||1,bancoId:recForm.bancoId||null};setData(d=>({...d,recorrencias:recForm.editId?(d.recorrencias||[]).map(x=>x.id===recForm.editId?r:x):[...(d.recorrencias||[]),r]}));setModalRec(false);setRecForm({});}
   const nfsComNF=data.transacoes.filter(t=>t.nfImg||t.nfManual);
+
+  // Anexar foto NF no modal de lançamento
+  const nfFileRef=useRef(null);
+  function handleNFFile(e){
+    const file=e.target.files[0];if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>setForm(f=>({...f,nfImg:ev.target.result,nfManual:false}));
+    reader.readAsDataURL(file);
+  }
+
   return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
     {showNF&&<NFModal currency={currency} onClose={()=>setShowNF(false)} onSave={dados=>{setForm(f=>({...f,...dados,tipo:"despesa"}));setShowNF(false);setModal("tx");}}/>}
+
+    {/* ⚡ LANÇAMENTO RÁPIDO */}
+    <Card style={{border:`1px solid ${D.gold}44`}}>
+      <p style={{fontSize:13,fontWeight:700,color:D.gold,marginBottom:8}}>⚡ Lançamento rápido — caiu no banco</p>
+      <div style={{display:"flex",gap:4,marginBottom:8}}>
+        {["despesa","receita"].map(t=><button key={t} onClick={()=>setQuickTipo(t)} style={{flex:1,padding:"6px",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:quickTipo===t?700:400,background:quickTipo===t?(t==="despesa"?D.red:D.green):"transparent",color:quickTipo===t?"#fff":D.text3}}>{t==="despesa"?"↓ Saída":"↑ Entrada"}</button>)}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+        <label style={{fontSize:12,color:D.text3}}>Valor ({currency})
+          <input type="number" value={quickValor} onChange={e=>setQuickValor(e.target.value)}
+            onKeyDown={e=>e.key==="Enter"&&saveQuick()}
+            placeholder="0,00" style={{marginTop:4}}/>
+        </label>
+        <label style={{fontSize:12,color:D.text3}}>Origem
+          <select value={quickOrigem} onChange={e=>setQuickOrigem(e.target.value)} style={{marginTop:4}}>
+            {ORIGENS.map(o=><option key={o}>{o}</option>)}
+          </select>
+        </label>
+      </div>
+      <label style={{fontSize:12,color:D.text3,display:"block",marginBottom:8}}>Categoria
+        <select value={quickCat} onChange={e=>setQuickCat(e.target.value)} style={{marginTop:4}}>
+          {(quickTipo==="receita"?catR:catD).map(c=><option key={c}>{c}</option>)}
+        </select>
+      </label>
+      {data.bancos.length>0&&<p style={{fontSize:10,color:D.text3,marginBottom:6}}>→ Lançado em: <strong style={{color:D.blue}}>{data.bancos[0].nome}</strong> · {hoje.toLocaleDateString("pt-BR")}</p>}
+      <Btn onClick={saveQuick} color={D.gold} style={{width:"100%"}}>Lançar agora</Btn>
+    </Card>
+
     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-      <Btn onClick={()=>{setModal("tx");setForm({});}}>+ Lançamento</Btn>
-      <Btn onClick={()=>setShowNF(true)} color={D.blue} outline sm>📷 Nota Fiscal</Btn>
+      <Btn onClick={()=>{setModal("tx");setForm({});}}>+ Lançamento completo</Btn>
+      <Btn onClick={()=>setShowNF(true)} color={D.blue} outline sm>📷 Nota Fiscal c/ IA</Btn>
       <Btn onClick={()=>{setModalOrc(true);setOrcForm({});}} color={D.gold} outline sm>🎯 Orçamento</Btn>
       <Btn onClick={()=>{setModalRec(true);setRecForm({});}} color={D.purple} outline sm>🔄 Recorrência</Btn>
       {nfsComNF.length>0&&<Btn onClick={()=>setShowExtratoNF(true)} color={D.green} outline sm>🧾 NFs para IR ({nfsComNF.length})</Btn>}
     </div>
+
     {showExtratoNF&&<Card>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
         <p style={{fontSize:14,fontWeight:700,color:D.text}}>🧾 Notas Fiscais para IR</p>
         <div style={{display:"flex",gap:8}}>
-          <Btn sm color={D.green} onClick={()=>{const csv=["Data,Descrição,Categoria,Valor,Tipo",...nfsComNF.map(t=>`${t.data},"${t.descricao}",${t.categoria},${t.valor},${t.nfManual?"Manual":"Foto"}`)].join("\n");const b=new Blob([csv],{type:"text/csv"});const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download="NFs_IR.csv";a.click();}}>⬇️ CSV</Btn>
+          <Btn sm color={D.green} onClick={()=>{const csv=["Data,Descrição,Categoria,Valor,Tipo",...nfsComNF.map(t=>`${t.data},"${t.descricao}",${t.categoria},${t.valor},${t.nfImg?"Foto":"Manual"}`)].join("\n");const b=new Blob([csv],{type:"text/csv"});const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download="NFs_IR.csv";a.click();}}>⬇️ CSV</Btn>
           <button onClick={()=>setShowExtratoNF(false)} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:18}}>✕</button>
         </div>
       </div>
       <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-        <thead><tr style={{background:D.bg3}}><th style={{padding:"8px",textAlign:"left",color:D.text3}}>Data</th><th style={{padding:"8px",textAlign:"left",color:D.text3}}>Descrição</th><th style={{padding:"8px",textAlign:"left",color:D.text3}}>Cat.</th><th style={{padding:"8px",textAlign:"right",color:D.text3}}>Valor</th><th style={{padding:"8px",textAlign:"center",color:D.text3}}>Tipo</th></tr></thead>
+        <thead><tr style={{background:D.bg3}}>
+          <th style={{padding:"8px",textAlign:"left",color:D.text3}}>Data</th>
+          <th style={{padding:"8px",textAlign:"left",color:D.text3}}>Descrição</th>
+          <th style={{padding:"8px",textAlign:"left",color:D.text3}}>Cat.</th>
+          <th style={{padding:"8px",textAlign:"right",color:D.text3}}>Valor</th>
+          <th style={{padding:"8px",textAlign:"center",color:D.text3}}>NF</th>
+        </tr></thead>
         <tbody>{nfsComNF.map(t=><tr key={t.id} style={{borderBottom:`1px solid ${D.border}`}}>
           <td style={{padding:"8px",color:D.text2}}>{t.data}</td>
           <td style={{padding:"8px",color:D.text}}>{t.descricao}</td>
           <td style={{padding:"8px"}}><Badge color={D.purple}>{t.categoria}</Badge></td>
           <td style={{padding:"8px",textAlign:"right",color:D.red,fontWeight:600}}>{fmtM(t.valor,currency)}</td>
-          <td style={{padding:"8px",textAlign:"center"}}>{t.nfImg?<img src={t.nfImg} style={{width:28,height:28,objectFit:"cover",borderRadius:4,cursor:"pointer"}} onClick={()=>window.open(t.nfImg)}/>:<span style={{fontSize:10,color:D.text3}}>Manual</span>}</td>
+          <td style={{padding:"8px",textAlign:"center"}}>
+            {t.nfImg
+              ?<img src={t.nfImg} style={{width:32,height:32,objectFit:"cover",borderRadius:4,cursor:"pointer",border:`1px solid ${D.green}`}} onClick={()=>window.open(t.nfImg)}/>
+              :<span style={{fontSize:10,color:D.text3}}>Manual</span>}
+          </td>
         </tr>)}</tbody>
       </table>
       <p style={{fontSize:11,color:D.text3,marginTop:6}}>Total: <strong style={{color:D.red}}>{fmtM(nfsComNF.reduce((a,b)=>a+b.valor,0),currency)}</strong></p></div>
     </Card>}
+
     {data.recorrencias?.length>0&&<Card>
       <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:8}}>🔄 Recorrentes</p>
       {data.recorrencias.map(r=><div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",background:D.bg3,borderRadius:8,fontSize:12,marginBottom:4}}>
@@ -385,12 +465,13 @@ function LancamentosTab({data,setData,currency,mes}){
         <div style={{display:"flex",gap:8}}><span style={{fontWeight:700,color:r.tipo==="receita"?D.green:D.red}}>{r.tipo==="receita"?"+":"-"}{fmtM(r.valor,currency)}</span><button onClick={()=>setData(d=>({...d,recorrencias:(d.recorrencias||[]).filter(x=>x.id!==r.id)}))} style={{border:"none",background:"none",cursor:"pointer",color:D.red,fontSize:12}}>🗑</button></div>
       </div>)}
     </Card>}
+
     {data.bancos.length===0&&<div style={{background:D.red+"22",border:`1px solid ${D.red}44`,borderRadius:10,padding:"10px 14px",fontSize:12,color:D.red}}>⚠️ Cadastre um banco primeiro.</div>}
     {txMes.length===0&&<p style={{fontSize:13,color:D.text3}}>Nenhum lançamento neste mês.</p>}
     {txMes.sort((a,b)=>b.data.localeCompare(a.data)).map(t=><Card key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"0.75rem 1rem"}}>
       <div style={{width:36,height:36,borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center",background:t.tipo==="receita"?D.green+"22":D.red+"22",fontSize:16,flexShrink:0}}>{t.tipo==="receita"?"↑":"↓"}</div>
       <div style={{flex:1,minWidth:0}}>
-        <div style={{display:"flex",alignItems:"center",gap:6}}><p style={{margin:0,fontSize:13,fontWeight:600,color:D.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</p>{(t.nfImg||t.nfManual)&&<span title={t.nfManual?"NF Manual":"NF com foto"} style={{fontSize:11}}>{t.nfImg?"📷":"📋"}</span>}</div>
+        <div style={{display:"flex",alignItems:"center",gap:6}}><p style={{margin:0,fontSize:13,fontWeight:600,color:D.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</p>{t.nfImg&&<img src={t.nfImg} style={{width:22,height:22,objectFit:"cover",borderRadius:3,cursor:"pointer",flexShrink:0}} onClick={()=>window.open(t.nfImg)} title="Ver NF"/>}{!t.nfImg&&t.nfManual&&<span title="NF Manual" style={{fontSize:11}}>📋</span>}</div>
         <p style={{margin:0,fontSize:11,color:D.text3}}>{t.categoria} · {t.data}{t.bancoId?` · 🏦 ${data.bancos.find(b=>b.id===t.bancoId)?.nome||""}`:""}</p>
       </div>
       <span style={{fontWeight:700,color:t.tipo==="receita"?D.green:D.red,fontSize:14,flexShrink:0}}>{t.tipo==="receita"?"+":"-"}{fmtM(t.valor,currency)}</span>
@@ -399,7 +480,9 @@ function LancamentosTab({data,setData,currency,mes}){
         <button onClick={()=>setData(d=>({...d,transacoes:d.transacoes.filter(x=>x.id!==t.id)}))} style={{border:"none",background:"none",cursor:"pointer",fontSize:13,color:D.red}}>🗑</button>
       </div>
     </Card>)}
-    {modal==="tx"&&<Modal title={form.editId?"Editar":"Novo lançamento"} onClose={()=>setModal(null)}>
+
+    {/* Modal lançamento completo — com campo foto NF */}
+    {modal==="tx"&&<Modal title={form.editId?"Editar":"Novo lançamento completo"} onClose={()=>setModal(null)}>
       <label style={{fontSize:12,color:D.text3}}>Tipo<select value={form.tipo||"despesa"} onChange={e=>setForm(f=>({...f,tipo:e.target.value}))} style={{marginTop:4}}><option value="despesa">Despesa</option><option value="receita">Receita</option></select></label>
       <label style={{fontSize:12,color:D.text3}}>Descrição<input value={form.descricao||""} onChange={e=>setForm(f=>({...f,descricao:e.target.value}))} style={{marginTop:4}}/></label>
       <label style={{fontSize:12,color:D.text3}}>Valor ({currency})<input type="number" value={form.valor||""} onChange={e=>setForm(f=>({...f,valor:e.target.value}))} style={{marginTop:4}}/></label>
@@ -407,9 +490,24 @@ function LancamentosTab({data,setData,currency,mes}){
       <div style={{display:"flex",gap:6}}><input placeholder="Nova categoria..." value={form.tipo==="receita"?newCatR:newCatD} onChange={e=>form.tipo==="receita"?setNewCatR(e.target.value):setNewCatD(e.target.value)} style={{flex:1}}/><Btn sm onClick={()=>{addCat(form.tipo==="receita"?"R":"D",form.tipo==="receita"?newCatR:newCatD);form.tipo==="receita"?setNewCatR(""):setNewCatD("");}}>+ Add</Btn></div>
       <label style={{fontSize:12,color:D.text3}}>Data<input type="date" value={form.data||hoje.toISOString().slice(0,10)} onChange={e=>setForm(f=>({...f,data:e.target.value}))} style={{marginTop:4}}/></label>
       <label style={{fontSize:12,color:D.text3}}>Banco <span style={{color:D.red}}>*</span><select value={form.bancoId||""} onChange={e=>setForm(f=>({...f,bancoId:e.target.value}))} style={{marginTop:4}}><option value="">Selecione...</option>{data.bancos.map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}</select></label>
-      {(form.nfImg||form.nfManual)&&<div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:D.bg3,borderRadius:8}}>{form.nfImg?<img src={form.nfImg} style={{width:36,height:36,objectFit:"cover",borderRadius:4}}/>:<span style={{fontSize:16}}>📋</span>}<span style={{fontSize:11,color:D.green}}>{form.nfImg?"📷 Foto anexada":"📋 NF manual"}</span></div>}
+
+      {/* ── CAMPO FOTO NF ── */}
+      <div style={{borderTop:`1px solid ${D.border}`,paddingTop:10}}>
+        <p style={{fontSize:12,color:D.text3,marginBottom:6}}>📎 Nota Fiscal (opcional)</p>
+        <input ref={nfFileRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handleNFFile}/>
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={()=>nfFileRef.current.click()} style={{flex:1,padding:"8px",borderRadius:8,border:`1px dashed ${D.border2}`,background:D.bg3,cursor:"pointer",fontSize:12,color:D.text3,textAlign:"center"}}>
+            {form.nfImg?"🖼 Trocar foto":"📷 Anexar foto da NF"}
+          </button>
+          {form.nfImg&&<button onClick={()=>setForm(f=>({...f,nfImg:null}))} style={{padding:"8px 12px",borderRadius:8,border:`1px solid ${D.red}44`,background:"transparent",cursor:"pointer",fontSize:12,color:D.red}}>✕</button>}
+        </div>
+        {form.nfImg&&<img src={form.nfImg} style={{width:"100%",borderRadius:8,marginTop:8,maxHeight:160,objectFit:"cover",border:`1px solid ${D.green}44`}}/>}
+        {!form.nfImg&&<p style={{fontSize:10,color:D.text3,marginTop:4}}>Sem foto — aparecerá como lançamento manual no extrato de NFs</p>}
+      </div>
+
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn outline color={D.text3} onClick={()=>setModal(null)}>Cancelar</Btn><Btn onClick={saveT}>Salvar</Btn></div>
     </Modal>}
+
     {modalOrc&&<Modal title="Orçamento mensal" onClose={()=>setModalOrc(false)}>
       <label style={{fontSize:12,color:D.text3}}>Categoria<select value={orcForm.categoria||""} onChange={e=>setOrcForm(f=>({...f,categoria:e.target.value}))} style={{marginTop:4}}>{catD.map(c=><option key={c}>{c}</option>)}</select></label>
       <label style={{fontSize:12,color:D.text3,marginTop:8,display:"block"}}>Limite ({currency})<input type="number" value={orcForm.valor||""} onChange={e=>setOrcForm(f=>({...f,valor:e.target.value}))} style={{marginTop:4}}/></label>
