@@ -1169,7 +1169,8 @@ function AnaliseTab({investimentos,profileId,market,currency}){
           <p onClick={()=>setChartTicker(w.ticker)} style={{margin:"0 0 2px",fontSize:13,fontWeight:700,color:D.green,cursor:"pointer"}}>{w.ticker}</p>
           <p style={{margin:"0 0 3px",fontSize:11,color:D.text3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{w.nome||"—"}</p>
           {w.categoria&&<div style={{marginBottom:4}}><Badge color={D.blue}>{w.categoria}</Badge></div>}
-          <p style={{margin:"2px 0 4px",fontSize:15,fontWeight:700,color:D.text}}>{w.preco!=null?`${currency} ${Number(w.preco).toFixed(2)}`:"—"}</p>
+          <p style={{margin:"2px 0 2px",fontSize:15,fontWeight:700,color:D.text}}>{w.preco!=null?`${currency} ${Number(w.preco).toFixed(2)}`:"—"}</p>
+          {w.variacao_dia!=null&&<p style={{margin:"0 0 4px",fontSize:11,fontWeight:600,color:w.variacao_dia>=0?D.green:D.red}}>{w.variacao_dia>=0?"▲":"▼"} {Math.abs(w.variacao_dia).toFixed(2)}% hoje</p>}
           <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
             {w.pl!=null&&<Badge color={D.blue}>P/L {Number(w.pl).toFixed(1)}</Badge>}
             {w.dy!=null&&<Badge color={D.gold}>DY {Number(w.dy).toFixed(1)}%</Badge>}
