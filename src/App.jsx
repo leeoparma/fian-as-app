@@ -337,7 +337,7 @@ function BancosTab({data,setData,currency}){
 
 // ── Lançamentos Tab ───────────────────────────────────────────────────────────
 
-unction LancamentosTab({data,setData,currency,mes}){
+function LancamentosTab({data,setData,currency,mes}){
   const [modal,setModal]=useState(null);const [form,setForm]=useState({});
   const [showNF,setShowNF]=useState(false);const [showExtratoNF,setShowExtratoNF]=useState(false);
   const [newCatD,setNewCatD]=useState("");const [newCatR,setNewCatR]=useState("");
