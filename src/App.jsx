@@ -559,9 +559,10 @@ function InvestimentosTab({data,setData,currency,profileId}){
       return;
     }
     setLoadingId(inv.id);
+    const dataHoje=new Date().toLocaleDateString("pt-BR");
     try{
       const mercado=isBR?"bolsa brasileira B3":"bolsa australiana ASX";
-      const txt=await askClaude(`Você é um analista com acesso a dados de mercado em tempo real. Para o ativo ${inv.ticker||inv.descricao} na ${mercado}, forneça o preço atual de hoje. Responda APENAS com JSON: {"preco_atual":number,"dy":number_or_null,"prox_dividendo":"YYYY-MM-DD or null","valor_dividendo":number_or_null,"resumo":"situação atual em 1 frase pt-BR"}`,500);
+      const txt=await askClaude(`Você é um analista com acesso a dados de mercado em tempo real. Data de hoje: ${dataHoje}. Para o ativo ${inv.ticker||inv.descricao} na ${mercado}, forneça o preço de fechamento mais recente disponível. Responda APENAS com JSON válido: {"preco_atual":number,"dy":number_or_null,"prox_dividendo":"YYYY-MM-DD or null","valor_dividendo":number_or_null,"resumo":"situação atual em 1 frase pt-BR"}`,500);
       const obj=JSON.parse(txt);
       if(!obj.preco_atual||obj.preco_atual<=0)throw new Error("Preço inválido");
       const va=obj.preco_atual*(inv.quantidade||1);
@@ -569,7 +570,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
       setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,...obj,valorAtual:va,lucro,ultimaAtualizacao:new Date().toLocaleTimeString("pt-BR")}:x)}));
     }catch{
       try{
-        const txt2=await askClaude(`Preço atual de mercado do ativo ${inv.ticker||inv.descricao}. JSON only: {"preco_atual":number}`,200);
+        const txt2=await askClaude(`Preço de mercado atual de hoje (${dataHoje}) do ativo ${inv.ticker||inv.descricao}. JSON apenas: {"preco_atual":number}`,200);
         const obj2=JSON.parse(txt2);
         if(obj2.preco_atual>0){const va=obj2.preco_atual*(inv.quantidade||1);setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,preco_atual:obj2.preco_atual,valorAtual:va,lucro:va-(inv.precoMedio||0)*(inv.quantidade||1),ultimaAtualizacao:new Date().toLocaleTimeString("pt-BR")}:x)}));}
       }catch{}
@@ -577,6 +578,16 @@ function InvestimentosTab({data,setData,currency,profileId}){
     setLoadingId(null);
   }
 
+  // Auto-refresh investimentos a cada 60s
+  const invRefreshRef = useRef(null);
+  useEffect(()=>{
+    invRefreshRef.current=setInterval(async()=>{
+      const ativos=data.investimentos.filter(i=>i.ticker||(i.tipo==="Renda Fixa"||i.tipo==="Tesouro Direto"));
+      for(const inv of ativos) await buscarDados(inv);
+    },60000);
+    return()=>clearInterval(invRefreshRef.current);
+  },[data.investimentos.length,profileId]);
+  
   async function atualizarTodos(){
     setAtualizandoTodos(true);
     const ativos=data.investimentos.filter(i=>i.ticker||i.tipo==="Renda Fixa"||i.tipo==="Tesouro Direto");
