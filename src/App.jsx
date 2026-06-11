@@ -1075,12 +1075,29 @@ function AnaliseTab({investimentos,profileId,market,currency}){
   }
   function addToComp(ticker){if(!compList.includes(ticker))setCompList(p=>[...p,ticker]);}
 
-  async function fetchNews(){
-    if(!watchlist.length){setErro("Adicione ativos à watchlist.");return;}
-    setNewsLoading(true);setErro("");
-    try{const txt=await askClaude(`Analista financeiro. Ativos: ${watchlist.map(w=>w.ticker).join(",")}. JSON: [{"ticker":"XX","noticias":[{"titulo":"str","resumo":"2 frases pt-BR","tipo":"resultado|dividendo|fato_relevante|noticia","data":"YYYY-MM-DD"}]}]`,1500);const arr=JSON.parse(txt);const map={};arr.forEach(x=>{map[x.ticker]=x.noticias;});setNews(map);}
-    catch{setErro("Erro ao buscar notícias.");}setNewsLoading(false);
-  }
+ async function fetchNews(){
+  if(!watchlist.length){setErro("Adicione ativos à watchlist.");return;}
+  setNewsLoading(true);setErro("");
+  const tickers=[...new Set([
+    ...watchlist.map(w=>w.ticker),
+    ...investimentos.map(i=>i.ticker).filter(Boolean)
+  ])];
+  try{
+    const txt=await askClaude(
+      `Você é um analista financeiro especializado. Para os ativos ${tickers.join(",")} retorne APENAS um array JSON válido com notícias e eventos recentes que impactam esses ativos. Inclua: resultados trimestrais, dividendos anunciados, fatos relevantes, mudanças de guidance, eventos macroeconômicos que afetam esses setores. Formato EXATO (sem markdown):
+[{"ticker":"XX","noticias":[{"titulo":"titulo curto","resumo":"2 frases explicando impacto positivo ou negativo","tipo":"resultado|dividendo|fato_relevante|noticia|macro","impacto":"positivo|negativo|neutro","data":"YYYY-MM-DD"}]}]
+Retorne no máximo 3 notícias por ativo. Foque em eventos dos últimos 30 dias.`,
+      2000
+    );
+    const s=txt.indexOf("["),e=txt.lastIndexOf("]");
+    if(s===-1)throw new Error("JSON inválido");
+    const arr=JSON.parse(txt.slice(s,e+1));
+    const map={};
+    arr.forEach(x=>{map[x.ticker]=x.noticias;});
+    setNews(map);
+  }catch(e){setErro("Erro ao buscar notícias: "+e.message);}
+  setNewsLoading(false);
+}
 
  async function compararAtivos(){
   if(compList.length<2){setErro("Adicione pelo menos 2 ativos.");return;}
