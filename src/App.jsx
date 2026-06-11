@@ -65,7 +65,6 @@ async function fetchPrecoReal(ticker) {
   try {
     const isB3 = /^[A-Z]{4}\d{1,2}$/.test(ticker);
     const isASX = ticker.endsWith(".AX");
-
     if (isB3) {
       const r = await fetch(`https://brapi.dev/api/quote/${ticker}?range=1d&interval=1d`);
       const d = await r.json();
@@ -77,10 +76,8 @@ async function fetchPrecoReal(ticker) {
         dy: q.dividendYield || null,
       };
     } else {
-      // ASX (.AX) e EUA
-      const yfTicker = isASX ? ticker : ticker;
       const r = await fetch(
-        `https://query2.finance.yahoo.com/v8/finance/chart/${yfTicker}?interval=1d&range=1d`,
+        `https://query2.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`,
         { headers: { "User-Agent": "Mozilla/5.0" } }
       );
       const d = await r.json();
