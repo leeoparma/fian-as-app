@@ -63,32 +63,10 @@ async function askClaude(prompt,maxTokens=900,images=[]){
 
 async function fetchPrecoReal(ticker) {
   try {
-    const isB3 = /^[A-Z]{4}\d{1,2}$/.test(ticker);
-    const isASX = ticker.endsWith(".AX");
-    if (isB3) {
-      const r = await fetch(`https://brapi.dev/api/quote/${ticker}?range=1d&interval=1d`);
-      const d = await r.json();
-      const q = d?.results?.[0];
-      if (q?.regularMarketPrice) return {
-        preco_atual: q.regularMarketPrice,
-        variacao_dia: q.regularMarketChangePercent,
-        nome: q.longName || q.shortName || ticker,
-        dy: q.dividendYield || null,
-      };
-    } else {
-      const r = await fetch(
-        `https://query2.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`,
-        { headers: { "User-Agent": "Mozilla/5.0" } }
-      );
-      const d = await r.json();
-      const meta = d?.chart?.result?.[0]?.meta;
-      if (meta?.regularMarketPrice) return {
-        preco_atual: meta.regularMarketPrice,
-        variacao_dia: meta.regularMarketChangePercent,
-        nome: meta.longName || meta.shortName || ticker,
-        dy: null,
-      };
-    }
+    // Passa pelo Worker para evitar CORS — Worker busca brapi.dev (B3) ou Yahoo (ASX/EUA)
+    const r = await fetch(`${WORKER}/quote?ticker=${ticker}`);
+    const d = await r.json();
+    if (d?.preco_atual) return d;
   } catch {}
   return null;
 }
