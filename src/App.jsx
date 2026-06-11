@@ -1082,17 +1082,34 @@ function AnaliseTab({investimentos,profileId,market,currency}){
     catch{setErro("Erro ao buscar notícias.");}setNewsLoading(false);
   }
 
-  async function compararAtivos(){
-    if(compList.length<2){setErro("Adicione pelo menos 2 ativos.");return;}
-    setCompLoading(true);setErro("");
-    const mercado=isBR?"brasileira B3":"australiana ASX";
-    const moeda=isBR?"BRL":"AUD";
-    try{
-      const txt=await askClaude(`Analista financeiro. Dados de mercado atual da bolsa ${mercado} em ${moeda}. JSON array com um objeto por ticker [${compList.join(",")}]: {"ticker":"","nome":"","preco":number_or_null,"pl":number_or_null,"pvp":number_or_null,"dy":number_or_null,"roe":number_or_null,"divida_ebitda":number_or_null,"cagr_lucro":number_or_null,"margem_liquida":number_or_null}`,1400);
-      const s=txt.indexOf("["),e=txt.lastIndexOf("]");if(s===-1)throw new Error();
-      setCompData(JSON.parse(txt.slice(s,e+1)));
-    }catch{setErro("Erro ao comparar.");}setCompLoading(false);
-  }
+ async function compararAtivos(){
+  if(compList.length<2){setErro("Adicione pelo menos 2 ativos.");return;}
+  setCompLoading(true);setErro("");
+  const mercado=isBR?"brasileira B3":"australiana ASX";
+  const moeda=isBR?"BRL":"AUD";
+  try{
+    // 1. Busca preços reais via Worker para todos os tickers
+    const precos={};
+    await Promise.all(compList.map(async t=>{
+      const real=await fetchPrecoReal(t,profileId);
+      if(real?.preco_atual) precos[t]=real;
+    }));
+
+    // 2. Claude só para indicadores fundamentais (não preço)
+    const txt=await askClaude(`Analista financeiro. Bolsa ${mercado} em ${moeda}. Retorne APENAS JSON array com indicadores fundamentais (NÃO preço) para [${compList.join(",")}]: [{"ticker":"","nome":"","pl":number_or_null,"pvp":number_or_null,"dy":number_or_null,"roe":number_or_null,"divida_ebitda":number_or_null,"cagr_lucro":number_or_null,"margem_liquida":number_or_null}]`,1200);
+    const s=txt.indexOf("["),e=txt.lastIndexOf("]");if(s===-1)throw new Error();
+    const arr=JSON.parse(txt.slice(s,e+1));
+
+    // 3. Combina preço real com indicadores do Claude
+    const final=arr.map(a=>({
+      ...a,
+      preco: precos[a.ticker]?.preco_atual || precos[a.ticker.replace(".AX","")]?.preco_atual || a.preco || null,
+      variacao_dia: precos[a.ticker]?.variacao_dia || null,
+    }));
+    setCompData(final);
+  }catch{setErro("Erro ao comparar.");}
+  setCompLoading(false);
+}
 
   async function sugerirAloc(){
     if(!investimentos.length){setErro("Adicione investimentos.");return;}
