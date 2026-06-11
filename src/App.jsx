@@ -1295,49 +1295,32 @@ setNews(map);
       </div>}
     </Card>
 
-    {/* Alertas */}
+{/* Alertas */}
     <Card>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
         <p style={{fontSize:14,fontWeight:700,color:D.text}}>🔔 Alertas e anúncios</p>
         <Btn sm onClick={fetchNews} disabled={newsLoading}>{newsLoading?"Buscando...":"Atualizar"}</Btn>
       </div>
       {Object.keys(news).length===0&&!newsLoading&&<p style={{fontSize:12,color:D.text3}}>Clique "Atualizar" para buscar anúncios.</p>}
-    {Object.entries(news).map(([ticker,noticias])=><div key={ticker} style={{marginBottom:12}}>
-  <p style={{fontSize:13,fontWeight:700,color:D.green,margin:"0 0 6px"}}>{ticker}</p>
-  {noticias.map((n,i)=>{
-    const impactoCor=n.impacto==="positivo"?D.green:n.impacto==="negativo"?D.red:D.text3;
-    return <div key={i} style={{background:D.bg3,borderRadius:8,padding:"8px 12px",marginBottom:6,borderLeft:`3px solid ${tipoLine[n.tipo]||D.text3}`}}>
-      <div style={{display:"flex",gap:6,marginBottom:3,alignItems:"center"}}>
-        <span>{tipoIcons[n.tipo]||"📰"}</span>
-        <span style={{fontSize:12,fontWeight:600,color:D.text,flex:1}}>{n.titulo}</span>
-        <span style={{fontSize:10,background:impactoCor+"22",color:impactoCor,borderRadius:4,padding:"2px 6px",fontWeight:600,border:`1px solid ${impactoCor}44`}}>
-          {n.impacto==="positivo"?"▲ Positivo":n.impacto==="negativo"?"▼ Negativo":"● Neutro"}
-        </span>
-        <span style={{fontSize:10,color:D.text3}}>{n.data}</span>
-      </div>
-      <p style={{margin:0,fontSize:12,color:D.text2}}>{n.resumo}</p>
-    </div>;
-  })}
-</div>)}
-</Card>
-  <p style={{fontSize:13,fontWeight:700,color:D.green,margin:"0 0 6px"}}>{ticker}</p>
-  {noticias.map((n,i)=>{
-    const impactoCor=n.impacto==="positivo"?D.green:n.impacto==="negativo"?D.red:D.text3;
-    return <div key={i} style={{background:D.bg3,borderRadius:8,padding:"8px 12px",marginBottom:6,borderLeft:`3px solid ${tipoLine[n.tipo]||D.text3}`}}>
-      <div style={{display:"flex",gap:6,marginBottom:3,alignItems:"center"}}>
-        <span>{tipoIcons[n.tipo]||"📰"}</span>
-        <span style={{fontSize:12,fontWeight:600,color:D.text,flex:1}}>{n.titulo}</span>
-        <span style={{fontSize:10,background:impactoCor+"22",color:impactoCor,borderRadius:4,padding:"2px 6px",fontWeight:600,border:`1px solid ${impactoCor}44`}}>
-          {n.impacto==="positivo"?"▲ Positivo":n.impacto==="negativo"?"▼ Negativo":"● Neutro"}
-        </span>
-        <span style={{fontSize:10,color:D.text3}}>{n.data}</span>
-      </div>
-      <p style={{margin:0,fontSize:12,color:D.text2}}>{n.resumo}</p>
-    </div>;
-  })}
-</div>)})}
-</Card>
-
+      {Object.entries(news).map(([ticker,noticias])=><div key={ticker} style={{marginBottom:12}}>
+        <p style={{fontSize:13,fontWeight:700,color:D.green,margin:"0 0 6px"}}>{ticker}</p>
+        {noticias.map((n,i)=>{
+          const impactoCor=n.impacto==="positivo"?D.green:n.impacto==="negativo"?D.red:D.text3;
+          return <div key={i} style={{background:D.bg3,borderRadius:8,padding:"8px 12px",marginBottom:6,borderLeft:`3px solid ${tipoLine[n.tipo]||D.text3}`}}>
+            <div style={{display:"flex",gap:6,marginBottom:3,alignItems:"center"}}>
+              <span>{tipoIcons[n.tipo]||"📰"}</span>
+              <span style={{fontSize:12,fontWeight:600,color:D.text,flex:1}}>{n.titulo}</span>
+              <span style={{fontSize:10,background:impactoCor+"22",color:impactoCor,borderRadius:4,padding:"2px 6px",fontWeight:600,border:`1px solid ${impactoCor}44`}}>
+                {n.impacto==="positivo"?"▲ Positivo":n.impacto==="negativo"?"▼ Negativo":"● Neutro"}
+              </span>
+              <span style={{fontSize:10,color:D.text3}}>{n.data}</span>
+            </div>
+            <p style={{margin:0,fontSize:12,color:D.text2}}>{n.resumo}</p>
+          </div>;
+        })}
+      </div>)}
+    </Card>
+    
     {/* Indicadores TradingView */}
     <Card>
       <p style={{fontSize:14,fontWeight:700,color:D.text,marginBottom:8}}>Indicadores fundamentalistas</p>
