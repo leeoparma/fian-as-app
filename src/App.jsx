@@ -1079,17 +1079,25 @@ function AnaliseTab({investimentos,profileId,market,currency}){
     return()=>clearInterval(wlRefreshRef.current);
   },[profileId]); // roda ao trocar perfil e a cada 60s
 
-  async function addWatch(){
-    const t=wInput.trim().toUpperCase();if(!t||watchlist.find(w=>w.ticker===t)){setWInput("");return;}
+  async function addWatch() {
+    const t = wInput.trim().toUpperCase();
+    if (!t || watchlist.find(w => w.ticker === t)) { setWInput(""); return; }
     setWLoading(true);
-    try{
-      const mercado=isBR?"brasileira B3":"australiana ASX";
-      const moeda=isBR?"BRL":"AUD";
-      const txt=await askClaude(`Analista financeiro com acesso a dados de mercado em tempo real. Dados atuais de hoje do ativo ${t} na bolsa ${mercado}. JSON APENAS com valores em ${moeda}: {"ticker":"${t}","nome":"nome curto","categoria":"Banco|Infraestrutura|Fundo Imobiliário|Energia|Tecnologia|Varejo|Saúde|Agronegócio|Mineração|Petróleo|ETF|Exterior|Outros","preco":number,"pl":number_or_null,"dy":number_or_null,"roe":number_or_null,"variacao_dia":number_or_null}`,500);
-      const obj=JSON.parse(txt);if(wCat)obj.categoria=wCat;
-      setWatchlist(p=>[...p,{...obj,currency}]);
-    }catch{setWatchlist(p=>[...p,{ticker:t,nome:t,categoria:wCat||"Outros",preco:null,pl:null,dy:null,roe:null,currency}]);}
-    setWInput("");setWLoading(false);
+    // 1. Busca preço real direto
+    const real = await fetchPrecoReal(t);
+    // 2. Claude só para nome/categoria/indicadores fundamentais
+    let obj = { ticker: t, nome: t, categoria: wCat || "Outros", preco: real?.preco_atual || null, variacao_dia: real?.variacao_dia || null, pl: null, dy: real?.dy || null, roe: null, currency };
+    try {
+      const mercado = isBR ? "brasileira B3" : "australiana ASX";
+      const txt = await askClaude(
+        `Para o ativo ${t} na bolsa ${mercado}, retorne APENAS JSON com nome e indicadores fundamentais (não preço): {"nome":"nome curto","categoria":"Banco|Infraestrutura|Fundo Imobiliário|Energia|Tecnologia|Varejo|Saúde|Agronegócio|Mineração|Petróleo|ETF|Exterior|Outros","pl":number_or_null,"dy":number_or_null,"roe":number_or_null}`,
+        300
+      );
+      const parsed = JSON.parse(txt);
+      obj = { ...obj, nome: parsed.nome || obj.nome, categoria: wCat || parsed.categoria || "Outros", pl: parsed.pl || null, dy: real?.dy || parsed.dy || null, roe: parsed.roe || null };
+    } catch {}
+    setWatchlist(p => [...p, obj]);
+    setWInput(""); setWLoading(false);
   }
   function addToComp(ticker){if(!compList.includes(ticker))setCompList(p=>[...p,ticker]);}
 
