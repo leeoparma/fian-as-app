@@ -1058,27 +1058,21 @@ function AnaliseTab({investimentos,profileId,market,currency}){
   // Auto-refresh watchlist a cada 60s
   
   const wlRefreshRef = useRef(null);
-  useEffect(()=>{
-    async function refreshAll(){
-      if(!watchlist.length) return;
-      const updated = [...watchlist];
-      for(let i=0;i<updated.length;i++){
-        try{
-          const w=updated[i];
-          const mercado=isBR?"brasileira B3":"australiana ASX";
-          const moeda=isBR?"BRL":"AUD";
-          const txt=await askClaude(`Analista financeiro com acesso a dados de mercado em tempo real. Preço atual de hoje do ativo ${w.ticker} na bolsa ${mercado}. JSON APENAS em ${moeda}: {"preco":number,"pl":number_or_null,"dy":number_or_null,"variacao_dia":number_or_null}`,300);
-          const obj=JSON.parse(txt);
-          updated[i]={...w,...obj};
-        }catch{}
-      }
-      setWatchlist([...updated]);
-    }
-    refreshAll();
-    wlRefreshRef.current=setInterval(refreshAll,60000);
-    return()=>clearInterval(wlRefreshRef.current);
-  },[profileId]); // roda ao trocar perfil e a cada 60s
-
+ useEffect(()=>{
+  async function refreshAll(){
+    if(!watchlist.length) return;
+    const updated = await Promise.all(watchlist.map(async w=>{
+      const real = await fetchPrecoReal(w.ticker);
+      if(!real) return w;
+      return {...w, preco:real.preco_atual, variacao_dia:real.variacao_dia};
+    }));
+    setWatchlist(updated);
+  }
+  refreshAll();
+  wlRefreshRef.current=setInterval(refreshAll,60000);
+  return()=>clearInterval(wlRefreshRef.current);
+},[profileId]);
+  
   async function addWatch() {
     const t = wInput.trim().toUpperCase();
     if (!t || watchlist.find(w => w.ticker === t)) { setWInput(""); return; }
