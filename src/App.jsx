@@ -1084,9 +1084,11 @@ function AnaliseTab({investimentos,profileId,market,currency}){
   ])];
   try{
     const txt=await askClaude(
-      `Você é um analista financeiro especializado. Para os ativos ${tickers.join(",")} retorne APENAS um array JSON válido com notícias e eventos recentes que impactam esses ativos. Inclua: resultados trimestrais, dividendos anunciados, fatos relevantes, mudanças de guidance, eventos macroeconômicos que afetam esses setores. Formato EXATO (sem markdown):
-[{"ticker":"XX","noticias":[{"titulo":"titulo curto","resumo":"2 frases explicando impacto positivo ou negativo","tipo":"resultado|dividendo|fato_relevante|noticia|macro","impacto":"positivo|negativo|neutro","data":"YYYY-MM-DD"}]}]
-Retorne no máximo 3 notícias por ativo. Foque em eventos dos últimos 30 dias.`,
+     `Você é um analista financeiro. Data de hoje: ${new Date().toLocaleDateString("pt-BR")}. 
+Para os ativos ${tickers.join(",")} retorne APENAS um array JSON válido com os eventos e notícias mais recentes que você conhece sobre esses ativos. Inclua: resultados trimestrais, dividendos, fatos relevantes, mudanças de guidance, eventos macro. 
+Formato EXATO (sem markdown):
+[{"ticker":"XX","noticias":[{"titulo":"titulo curto","resumo":"2 frases sobre impacto","tipo":"resultado|dividendo|fato_relevante|noticia|macro","impacto":"positivo|negativo|neutro","data":"YYYY-MM-DD"}]}]
+Máximo 3 notícias por ativo. Indique no resumo se a informação pode estar desatualizada.`
       2000
     );
    const s=txt.indexOf("["),e=txt.lastIndexOf("]");
