@@ -1089,12 +1089,23 @@ function AnaliseTab({investimentos,profileId,market,currency}){
 Retorne no máximo 3 notícias por ativo. Foque em eventos dos últimos 30 dias.`,
       2000
     );
-    const s=txt.indexOf("["),e=txt.lastIndexOf("]");
-    if(s===-1)throw new Error("JSON inválido");
-    const arr=JSON.parse(txt.slice(s,e+1));
-    const map={};
-    arr.forEach(x=>{map[x.ticker]=x.noticias;});
-    setNews(map);
+   const s=txt.indexOf("["),e=txt.lastIndexOf("]");
+if(s===-1)throw new Error("JSON inválido");
+let jsonStr=txt.slice(s,e+1);
+// Tenta corrigir JSON truncado adicionando fechamentos faltando
+try{
+  JSON.parse(jsonStr);
+}catch{
+  // Conta abertura/fechamento de chaves e colchetes para corrigir
+  let opens=0,openArr=0;
+  for(const c of jsonStr){if(c==="{")opens++;else if(c==="}")opens--;else if(c==="[")openArr++;else if(c==="]")openArr--;}
+  while(opens>0){jsonStr+="}";opens--;}
+  while(openArr>0){jsonStr+="]";openArr--;}
+}
+const arr=JSON.parse(jsonStr);
+const map={};
+arr.forEach(x=>{if(x?.ticker&&x?.noticias)map[x.ticker]=x.noticias;});
+setNews(map);
   }catch(e){setErro("Erro ao buscar notícias: "+e.message);}
   setNewsLoading(false);
 }
