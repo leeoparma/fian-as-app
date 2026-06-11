@@ -61,6 +61,41 @@ async function askClaude(prompt,maxTokens=900,images=[]){
   }catch(e){console.error("askClaude:",e);throw e;}
 }
 
+async function fetchPrecoReal(ticker) {
+  try {
+    const isB3 = /^[A-Z]{4}\d{1,2}$/.test(ticker);
+    const isASX = ticker.endsWith(".AX");
+
+    if (isB3) {
+      const r = await fetch(`https://brapi.dev/api/quote/${ticker}?range=1d&interval=1d`);
+      const d = await r.json();
+      const q = d?.results?.[0];
+      if (q?.regularMarketPrice) return {
+        preco_atual: q.regularMarketPrice,
+        variacao_dia: q.regularMarketChangePercent,
+        nome: q.longName || q.shortName || ticker,
+        dy: q.dividendYield || null,
+      };
+    } else {
+      // ASX (.AX) e EUA
+      const yfTicker = isASX ? ticker : ticker;
+      const r = await fetch(
+        `https://query2.finance.yahoo.com/v8/finance/chart/${yfTicker}?interval=1d&range=1d`,
+        { headers: { "User-Agent": "Mozilla/5.0" } }
+      );
+      const d = await r.json();
+      const meta = d?.chart?.result?.[0]?.meta;
+      if (meta?.regularMarketPrice) return {
+        preco_atual: meta.regularMarketPrice,
+        variacao_dia: meta.regularMarketChangePercent,
+        nome: meta.longName || meta.shortName || ticker,
+        dy: null,
+      };
+    }
+  } catch {}
+  return null;
+}
+
 const GS=`*{box-sizing:border-box;margin:0;padding:0;}body{background:${D.bg};color:${D.text};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}input,select,textarea{background:${D.bg3};color:${D.text};border:1px solid ${D.border2};border-radius:8px;padding:8px 12px;font-size:13px;width:100%;outline:none;transition:border-color .2s;}input:focus,select:focus{border-color:${D.green};}input::placeholder{color:${D.text3};}select option{background:${D.bg3};}::-webkit-scrollbar{width:4px;height:4px;}::-webkit-scrollbar-thumb{background:${D.border2};border-radius:2px;}`;
 
 function Tip({text,children}){
