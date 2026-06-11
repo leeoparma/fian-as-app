@@ -61,10 +61,11 @@ async function askClaude(prompt,maxTokens=900,images=[]){
   }catch(e){console.error("askClaude:",e);throw e;}
 }
 
-async function fetchPrecoReal(ticker) {
+async function fetchPrecoReal(ticker, profileId) {
   try {
-    // Passa pelo Worker para evitar CORS — Worker busca brapi.dev (B3) ou Yahoo (ASX/EUA)
-    const r = await fetch(`${WORKER}/quote?ticker=${ticker}`);
+    const market = profileId || "au";
+    const r = await fetch(`${WORKER}/quote?ticker=${encodeURIComponent(ticker)}&market=${market}`);
+    if (!r.ok) return null;
     const d = await r.json();
     if (d?.preco_atual) return d;
   } catch {}
