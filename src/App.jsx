@@ -1335,7 +1335,7 @@ setNews(map);
       <p style={{margin:0,fontSize:12,color:D.text2}}>{n.resumo}</p>
     </div>;
   })}
-</div>)}
+</div>)})}
 </Card>
 
     {/* Indicadores TradingView */}
