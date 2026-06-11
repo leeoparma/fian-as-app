@@ -1042,7 +1042,7 @@ function AnaliseTab({investimentos,profileId,market,currency}){
   async function refreshAll(){
     if(!watchlist.length) return;
     const updated = await Promise.all(watchlist.map(async w=>{
-      const real = await fetchPrecoReal(w.ticker);
+      const real = await fetchPrecoReal(w.ticker, profileId);
       if(!real) return w;
       return {...w, preco:real.preco_atual, variacao_dia:real.variacao_dia};
     }));
@@ -1058,7 +1058,7 @@ function AnaliseTab({investimentos,profileId,market,currency}){
     if (!t || watchlist.find(w => w.ticker === t)) { setWInput(""); return; }
     setWLoading(true);
     // 1. Busca preço real direto
-    const real = await fetchPrecoReal(t);
+   const real = await fetchPrecoReal(t, profileId);
     // 2. Claude só para nome/categoria/indicadores fundamentais
     let obj = { ticker: t, nome: t, categoria: wCat || "Outros", preco: real?.preco_atual || null, variacao_dia: real?.variacao_dia || null, pl: null, dy: real?.dy || null, roe: null, currency };
     try {
