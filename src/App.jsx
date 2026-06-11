@@ -571,7 +571,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
   }
   if(!inv.ticker) return;
   setLoadingId(inv.id);
-  const real=await fetchPrecoReal(inv.ticker);
+  const real=await fetchPrecoReal(inv.ticker, profileId);
   if(real?.preco_atual){
     const va=real.preco_atual*(inv.quantidade||1);
     const lucro=va-(inv.precoMedio||0)*(inv.quantidade||1);
