@@ -1088,8 +1088,7 @@ function AnaliseTab({investimentos,profileId,market,currency}){
 Para os ativos ${tickers.join(",")} retorne APENAS um array JSON válido com os eventos e notícias mais recentes que você conhece sobre esses ativos. Inclua: resultados trimestrais, dividendos, fatos relevantes, mudanças de guidance, eventos macro. 
 Formato EXATO (sem markdown):
 [{"ticker":"XX","noticias":[{"titulo":"titulo curto","resumo":"2 frases sobre impacto","tipo":"resultado|dividendo|fato_relevante|noticia|macro","impacto":"positivo|negativo|neutro","data":"YYYY-MM-DD"}]}]
-Máximo 3 notícias por ativo. Indique no resumo se a informação pode estar desatualizada.`
-      2000
+Máximo 3 notícias por ativo. Indique no resumo se a informação pode estar desatualizada.`,
     );
    const s=txt.indexOf("["),e=txt.lastIndexOf("]");
 if(s===-1)throw new Error("JSON inválido");
