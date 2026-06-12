@@ -1075,7 +1075,7 @@ function AnaliseTab({investimentos,profileId,market,currency}){
   }
   function addToComp(ticker){if(!compList.includes(ticker))setCompList(p=>[...p,ticker]);}
 
- async function fetchNews(){
+async function fetchNews(){
   if(!watchlist.length){setErro("Adicione ativos à watchlist.");return;}
   setNewsLoading(true);setErro("");
   const tickers=[...new Set([
@@ -1083,30 +1083,44 @@ function AnaliseTab({investimentos,profileId,market,currency}){
     ...investimentos.map(i=>i.ticker).filter(Boolean)
   ])];
   try{
-    const txt=await askClaude(
-     `Você é um analista financeiro. Data de hoje: ${new Date().toLocaleDateString("pt-BR")}. 
-Para os ativos ${tickers.join(",")} retorne APENAS um array JSON válido com os eventos e notícias mais recentes que você conhece sobre esses ativos. Inclua: resultados trimestrais, dividendos, fatos relevantes, mudanças de guidance, eventos macro. 
-Formato EXATO (sem markdown):
-[{"ticker":"XX","noticias":[{"titulo":"titulo curto","resumo":"2 frases sobre impacto","tipo":"resultado|dividendo|fato_relevante|noticia|macro","impacto":"positivo|negativo|neutro","data":"YYYY-MM-DD"}]}]
-Máximo 3 notícias por ativo. Indique no resumo se a informação pode estar desatualizada.`,
-    );
-   const s=txt.indexOf("["),e=txt.lastIndexOf("]");
-if(s===-1)throw new Error("JSON inválido");
-let jsonStr=txt.slice(s,e+1);
-// Tenta corrigir JSON truncado adicionando fechamentos faltando
-try{
-  JSON.parse(jsonStr);
-}catch{
-  // Conta abertura/fechamento de chaves e colchetes para corrigir
-  let opens=0,openArr=0;
-  for(const c of jsonStr){if(c==="{")opens++;else if(c==="}")opens--;else if(c==="[")openArr++;else if(c==="]")openArr--;}
-  while(opens>0){jsonStr+="}";opens--;}
-  while(openArr>0){jsonStr+="]";openArr--;}
-}
-const arr=JSON.parse(jsonStr);
-const map={};
-arr.forEach(x=>{if(x?.ticker&&x?.noticias)map[x.ticker]=x.noticias;});
-setNews(map);
+    const map={};
+    for(const ticker of tickers){
+      const r=await fetch(`${WORKER}/news?ticker=${encodeURIComponent(ticker)}&market=${profileId}`);
+      const d=await r.json();
+      if(!d.items||d.items.length===0){map[ticker]=[];continue;}
+
+      // Pede ao Claude apenas para classificar impacto/tipo e resumir, mantendo dados reais
+      const lista=d.items.map((it,i)=>`${i+1}. "${it.title}" (${new Date(it.pubDate).toLocaleDateString("pt-BR")})`).join("\n");
+      try{
+        const txt=await askClaude(
+          `Para cada notícia abaixo sobre ${ticker}, classifique tipo e impacto e escreva um resumo curto em português (1-2 frases) sobre o que isso significa para o investidor. Notícias:\n${lista}\nRetorne APENAS JSON array na mesma ordem: [{"tipo":"resultado|dividendo|fato_relevante|noticia|macro","impacto":"positivo|negativo|neutro","resumo":"..."}]`,
+          600
+        );
+        const s=txt.indexOf("["),e=txt.lastIndexOf("]");
+        const class_=JSON.parse(txt.slice(s,e+1));
+        map[ticker]=d.items.map((it,i)=>({
+          titulo:it.title,
+          data:it.pubDate?new Date(it.pubDate).toISOString().slice(0,10):"",
+          link:it.link,
+          fonte:it.source,
+          tipo:class_[i]?.tipo||"noticia",
+          impacto:class_[i]?.impacto||"neutro",
+          resumo:class_[i]?.resumo||""
+        }));
+      }catch{
+        // fallback: mostra notícia real sem classificação da IA
+        map[ticker]=d.items.map(it=>({
+          titulo:it.title,
+          data:it.pubDate?new Date(it.pubDate).toISOString().slice(0,10):"",
+          link:it.link,
+          fonte:it.source,
+          tipo:"noticia",
+          impacto:"neutro",
+          resumo:""
+        }));
+      }
+    }
+    setNews(map);
   }catch(e){setErro("Erro ao buscar notícias: "+e.message);}
   setNewsLoading(false);
 }
