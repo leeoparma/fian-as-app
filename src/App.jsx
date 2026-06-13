@@ -1075,56 +1075,173 @@ function AnaliseTab({investimentos,profileId,market,currency}){
   }
   function addToComp(ticker){if(!compList.includes(ticker))setCompList(p=>[...p,ticker]);}
 
-async function fetchNews(){
-  if(!watchlist.length){setErro("Adicione ativos à watchlist.");return;}
-  setNewsLoading(true);setErro("");
-  const tickers=[...new Set([
-    ...watchlist.map(w=>w.ticker),
-    ...investimentos.map(i=>i.ticker).filter(Boolean)
-  ])];
-  try{
-    const map={};
-    for(const ticker of tickers){
-      const r=await fetch(`${WORKER}/news?ticker=${encodeURIComponent(ticker)}&market=${profileId}`);
-      const d=await r.json();
-      if(!d.items||d.items.length===0){map[ticker]=[];continue;}
+const BRAPI_TOKEN = "8KjmJjKrzXYXc822ovC2gj";
 
-      // Pede ao Claude apenas para classificar impacto/tipo e resumir, mantendo dados reais
-      const lista=d.items.map((it,i)=>`${i+1}. "${it.title}" (${new Date(it.pubDate).toLocaleDateString("pt-BR")})`).join("\n");
-      try{
-        const txt=await askClaude(
-          `Para cada notícia abaixo sobre ${ticker}, classifique tipo e impacto e escreva um resumo curto em português (1-2 frases) sobre o que isso significa para o investidor. Notícias:\n${lista}\nRetorne APENAS JSON array na mesma ordem: [{"tipo":"resultado|dividendo|fato_relevante|noticia|macro","impacto":"positivo|negativo|neutro","resumo":"..."}]`,
-          600
-        );
-        const s=txt.indexOf("["),e=txt.lastIndexOf("]");
-        const class_=JSON.parse(txt.slice(s,e+1));
-        map[ticker]=d.items.map((it,i)=>({
-          titulo:it.title,
-          data:it.pubDate?new Date(it.pubDate).toISOString().slice(0,10):"",
-          link:it.link,
-          fonte:it.source,
-          tipo:class_[i]?.tipo||"noticia",
-          impacto:class_[i]?.impacto||"neutro",
-          resumo:class_[i]?.resumo||""
-        }));
-      }catch{
-        // fallback: mostra notícia real sem classificação da IA
-        map[ticker]=d.items.map(it=>({
-          titulo:it.title,
-          data:it.pubDate?new Date(it.pubDate).toISOString().slice(0,10):"",
-          link:it.link,
-          fonte:it.source,
-          tipo:"noticia",
-          impacto:"neutro",
-          resumo:""
-        }));
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+async function fetchCotacao(ticker, market) {
+  const isB3 = /^[A-Z]{3,6}\d{1,2}$/.test(ticker) && !ticker.includes(".");
+  const yfTicker = (!isB3 && !ticker.includes("."))
+    ? ticker + ".AX"
+    : ticker;
+  try {
+    if (isB3) {
+      const tentativas = [ticker + ".SA", ticker];
+      for (const t of tentativas) {
+        try {
+          const r = await fetch(
+            `https://query2.finance.yahoo.com/v8/finance/chart/${t}?interval=1d&range=1d&includePrePost=false`,
+            { headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "Accept": "application/json", "Accept-Language": "en-US,en;q=0.9" } }
+          );
+          const d = await r.json();
+          const meta = d?.chart?.result?.[0]?.meta;
+          if (meta?.regularMarketPrice) return {
+            ticker,
+            preco_atual: meta.regularMarketPrice,
+            variacao_dia: meta.regularMarketChangePercent,
+            nome: (meta.longName || meta.shortName || ticker)
+              .replace(/Ã£/g,"ã").replace(/Ã¡/g,"á").replace(/Ã©/g,"é")
+              .replace(/Ãª/g,"ê").replace(/Ã³/g,"ó").replace(/Ãº/g,"ú")
+              .replace(/Ã§/g,"ç").replace(/Ã­/g,"í").replace(/Ã¢/g,"â")
+              .replace(/Ã´/g,"ô").replace(/Ã /g,"à"),
+            dy: null,
+          };
+        } catch {}
       }
+      return null;
+    } else {
+      const tentativas = [yfTicker, ticker + ".AX", ticker + ".ax"];
+      for (const t of tentativas) {
+        try {
+          const r = await fetch(
+            `https://query2.finance.yahoo.com/v8/finance/chart/${t}?interval=1d&range=1d&includePrePost=false`,
+            { headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "Accept": "application/json", "Accept-Language": "en-US,en;q=0.9" } }
+          );
+          const d = await r.json();
+          const meta = d?.chart?.result?.[0]?.meta;
+          if (meta?.regularMarketPrice) return {
+            ticker: t,
+            preco_atual: meta.regularMarketPrice,
+            variacao_dia: meta.regularMarketChangePercent,
+            nome: meta.longName || meta.shortName || t,
+            dy: null,
+          };
+        } catch {}
+      }
+      return null;
     }
-    setNews(map);
-  }catch(e){setErro("Erro ao buscar notícias: "+e.message);}
-  setNewsLoading(false);
+  } catch {}
+  return null;
 }
 
+// ── NOVO: busca notícias reais via Google News RSS ──────────────────────────
+async function fetchNoticias(ticker, market) {
+  const isBR = market === "br";
+  const query = isBR ? `${ticker} ação B3` : `${ticker} ASX stock`;
+  const hl = isBR ? "pt-BR" : "en-AU";
+  const gl = isBR ? "BR" : "AU";
+  const ceid = isBR ? "BR:pt-419" : "AU:en";
+  const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=${hl}&gl=${gl}&ceid=${ceid}`;
+
+  try {
+    const res = await fetch(rssUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
+    const xml = await res.text();
+    const items = [];
+    const itemRegex = /<item>([\s\S]*?)<\/item>/g;
+    let m;
+    while ((m = itemRegex.exec(xml)) && items.length < 5) {
+      const block = m[1];
+      const decode = s => (s || "")
+        .replace(/<!\[CDATA\[(.*?)\]\]>/, "$1")
+        .replace(/&apos;/g, "'").replace(/&quot;/g, '"')
+        .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+      const title = decode((block.match(/<title>(.*?)<\/title>/) || [])[1]);
+      const pubDate = (block.match(/<pubDate>(.*?)<\/pubDate>/) || [])[1] || "";
+      const link = decode((block.match(/<link>(.*?)<\/link>/) || [])[1]);
+      const source = decode((block.match(/<source[^>]*>(.*?)<\/source>/) || [])[1]) || "";
+      items.push({ title, pubDate, link, source });
+    }
+    return items;
+  } catch {
+    return [];
+  }
+}
+
+export default {
+  async fetch(request) {
+    const url = new URL(request.url);
+
+    // CORS preflight
+    if (request.method === "OPTIONS") {
+      return new Response(null, { headers: CORS });
+    }
+
+    // ── NOVO endpoint GET /news?ticker=PETR4&market=br ──────────────────────
+    if (request.method === "GET" && url.pathname === "/news") {
+      const ticker = url.searchParams.get("ticker")?.toUpperCase();
+      const market = url.searchParams.get("market") || "br";
+      if (!ticker) {
+        return new Response(JSON.stringify({ error: "ticker required" }), {
+          status: 400, headers: { "Content-Type": "application/json", ...CORS }
+        });
+      }
+      const items = await fetchNoticias(ticker, market);
+      return new Response(JSON.stringify({ ticker, items }), {
+        headers: { "Content-Type": "application/json", ...CORS }
+      });
+    }
+
+    // ── endpoint GET /quote?ticker=CBA.AX ───────────────────────────────────
+    if (request.method === "GET" && url.pathname === "/quote") {
+      const ticker = url.searchParams.get("ticker")?.toUpperCase();
+      const market = url.searchParams.get("market") || "au";
+      if (!ticker) {
+        return new Response(JSON.stringify({ error: "ticker required" }), {
+          status: 400, headers: { "Content-Type": "application/json", ...CORS }
+        });
+      }
+      const cotacao = await fetchCotacao(ticker, market);
+      return new Response(JSON.stringify(cotacao || { error: "not found" }), {
+        status: cotacao ? 200 : 404,
+        headers: { "Content-Type": "application/json", ...CORS }
+      });
+    }
+
+    // ── POST /messages — igual ao original ─────────────────────────────────
+    if (request.method !== "POST") {
+      return new Response(JSON.stringify({ error: "Method not allowed" }), {
+        status: 405, headers: { "Content-Type": "application/json", ...CORS }
+      });
+    }
+
+    try {
+      const body = await request.json();
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": ANTHROPIC_KEY,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await response.json();
+      return new Response(JSON.stringify(data), {
+        status: response.status,
+        headers: { "Content-Type": "application/json", ...CORS }
+      });
+    } catch (error) {
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: 500, headers: { "Content-Type": "application/json", ...CORS }
+      });
+    }
+  }
+};
+  
  async function compararAtivos(){
   if(compList.length<2){setErro("Adicione pelo menos 2 ativos.");return;}
   setCompLoading(true);setErro("");
