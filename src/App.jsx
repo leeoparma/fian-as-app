@@ -347,14 +347,12 @@ function BancosTab({data,setData,currency}){
 }
 
 // ── Lançamentos Tab ───────────────────────────────────────────────────────────
-
 function LancamentosTab({data,setData,currency,mes}){
   const [modal,setModal]=useState(null);const [form,setForm]=useState({});
   const [showNF,setShowNF]=useState(false);const [showExtratoNF,setShowExtratoNF]=useState(false);
   const [newCatD,setNewCatD]=useState("");const [newCatR,setNewCatR]=useState("");
   const [modalOrc,setModalOrc]=useState(false);const [orcForm,setOrcForm]=useState({});
   const [modalRec,setModalRec]=useState(false);const [recForm,setRecForm]=useState({});
-  // ⚡ Lançamento rápido
   const [quickValor,setQuickValor]=useState("");
   const [quickOrigem,setQuickOrigem]=useState("Conta Corrente");
   const [quickCat,setQuickCat]=useState("Outros");
@@ -365,7 +363,6 @@ function LancamentosTab({data,setData,currency,mes}){
   function addCat(tipo,nome){if(!nome.trim())return;setData(d=>({...d,[tipo==="D"?"catD":"catR"]:[...(tipo==="D"?d.catD||CAT_D_DEF:d.catR||CAT_R_DEF),nome.trim()]}));}
   const txMes=data.transacoes.filter(t=>{const d=new Date(t.data);return d.getMonth()===mes&&d.getFullYear()===ANO_ATUAL;});
 
-  // ⚡ Salva lançamento rápido
   function saveQuick(){
     const v=parseFloat(quickValor);if(!v)return;
     if(data.bancos.length===0){alert("Cadastre um banco primeiro!");return;}
@@ -391,7 +388,6 @@ function LancamentosTab({data,setData,currency,mes}){
   function saveRec(){const r={id:recForm.editId||uid(),tipo:recForm.tipo||"despesa",descricao:recForm.descricao||"",valor:parseFloat(recForm.valor)||0,categoria:recForm.categoria||catD[0],dia:parseInt(recForm.dia)||1,bancoId:recForm.bancoId||null};setData(d=>({...d,recorrencias:recForm.editId?(d.recorrencias||[]).map(x=>x.id===recForm.editId?r:x):[...(d.recorrencias||[]),r]}));setModalRec(false);setRecForm({});}
   const nfsComNF=data.transacoes.filter(t=>t.nfImg||t.nfManual);
 
-  // Anexar foto NF no modal de lançamento
   const nfFileRef=useRef(null);
   function handleNFFile(e){
     const file=e.target.files[0];if(!file)return;
@@ -403,7 +399,6 @@ function LancamentosTab({data,setData,currency,mes}){
   return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
     {showNF&&<NFModal currency={currency} onClose={()=>setShowNF(false)} onSave={dados=>{setForm(f=>({...f,...dados,tipo:"despesa"}));setShowNF(false);setModal("tx");}}/>}
 
-    {/* ⚡ LANÇAMENTO RÁPIDO */}
     <Card style={{border:`1px solid ${D.gold}44`}}>
       <p style={{fontSize:13,fontWeight:700,color:D.gold,marginBottom:8}}>⚡ Lançamento rápido — caiu no banco</p>
       <div style={{display:"flex",gap:4,marginBottom:8}}>
@@ -492,7 +487,6 @@ function LancamentosTab({data,setData,currency,mes}){
       </div>
     </Card>)}
 
-    {/* Modal lançamento completo — com campo foto NF */}
     {modal==="tx"&&<Modal title={form.editId?"Editar":"Novo lançamento completo"} onClose={()=>setModal(null)}>
       <label style={{fontSize:12,color:D.text3}}>Tipo<select value={form.tipo||"despesa"} onChange={e=>setForm(f=>({...f,tipo:e.target.value}))} style={{marginTop:4}}><option value="despesa">Despesa</option><option value="receita">Receita</option></select></label>
       <label style={{fontSize:12,color:D.text3}}>Descrição<input value={form.descricao||""} onChange={e=>setForm(f=>({...f,descricao:e.target.value}))} style={{marginTop:4}}/></label>
@@ -501,8 +495,6 @@ function LancamentosTab({data,setData,currency,mes}){
       <div style={{display:"flex",gap:6}}><input placeholder="Nova categoria..." value={form.tipo==="receita"?newCatR:newCatD} onChange={e=>form.tipo==="receita"?setNewCatR(e.target.value):setNewCatD(e.target.value)} style={{flex:1}}/><Btn sm onClick={()=>{addCat(form.tipo==="receita"?"R":"D",form.tipo==="receita"?newCatR:newCatD);form.tipo==="receita"?setNewCatR(""):setNewCatD("");}}>+ Add</Btn></div>
       <label style={{fontSize:12,color:D.text3}}>Data<input type="date" value={form.data||hoje.toISOString().slice(0,10)} onChange={e=>setForm(f=>({...f,data:e.target.value}))} style={{marginTop:4}}/></label>
       <label style={{fontSize:12,color:D.text3}}>Banco <span style={{color:D.red}}>*</span><select value={form.bancoId||""} onChange={e=>setForm(f=>({...f,bancoId:e.target.value}))} style={{marginTop:4}}><option value="">Selecione...</option>{data.bancos.map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}</select></label>
-
-      {/* ── CAMPO FOTO NF ── */}
       <div style={{borderTop:`1px solid ${D.border}`,paddingTop:10}}>
         <p style={{fontSize:12,color:D.text3,marginBottom:6}}>📎 Nota Fiscal (opcional)</p>
         <input ref={nfFileRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handleNFFile}/>
@@ -515,7 +507,6 @@ function LancamentosTab({data,setData,currency,mes}){
         {form.nfImg&&<img src={form.nfImg} style={{width:"100%",borderRadius:8,marginTop:8,maxHeight:160,objectFit:"cover",border:`1px solid ${D.green}44`}}/>}
         {!form.nfImg&&<p style={{fontSize:10,color:D.text3,marginTop:4}}>Sem foto — aparecerá como lançamento manual no extrato de NFs</p>}
       </div>
-
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn outline color={D.text3} onClick={()=>setModal(null)}>Cancelar</Btn><Btn onClick={saveT}>Salvar</Btn></div>
     </Modal>}
 
@@ -536,7 +527,7 @@ function LancamentosTab({data,setData,currency,mes}){
   </div>;
 }
 
-// ── Investimentos Tab (estilo XP) ─────────────────────────────────────────────
+// ── Investimentos Tab ─────────────────────────────────────────────────────────
 function InvestimentosTab({data,setData,currency,profileId}){
   const [view,setView]=useState("classe");
   const [modal,setModal]=useState(false);const [form,setForm]=useState({});
@@ -550,7 +541,6 @@ function InvestimentosTab({data,setData,currency,profileId}){
   const totalLucro=totalInvest-totalInvestido;
   const rentTotal=totalInvestido>0?((totalInvest-totalInvestido)/totalInvestido)*100:0;
 
-  // Classificação estilo XP
   const rendaVariavel=data.investimentos.filter(i=>["Ações","FII","ETF","Cripto"].includes(i.tipo));
   const rendaFixa=data.investimentos.filter(i=>["Renda Fixa","Tesouro Direto"].includes(i.tipo));
   const outros=data.investimentos.filter(i=>i.tipo==="Outros");
@@ -558,42 +548,40 @@ function InvestimentosTab({data,setData,currency,profileId}){
   const totalRF=rendaFixa.reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||0),0);
   const totalOu=outros.reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||0),0);
 
-  // Proventos
   const divMes=(data.dividendos||[]).filter(d=>{const dt=new Date(d.data);return dt.getMonth()===MES_ATUAL&&dt.getFullYear()===ANO_ATUAL;});
   const totDiv=divMes.reduce((a,b)=>a+b.valor,0);
   const proxDiv=data.investimentos.filter(i=>i.prox_dividendo).sort((a,b)=>a.prox_dividendo.localeCompare(b.prox_dividendo));
 
   async function buscarDados(inv){
-  if(inv.tipo==="Renda Fixa"||inv.tipo==="Tesouro Direto"){
-    const va=calcValorAtualRF(inv);
-    setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,valorAtual:va,lucro:va-(inv.valorInvestido||inv.valor||0),preco_atual:va/(inv.quantidade||1)}:x)}));
-    return;
+    if(inv.tipo==="Renda Fixa"||inv.tipo==="Tesouro Direto"){
+      const va=calcValorAtualRF(inv);
+      setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,valorAtual:va,lucro:va-(inv.valorInvestido||inv.valor||0),preco_atual:va/(inv.quantidade||1)}:x)}));
+      return;
+    }
+    if(!inv.ticker) return;
+    setLoadingId(inv.id);
+    const real=await fetchPrecoReal(inv.ticker, profileId);
+    if(real?.preco_atual){
+      const va=real.preco_atual*(inv.quantidade||1);
+      const lucro=va-(inv.precoMedio||0)*(inv.quantidade||1);
+      setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,preco_atual:real.preco_atual,variacao_dia:real.variacao_dia,valorAtual:va,lucro,ultimaAtualizacao:new Date().toLocaleTimeString("pt-BR")}:x)}));
+      try{
+        const mercado=isBR?"bolsa brasileira B3":"bolsa australiana ASX";
+        const txt=await askClaude(`Para o ativo ${inv.ticker} na ${mercado} com preço atual de ${real.preco_atual}, retorne APENAS JSON: {"dy":number_or_null,"prox_dividendo":"YYYY-MM-DD or null","valor_dividendo":number_or_null,"resumo":"1 frase sobre perspectiva atual"}`,300);
+        const extra=JSON.parse(txt);
+        setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,...extra}:x)}));
+      }catch{}
+    }else{
+      try{
+        const mercado=isBR?"bolsa brasileira B3":"bolsa australiana ASX";
+        const txt=await askClaude(`Preço de fechamento mais recente do ativo ${inv.ticker} na ${mercado}. JSON apenas: {"preco_atual":number}`,150);
+        const obj=JSON.parse(txt);
+        if(obj.preco_atual>0){const va=obj.preco_atual*(inv.quantidade||1);setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,preco_atual:obj.preco_atual,valorAtual:va,lucro:va-(inv.precoMedio||0)*(inv.quantidade||1),ultimaAtualizacao:new Date().toLocaleTimeString("pt-BR")}:x)}));}
+      }catch{}
+    }
+    setLoadingId(null);
   }
-  if(!inv.ticker) return;
-  setLoadingId(inv.id);
-  const real=await fetchPrecoReal(inv.ticker, profileId);
-  if(real?.preco_atual){
-    const va=real.preco_atual*(inv.quantidade||1);
-    const lucro=va-(inv.precoMedio||0)*(inv.quantidade||1);
-    setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,preco_atual:real.preco_atual,variacao_dia:real.variacao_dia,valorAtual:va,lucro,ultimaAtualizacao:new Date().toLocaleTimeString("pt-BR")}:x)}));
-    try{
-      const mercado=isBR?"bolsa brasileira B3":"bolsa australiana ASX";
-      const txt=await askClaude(`Para o ativo ${inv.ticker} na ${mercado} com preço atual de ${real.preco_atual}, retorne APENAS JSON: {"dy":number_or_null,"prox_dividendo":"YYYY-MM-DD or null","valor_dividendo":number_or_null,"resumo":"1 frase sobre perspectiva atual"}`,300);
-      const extra=JSON.parse(txt);
-      setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,...extra}:x)}));
-    }catch{}
-  }else{
-    try{
-      const mercado=isBR?"bolsa brasileira B3":"bolsa australiana ASX";
-      const txt=await askClaude(`Preço de fechamento mais recente do ativo ${inv.ticker} na ${mercado}. JSON apenas: {"preco_atual":number}`,150);
-      const obj=JSON.parse(txt);
-      if(obj.preco_atual>0){const va=obj.preco_atual*(inv.quantidade||1);setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,preco_atual:obj.preco_atual,valorAtual:va,lucro:va-(inv.precoMedio||0)*(inv.quantidade||1),ultimaAtualizacao:new Date().toLocaleTimeString("pt-BR")}:x)}));}
-    }catch{}
-  }
-  setLoadingId(null);
-}
 
-  // Auto-refresh investimentos a cada 60s
   const invRefreshRef = useRef(null);
   useEffect(()=>{
     invRefreshRef.current=setInterval(async()=>{
@@ -602,7 +590,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
     },60000);
     return()=>clearInterval(invRefreshRef.current);
   },[data.investimentos.length,profileId]);
-  
+
   async function atualizarTodos(){
     setAtualizandoTodos(true);
     const ativos=data.investimentos.filter(i=>i.ticker||i.tipo==="Renda Fixa"||i.tipo==="Tesouro Direto");
@@ -657,8 +645,6 @@ function InvestimentosTab({data,setData,currency,profileId}){
 
   return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
     {chartTicker&&<ChartModal ticker={chartTicker} onClose={()=>setChartTicker(null)}/>}
-
-    {/* Header com total */}
     <Card glow style={{background:`linear-gradient(135deg,${D.bg3},${D.card2})`,border:`1px solid ${D.blue}33`}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
         <div>
@@ -674,12 +660,10 @@ function InvestimentosTab({data,setData,currency,profileId}){
       </div>
     </Card>
 
-    {/* Classes estilo XP */}
     <div style={{display:"flex",gap:4,background:D.card,borderRadius:10,padding:4,border:`1px solid ${D.border}`}}>
       {[["classe","Por Classe"],["rv","Renda Variável"],["rf","Renda Fixa"],["proventos","Proventos"]].map(([v,l])=><button key={v} onClick={()=>setView(v)} style={{flex:1,padding:"7px 8px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:view===v?700:400,background:view===v?D.blue:"transparent",color:view===v?"#fff":D.text3,whiteSpace:"nowrap"}}>{l}</button>)}
     </div>
 
-    {/* Visão por classe */}
     {view==="classe"&&<div style={{display:"flex",flexDirection:"column",gap:10}}>
       {[{label:"Renda Variável",icon:"📈",color:D.blue,invs:rendaVariavel,total:totalRV},{label:"Renda Fixa",icon:"🏛️",color:D.gold,invs:rendaFixa,total:totalRF},{label:"Outros",icon:"💼",color:D.purple,invs:outros,total:totalOu}].filter(c=>c.invs.length>0).map(c=><Card key={c.label} style={{border:`1px solid ${c.color}33`}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
@@ -697,7 +681,6 @@ function InvestimentosTab({data,setData,currency,profileId}){
       <PieChart slices={[{label:"Renda Variável",v:totalRV,color:D.blue},{label:"Renda Fixa",v:totalRF,color:D.gold},{label:"Outros",v:totalOu,color:D.purple}].filter(s=>s.v>0)}/>
     </div>}
 
-    {/* Renda Variável */}
     {view==="rv"&&<div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
         <div><p style={{margin:0,fontSize:14,fontWeight:700,color:D.text}}>📈 Renda Variável</p><p style={{margin:0,fontSize:11,color:D.text3}}>Total: {fmtM(totalRV,currency)}</p></div>
@@ -706,7 +689,6 @@ function InvestimentosTab({data,setData,currency,profileId}){
       <InvList invs={rendaVariavel} emptyMsg="Nenhum ativo de renda variável cadastrado."/>
     </div>}
 
-    {/* Renda Fixa */}
     {view==="rf"&&<div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
         <div><p style={{margin:0,fontSize:14,fontWeight:700,color:D.text}}>🏛️ Renda Fixa</p><p style={{margin:0,fontSize:11,color:D.text3}}>Total: {fmtM(totalRF,currency)}</p></div>
@@ -715,7 +697,6 @@ function InvestimentosTab({data,setData,currency,profileId}){
       <InvList invs={rendaFixa} emptyMsg="Nenhum ativo de renda fixa cadastrado."/>
     </div>}
 
-    {/* Proventos estilo XP */}
     {view==="proventos"&&<div style={{display:"flex",flexDirection:"column",gap:10}}>
       <Card style={{background:`linear-gradient(135deg,${D.bg3},${D.card2})`,border:`1px solid ${D.gold}33`}}>
         <p style={{fontSize:10,color:D.text3,textTransform:"uppercase",letterSpacing:"1px",marginBottom:4}}>Total investido · {hoje.toLocaleDateString("pt-BR")}</p>
@@ -817,44 +798,30 @@ function SplitwiseTab({currency,userEmail}){
 
   async function loadSW(){
     setLoading(true);
-    try{
-      // Usa localStorage como fallback já que Supabase pode não ter tabela splitwise
-      const local=lsGet(`sw_${codigo}`);
-      if(local)setSwData(local);
-    }catch{}
+    try{const local=lsGet(`sw_${codigo}`);if(local)setSwData(local);}catch{}
     setLoading(false);
   }
 
-  function saveSW(d){
-    setSwData(d);
-    lsSet(`sw_${codigo}`,d);
-  }
+  function saveSW(d){setSwData(d);lsSet(`sw_${codigo}`,d);}
 
   function criarGrupo(){
     if(!setupNome.trim()||!inputCod.trim())return;
-    const cod=inputCod.trim().toUpperCase();
-    const nome=setupNome.trim();
-    lsSet("sw_codigo",cod);lsSet("sw_nome",nome);
-    setCodigo(cod);setNomeUser(nome);
+    const cod=inputCod.trim().toUpperCase(),nome=setupNome.trim();
+    lsSet("sw_codigo",cod);lsSet("sw_nome",nome);setCodigo(cod);setNomeUser(nome);
     const d={codigo:cod,membros:[{nome,email:userEmail||nome}],despesas:[],pagamentos:[]};
     saveSW(d);setInputCod("");setSetupNome("");
   }
 
   function entrarGrupo(){
     if(!inputCod.trim()||!setupNome.trim())return;
-    const cod=inputCod.trim().toUpperCase();
-    const nome=setupNome.trim();
-    lsSet("sw_codigo",cod);lsSet("sw_nome",nome);
-    setCodigo(cod);setNomeUser(nome);
+    const cod=inputCod.trim().toUpperCase(),nome=setupNome.trim();
+    lsSet("sw_codigo",cod);lsSet("sw_nome",nome);setCodigo(cod);setNomeUser(nome);
     const existing=lsGet(`sw_${cod}`);
     if(existing){
-      if(!existing.membros.find(m=>m.nome===nome)){
-        existing.membros.push({nome,email:userEmail||nome});
-        saveSW(existing);
-      }else{setSwData(existing);}
+      if(!existing.membros.find(m=>m.nome===nome)){existing.membros.push({nome,email:userEmail||nome});saveSW(existing);}
+      else{setSwData(existing);}
     }else{
-      const d={codigo:cod,membros:[{nome,email:userEmail||nome}],despesas:[],pagamentos:[]};
-      saveSW(d);
+      const d={codigo:cod,membros:[{nome,email:userEmail||nome}],despesas:[],pagamentos:[]};saveSW(d);
     }
     setInputCod("");setSetupNome("");
   }
@@ -865,29 +832,21 @@ function SplitwiseTab({currency,userEmail}){
     const selecionados=form.divisao||membros;
     const porPessoa=parseFloat(form.valor)/selecionados.length;
     const d={id:uid(),descricao:form.descricao,valor:parseFloat(form.valor),pagoPor:form.pagoPor,data:form.data||hoje.toISOString().slice(0,10),categoria:form.categoria||"Outros",divisao:selecionados.map(nome=>({nome,valor:porPessoa}))};
-    saveSW({...swData,despesas:[...swData.despesas,d]});
-    setModal(null);setForm({});
+    saveSW({...swData,despesas:[...swData.despesas,d]});setModal(null);setForm({});
   }
 
   function registrarPagamento(){
     if(!form.de||!form.para||!form.valor)return;
     const p={id:uid(),de:form.de,para:form.para,valor:parseFloat(form.valor),data:form.data||hoje.toISOString().slice(0,10)};
-    saveSW({...swData,pagamentos:[...swData.pagamentos,p]});
-    setModal(null);setForm({});
+    saveSW({...swData,pagamentos:[...swData.pagamentos,p]});setModal(null);setForm({});
   }
 
   function calcSaldos(){
     if(!swData)return {};
     const saldos={};
     swData.membros.forEach(m=>{saldos[m.nome]=0;});
-    swData.despesas.forEach(d=>{
-      saldos[d.pagoPor]=(saldos[d.pagoPor]||0)+d.valor;
-      d.divisao.forEach(div=>{saldos[div.nome]=(saldos[div.nome]||0)-div.valor;});
-    });
-    swData.pagamentos?.forEach(p=>{
-      saldos[p.de]=(saldos[p.de]||0)-p.valor;
-      saldos[p.para]=(saldos[p.para]||0)+p.valor;
-    });
+    swData.despesas.forEach(d=>{saldos[d.pagoPor]=(saldos[d.pagoPor]||0)+d.valor;d.divisao.forEach(div=>{saldos[div.nome]=(saldos[div.nome]||0)-div.valor;});});
+    swData.pagamentos?.forEach(p=>{saldos[p.de]=(saldos[p.de]||0)-p.valor;saldos[p.para]=(saldos[p.para]||0)+p.valor;});
     return saldos;
   }
 
@@ -895,15 +854,12 @@ function SplitwiseTab({currency,userEmail}){
     const saldos=calcSaldos();
     const devedores=Object.entries(saldos).filter(([,v])=>v<0).map(([n,v])=>({nome:n,valor:-v}));
     const credores=Object.entries(saldos).filter(([,v])=>v>0).map(([n,v])=>({nome:n,valor:v}));
-    const transacoes=[];
-    const dev=[...devedores],cred=[...credores];
+    const transacoes=[];const dev=[...devedores],cred=[...credores];
     while(dev.length&&cred.length){
-      const d=dev[0],c=cred[0];
-      const v=Math.min(d.valor,c.valor);
+      const d=dev[0],c=cred[0],v=Math.min(d.valor,c.valor);
       if(v>0.01)transacoes.push({de:d.nome,para:c.nome,valor:v});
       d.valor-=v;c.valor-=v;
-      if(d.valor<0.01)dev.shift();
-      if(c.valor<0.01)cred.shift();
+      if(d.valor<0.01)dev.shift();if(c.valor<0.01)cred.shift();
     }
     return transacoes;
   }
@@ -926,11 +882,9 @@ function SplitwiseTab({currency,userEmail}){
 
   if(loading||!swData)return <p style={{color:D.text3,fontSize:13}}>Carregando...</p>;
 
-  const saldos=calcSaldos();const dividas=calcDividas();
-  const meuSaldo=saldos[nomeUser]||0;
+  const saldos=calcSaldos();const dividas=calcDividas();const meuSaldo=saldos[nomeUser]||0;
 
   return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
-    {/* Header */}
     <Card style={{border:`1px solid ${D.green}33`}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
         <div>
@@ -945,8 +899,6 @@ function SplitwiseTab({currency,userEmail}){
         </div>
       </div>
     </Card>
-
-    {/* Saldos */}
     <Card>
       <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>Saldos do grupo</p>
       {Object.entries(saldos).map(([nome,val])=><div key={nome} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${D.border}`}}>
@@ -954,8 +906,6 @@ function SplitwiseTab({currency,userEmail}){
         <span style={{fontSize:13,fontWeight:700,color:val>=0?D.green:D.red}}>{val>=0?"+":""}{fmtM(val,currency)}</span>
       </div>)}
     </Card>
-
-    {/* Quem deve pra quem */}
     {dividas.length>0&&<Card style={{border:`1px solid ${D.gold}33`}}>
       <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>💰 Quem deve pra quem</p>
       {dividas.map((d,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",background:D.bg3,borderRadius:8,marginBottom:6,border:`1px solid ${(d.de===nomeUser||d.para===nomeUser)?D.gold+"44":D.border}`}}>
@@ -963,15 +913,11 @@ function SplitwiseTab({currency,userEmail}){
         <span style={{fontSize:14,fontWeight:700,color:D.gold}}>{fmtM(d.valor,currency)}</span>
       </div>)}
     </Card>}
-
-    {/* Ações */}
     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
       <Btn onClick={()=>{setModal("despesa");setForm({pagoPor:nomeUser,divisao:swData.membros.map(m=>m.nome)});}} color={D.green}>+ Nova despesa</Btn>
       <Btn onClick={()=>{setModal("pagamento");setForm({de:nomeUser});}} color={D.blue} outline>✓ Registrar pagamento</Btn>
       <Btn onClick={()=>{setCodigo("");setNomeUser("");lsSet("sw_codigo","");lsSet("sw_nome","");}} color={D.red} outline sm>Sair do grupo</Btn>
     </div>
-
-    {/* Despesas */}
     <Card>
       <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>Despesas recentes</p>
       {swData.despesas.length===0&&<p style={{fontSize:13,color:D.text3}}>Nenhuma despesa ainda.</p>}
@@ -989,7 +935,6 @@ function SplitwiseTab({currency,userEmail}){
         <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}>{d.divisao.map(div=><span key={div.nome} style={{fontSize:10,background:D.bg3,color:D.text3,borderRadius:4,padding:"2px 6px"}}>{div.nome}: {fmtM(div.valor,currency)}</span>)}</div>
       </div>)}
     </Card>
-
     {modal==="despesa"&&<Modal title="Nova despesa" onClose={()=>setModal(null)}>
       <label style={{fontSize:12,color:D.text3}}>Descrição<input value={form.descricao||""} onChange={e=>setForm(f=>({...f,descricao:e.target.value}))} style={{marginTop:4}}/></label>
       <label style={{fontSize:12,color:D.text3}}>Valor ({currency})<input type="number" value={form.valor||""} onChange={e=>setForm(f=>({...f,valor:e.target.value}))} style={{marginTop:4}}/></label>
@@ -1005,7 +950,6 @@ function SplitwiseTab({currency,userEmail}){
       </div>
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn outline color={D.text3} onClick={()=>setModal(null)}>Cancelar</Btn><Btn color={D.green} onClick={addDespesa}>Adicionar</Btn></div>
     </Modal>}
-
     {modal==="pagamento"&&<Modal title="Registrar pagamento" onClose={()=>setModal(null)}>
       <label style={{fontSize:12,color:D.text3}}>Quem pagou<select value={form.de||nomeUser} onChange={e=>setForm(f=>({...f,de:e.target.value}))} style={{marginTop:4}}>{swData.membros.map(m=><option key={m.nome}>{m.nome}</option>)}</select></label>
       <label style={{fontSize:12,color:D.text3}}>Para quem<select value={form.para||""} onChange={e=>setForm(f=>({...f,para:e.target.value}))} style={{marginTop:4}}><option value="">Selecione...</option>{swData.membros.filter(m=>m.nome!==form.de).map(m=><option key={m.nome}>{m.nome}</option>)}</select></label>
@@ -1035,241 +979,107 @@ function AnaliseTab({investimentos,profileId,market,currency}){
   const isBR=profileId==="br";
   useEffect(()=>{lsSet(WL_KEY,watchlist);},[watchlist]);
 
-  // Auto-refresh watchlist a cada 60s
-  
   const wlRefreshRef = useRef(null);
- useEffect(()=>{
-  async function refreshAll(){
-    if(!watchlist.length) return;
-    const updated = await Promise.all(watchlist.map(async w=>{
-      const real = await fetchPrecoReal(w.ticker, profileId);
-      if(!real) return w;
-      return {...w, preco:real.preco_atual, variacao_dia:real.variacao_dia};
-    }));
-    setWatchlist(updated);
-  }
-  refreshAll();
-  wlRefreshRef.current=setInterval(refreshAll,60000);
-  return()=>clearInterval(wlRefreshRef.current);
-},[profileId]);
-  
+  useEffect(()=>{
+    async function refreshAll(){
+      if(!watchlist.length) return;
+      const updated = await Promise.all(watchlist.map(async w=>{
+        const real = await fetchPrecoReal(w.ticker, profileId);
+        if(!real) return w;
+        return {...w, preco:real.preco_atual, variacao_dia:real.variacao_dia};
+      }));
+      setWatchlist(updated);
+    }
+    refreshAll();
+    wlRefreshRef.current=setInterval(refreshAll,60000);
+    return()=>clearInterval(wlRefreshRef.current);
+  },[profileId]);
+
   async function addWatch() {
     const t = wInput.trim().toUpperCase();
     if (!t || watchlist.find(w => w.ticker === t)) { setWInput(""); return; }
     setWLoading(true);
-    // 1. Busca preço real direto
-   const real = await fetchPrecoReal(t, profileId);
-    // 2. Claude só para nome/categoria/indicadores fundamentais
+    const real = await fetchPrecoReal(t, profileId);
     let obj = { ticker: t, nome: t, categoria: wCat || "Outros", preco: real?.preco_atual || null, variacao_dia: real?.variacao_dia || null, pl: null, dy: real?.dy || null, roe: null, currency };
     try {
       const mercado = isBR ? "brasileira B3" : "australiana ASX";
-      const txt = await askClaude(
-        `Para o ativo ${t} na bolsa ${mercado}, retorne APENAS JSON com nome e indicadores fundamentais (não preço): {"nome":"nome curto","categoria":"Banco|Infraestrutura|Fundo Imobiliário|Energia|Tecnologia|Varejo|Saúde|Agronegócio|Mineração|Petróleo|ETF|Exterior|Outros","pl":number_or_null,"dy":number_or_null,"roe":number_or_null}`,
-        300
-      );
+      const txt = await askClaude(`Para o ativo ${t} na bolsa ${mercado}, retorne APENAS JSON com nome e indicadores fundamentais (não preço): {"nome":"nome curto","categoria":"Banco|Infraestrutura|Fundo Imobiliário|Energia|Tecnologia|Varejo|Saúde|Agronegócio|Mineração|Petróleo|ETF|Exterior|Outros","pl":number_or_null,"dy":number_or_null,"roe":number_or_null}`,300);
       const parsed = JSON.parse(txt);
       obj = { ...obj, nome: parsed.nome || obj.nome, categoria: wCat || parsed.categoria || "Outros", pl: parsed.pl || null, dy: real?.dy || parsed.dy || null, roe: parsed.roe || null };
     } catch {}
     setWatchlist(p => [...p, obj]);
     setWInput(""); setWLoading(false);
   }
+
   function addToComp(ticker){if(!compList.includes(ticker))setCompList(p=>[...p,ticker]);}
 
-const BRAPI_TOKEN = "8KjmJjKrzXYXc822ovC2gj";
-
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-};
-
-async function fetchCotacao(ticker, market) {
-  const isB3 = /^[A-Z]{3,6}\d{1,2}$/.test(ticker) && !ticker.includes(".");
-  const yfTicker = (!isB3 && !ticker.includes("."))
-    ? ticker + ".AX"
-    : ticker;
-  try {
-    if (isB3) {
-      const tentativas = [ticker + ".SA", ticker];
-      for (const t of tentativas) {
-        try {
-          const r = await fetch(
-            `https://query2.finance.yahoo.com/v8/finance/chart/${t}?interval=1d&range=1d&includePrePost=false`,
-            { headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "Accept": "application/json", "Accept-Language": "en-US,en;q=0.9" } }
+  // ── fetchNews com Google News RSS real ──────────────────────────────────────
+  async function fetchNews(){
+    if(!watchlist.length){setErro("Adicione ativos à watchlist.");return;}
+    setNewsLoading(true);setErro("");
+    const tickers=[...new Set([
+      ...watchlist.map(w=>w.ticker),
+      ...investimentos.map(i=>i.ticker).filter(Boolean)
+    ])];
+    try{
+      const map={};
+      for(const ticker of tickers){
+        const r=await fetch(`${WORKER}/news?ticker=${encodeURIComponent(ticker)}&market=${profileId}`);
+        const d=await r.json();
+        if(!d.items||d.items.length===0){map[ticker]=[];continue;}
+        const lista=d.items.map((it,i)=>`${i+1}. "${it.title}" (${new Date(it.pubDate).toLocaleDateString("pt-BR")})`).join("\n");
+        try{
+          const txt=await askClaude(
+            `Para cada notícia abaixo sobre ${ticker}, classifique tipo e impacto e escreva um resumo curto em português (1-2 frases) sobre o que isso significa para o investidor. Notícias:\n${lista}\nRetorne APENAS JSON array na mesma ordem: [{"tipo":"resultado|dividendo|fato_relevante|noticia|macro","impacto":"positivo|negativo|neutro","resumo":"..."}]`,
+            600
           );
-          const d = await r.json();
-          const meta = d?.chart?.result?.[0]?.meta;
-          if (meta?.regularMarketPrice) return {
-            ticker,
-            preco_atual: meta.regularMarketPrice,
-            variacao_dia: meta.regularMarketChangePercent,
-            nome: (meta.longName || meta.shortName || ticker)
-              .replace(/Ã£/g,"ã").replace(/Ã¡/g,"á").replace(/Ã©/g,"é")
-              .replace(/Ãª/g,"ê").replace(/Ã³/g,"ó").replace(/Ãº/g,"ú")
-              .replace(/Ã§/g,"ç").replace(/Ã­/g,"í").replace(/Ã¢/g,"â")
-              .replace(/Ã´/g,"ô").replace(/Ã /g,"à"),
-            dy: null,
-          };
-        } catch {}
+          const s=txt.indexOf("["),e=txt.lastIndexOf("]");
+          const class_=JSON.parse(txt.slice(s,e+1));
+          map[ticker]=d.items.map((it,i)=>({
+            titulo:it.title,
+            data:it.pubDate?new Date(it.pubDate).toISOString().slice(0,10):"",
+            link:it.link,
+            fonte:it.source,
+            tipo:class_[i]?.tipo||"noticia",
+            impacto:class_[i]?.impacto||"neutro",
+            resumo:class_[i]?.resumo||""
+          }));
+        }catch{
+          map[ticker]=d.items.map(it=>({
+            titulo:it.title,
+            data:it.pubDate?new Date(it.pubDate).toISOString().slice(0,10):"",
+            link:it.link,
+            fonte:it.source,
+            tipo:"noticia",
+            impacto:"neutro",
+            resumo:""
+          }));
+        }
       }
-      return null;
-    } else {
-      const tentativas = [yfTicker, ticker + ".AX", ticker + ".ax"];
-      for (const t of tentativas) {
-        try {
-          const r = await fetch(
-            `https://query2.finance.yahoo.com/v8/finance/chart/${t}?interval=1d&range=1d&includePrePost=false`,
-            { headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "Accept": "application/json", "Accept-Language": "en-US,en;q=0.9" } }
-          );
-          const d = await r.json();
-          const meta = d?.chart?.result?.[0]?.meta;
-          if (meta?.regularMarketPrice) return {
-            ticker: t,
-            preco_atual: meta.regularMarketPrice,
-            variacao_dia: meta.regularMarketChangePercent,
-            nome: meta.longName || meta.shortName || t,
-            dy: null,
-          };
-        } catch {}
-      }
-      return null;
-    }
-  } catch {}
-  return null;
-}
-
-// ── NOVO: busca notícias reais via Google News RSS ──────────────────────────
-async function fetchNoticias(ticker, market) {
-  const isBR = market === "br";
-  const query = isBR ? `${ticker} ação B3` : `${ticker} ASX stock`;
-  const hl = isBR ? "pt-BR" : "en-AU";
-  const gl = isBR ? "BR" : "AU";
-  const ceid = isBR ? "BR:pt-419" : "AU:en";
-  const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=${hl}&gl=${gl}&ceid=${ceid}`;
-
-  try {
-    const res = await fetch(rssUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
-    const xml = await res.text();
-    const items = [];
-    const itemRegex = /<item>([\s\S]*?)<\/item>/g;
-    let m;
-    while ((m = itemRegex.exec(xml)) && items.length < 5) {
-      const block = m[1];
-      const decode = s => (s || "")
-        .replace(/<!\[CDATA\[(.*?)\]\]>/, "$1")
-        .replace(/&apos;/g, "'").replace(/&quot;/g, '"')
-        .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
-      const title = decode((block.match(/<title>(.*?)<\/title>/) || [])[1]);
-      const pubDate = (block.match(/<pubDate>(.*?)<\/pubDate>/) || [])[1] || "";
-      const link = decode((block.match(/<link>(.*?)<\/link>/) || [])[1]);
-      const source = decode((block.match(/<source[^>]*>(.*?)<\/source>/) || [])[1]) || "";
-      items.push({ title, pubDate, link, source });
-    }
-    return items;
-  } catch {
-    return [];
+      setNews(map);
+    }catch(e){setErro("Erro ao buscar notícias: "+e.message);}
+    setNewsLoading(false);
   }
-}
 
-export default {
-  async fetch(request) {
-    const url = new URL(request.url);
-
-    // CORS preflight
-    if (request.method === "OPTIONS") {
-      return new Response(null, { headers: CORS });
-    }
-
-    // ── NOVO endpoint GET /news?ticker=PETR4&market=br ──────────────────────
-    if (request.method === "GET" && url.pathname === "/news") {
-      const ticker = url.searchParams.get("ticker")?.toUpperCase();
-      const market = url.searchParams.get("market") || "br";
-      if (!ticker) {
-        return new Response(JSON.stringify({ error: "ticker required" }), {
-          status: 400, headers: { "Content-Type": "application/json", ...CORS }
-        });
-      }
-      const items = await fetchNoticias(ticker, market);
-      return new Response(JSON.stringify({ ticker, items }), {
-        headers: { "Content-Type": "application/json", ...CORS }
-      });
-    }
-
-    // ── endpoint GET /quote?ticker=CBA.AX ───────────────────────────────────
-    if (request.method === "GET" && url.pathname === "/quote") {
-      const ticker = url.searchParams.get("ticker")?.toUpperCase();
-      const market = url.searchParams.get("market") || "au";
-      if (!ticker) {
-        return new Response(JSON.stringify({ error: "ticker required" }), {
-          status: 400, headers: { "Content-Type": "application/json", ...CORS }
-        });
-      }
-      const cotacao = await fetchCotacao(ticker, market);
-      return new Response(JSON.stringify(cotacao || { error: "not found" }), {
-        status: cotacao ? 200 : 404,
-        headers: { "Content-Type": "application/json", ...CORS }
-      });
-    }
-
-    // ── POST /messages — igual ao original ─────────────────────────────────
-    if (request.method !== "POST") {
-      return new Response(JSON.stringify({ error: "Method not allowed" }), {
-        status: 405, headers: { "Content-Type": "application/json", ...CORS }
-      });
-    }
-
-    try {
-      const body = await request.json();
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": ANTHROPIC_KEY,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify(body),
-      });
-      const data = await response.json();
-      return new Response(JSON.stringify(data), {
-        status: response.status,
-        headers: { "Content-Type": "application/json", ...CORS }
-      });
-    } catch (error) {
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 500, headers: { "Content-Type": "application/json", ...CORS }
-      });
-    }
+  async function compararAtivos(){
+    if(compList.length<2){setErro("Adicione pelo menos 2 ativos.");return;}
+    setCompLoading(true);setErro("");
+    const mercado=isBR?"brasileira B3":"australiana ASX";
+    const moeda=isBR?"BRL":"AUD";
+    try{
+      const precos={};
+      await Promise.all(compList.map(async t=>{
+        const real=await fetchPrecoReal(t,profileId);
+        if(real?.preco_atual) precos[t]=real;
+      }));
+      const txt=await askClaude(`Analista financeiro. Bolsa ${mercado} em ${moeda}. Retorne APENAS JSON array com indicadores fundamentais (NÃO preço) para [${compList.join(",")}]: [{"ticker":"","nome":"","pl":number_or_null,"pvp":number_or_null,"dy":number_or_null,"roe":number_or_null,"divida_ebitda":number_or_null,"cagr_lucro":number_or_null,"margem_liquida":number_or_null}]`,1200);
+      const s=txt.indexOf("["),e=txt.lastIndexOf("]");if(s===-1)throw new Error();
+      const arr=JSON.parse(txt.slice(s,e+1));
+      const final=arr.map(a=>({...a,preco:precos[a.ticker]?.preco_atual||precos[a.ticker.replace(".AX","")]?.preco_atual||a.preco||null,variacao_dia:precos[a.ticker]?.variacao_dia||null}));
+      setCompData(final);
+    }catch{setErro("Erro ao comparar.");}
+    setCompLoading(false);
   }
-};
-  
- async function compararAtivos(){
-  if(compList.length<2){setErro("Adicione pelo menos 2 ativos.");return;}
-  setCompLoading(true);setErro("");
-  const mercado=isBR?"brasileira B3":"australiana ASX";
-  const moeda=isBR?"BRL":"AUD";
-  try{
-    // 1. Busca preços reais via Worker para todos os tickers
-    const precos={};
-    await Promise.all(compList.map(async t=>{
-      const real=await fetchPrecoReal(t,profileId);
-      if(real?.preco_atual) precos[t]=real;
-    }));
-
-    // 2. Claude só para indicadores fundamentais (não preço)
-    const txt=await askClaude(`Analista financeiro. Bolsa ${mercado} em ${moeda}. Retorne APENAS JSON array com indicadores fundamentais (NÃO preço) para [${compList.join(",")}]: [{"ticker":"","nome":"","pl":number_or_null,"pvp":number_or_null,"dy":number_or_null,"roe":number_or_null,"divida_ebitda":number_or_null,"cagr_lucro":number_or_null,"margem_liquida":number_or_null}]`,1200);
-    const s=txt.indexOf("["),e=txt.lastIndexOf("]");if(s===-1)throw new Error();
-    const arr=JSON.parse(txt.slice(s,e+1));
-
-    // 3. Combina preço real com indicadores do Claude
-    const final=arr.map(a=>({
-      ...a,
-      preco: precos[a.ticker]?.preco_atual || precos[a.ticker.replace(".AX","")]?.preco_atual || a.preco || null,
-      variacao_dia: precos[a.ticker]?.variacao_dia || null,
-    }));
-    setCompData(final);
-  }catch{setErro("Erro ao comparar.");}
-  setCompLoading(false);
-}
 
   async function sugerirAloc(){
     if(!investimentos.length){setErro("Adicione investimentos.");return;}
@@ -1317,11 +1127,7 @@ export default {
   const tipoIcons={resultado:"📊",dividendo:"💰",fato_relevante:"📢",noticia:"📰"};
   const tipoLine={resultado:D.blue,dividendo:D.green,fato_relevante:D.gold,noticia:D.text3};
 
-  // Screener com busca manual
   const screenerSymbol=screenerSearch.trim().toUpperCase()||null;
-  const screenerConfig=screenerSymbol
-    ?{symbol:isBR?"BMFBOVESPA:"+screenerSymbol:screenerSymbol,width:"100%",height:490,locale:"pt_BR"}
-    :{width:"100%",height:490,defaultColumn:"overview",defaultScreen:"most_capitalized",market,showToolbar:true,locale:"pt_BR"};
 
   return <div style={{display:"flex",flexDirection:"column",gap:"1.25rem"}}>
     {chartTicker&&<ChartModal ticker={chartTicker} onClose={()=>setChartTicker(null)}/>}
@@ -1427,7 +1233,7 @@ export default {
       </div>}
     </Card>
 
-{/* Alertas */}
+    {/* Alertas — notícias reais do Google News */}
     <Card>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
         <p style={{fontSize:14,fontWeight:700,color:D.text}}>🔔 Alertas e anúncios</p>
@@ -1436,23 +1242,25 @@ export default {
       {Object.keys(news).length===0&&!newsLoading&&<p style={{fontSize:12,color:D.text3}}>Clique "Atualizar" para buscar anúncios.</p>}
       {Object.entries(news).map(([ticker,noticias])=><div key={ticker} style={{marginBottom:12}}>
         <p style={{fontSize:13,fontWeight:700,color:D.green,margin:"0 0 6px"}}>{ticker}</p>
+        {noticias.length===0&&<p style={{fontSize:12,color:D.text3}}>Nenhuma notícia recente encontrada.</p>}
         {noticias.map((n,i)=>{
           const impactoCor=n.impacto==="positivo"?D.green:n.impacto==="negativo"?D.red:D.text3;
           return <div key={i} style={{background:D.bg3,borderRadius:8,padding:"8px 12px",marginBottom:6,borderLeft:`3px solid ${tipoLine[n.tipo]||D.text3}`}}>
             <div style={{display:"flex",gap:6,marginBottom:3,alignItems:"center"}}>
               <span>{tipoIcons[n.tipo]||"📰"}</span>
-              <span style={{fontSize:12,fontWeight:600,color:D.text,flex:1}}>{n.titulo}</span>
+              <a href={n.link} target="_blank" rel="noopener noreferrer" style={{fontSize:12,fontWeight:600,color:D.text,flex:1,textDecoration:"none"}}>{n.titulo}</a>
               <span style={{fontSize:10,background:impactoCor+"22",color:impactoCor,borderRadius:4,padding:"2px 6px",fontWeight:600,border:`1px solid ${impactoCor}44`}}>
                 {n.impacto==="positivo"?"▲ Positivo":n.impacto==="negativo"?"▼ Negativo":"● Neutro"}
               </span>
               <span style={{fontSize:10,color:D.text3}}>{n.data}</span>
             </div>
-            <p style={{margin:0,fontSize:12,color:D.text2}}>{n.resumo}</p>
+            {n.resumo&&<p style={{margin:0,fontSize:12,color:D.text2}}>{n.resumo}</p>}
+            {n.fonte&&<p style={{margin:"2px 0 0",fontSize:10,color:D.text3}}>Fonte: {n.fonte}</p>}
           </div>;
         })}
       </div>)}
     </Card>
-    
+
     {/* Indicadores TradingView */}
     <Card>
       <p style={{fontSize:14,fontWeight:700,color:D.text,marginBottom:8}}>Indicadores fundamentalistas</p>
@@ -1464,7 +1272,7 @@ export default {
       <TVWidget type="financials" config={{symbol:fundSymbol,displayMode:"regular",width:"100%",height:490,locale:"pt_BR"}}/>
     </Card>
 
-    {/* Screener com busca manual */}
+    {/* Screener */}
     <Card>
       <p style={{fontSize:14,fontWeight:700,color:D.text,marginBottom:6}}>Screener de ações</p>
       <div style={{display:"flex",gap:8,marginBottom:10}}>
@@ -1474,7 +1282,7 @@ export default {
       {screenerSearch?<TVWidget type="financials" config={{symbol:isBR&&!/\./.test(screenerSearch)?"BMFBOVESPA:"+screenerSearch:screenerSearch,displayMode:"regular",width:"100%",height:490,locale:"pt_BR"}}/>:<TVWidget type="screener" config={{width:"100%",height:490,defaultColumn:"overview",defaultScreen:"most_capitalized",market,showToolbar:true,locale:"pt_BR"}}/>}
     </Card>
 
-    {/* Calculadora com imposto */}
+    {/* Calculadora */}
     <Card>
       <p style={{fontSize:14,fontWeight:700,color:D.text,marginBottom:10}}>Calcular rentabilidade</p>
       <label style={{fontSize:12,color:D.text3,display:"block",marginBottom:8}}>Tipo<select value={calcForm.tipo} onChange={e=>setCalcForm(f=>({...f,tipo:e.target.value}))} style={{marginTop:4}}><option value="acao">Ações / FII / ETF</option><option value="rf">Renda Fixa</option></select></label>
@@ -1497,7 +1305,7 @@ export default {
       </div>}
     </Card>
 
-    {/* Simulador com imposto */}
+    {/* Simulador */}
     <Card>
       <p style={{fontSize:14,fontWeight:700,color:D.text,marginBottom:10}}>Simular juros compostos</p>
       <label style={{fontSize:12,color:D.text3,display:"block",marginBottom:8}}>Tipo<select value={simForm.tipo} onChange={e=>setSimForm(f=>({...f,tipo:e.target.value}))} style={{marginTop:4}}><option value="fixo">Taxa fixa mensal</option><option value="pct">% de índice (ex: 102% CDI)</option><option value="mais">Índice + % (ex: IPCA+9%)</option></select></label>
