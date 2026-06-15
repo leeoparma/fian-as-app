@@ -960,6 +960,7 @@ function SplitwiseTab({currency,userEmail}){
   </div>;
 }
 
+
 // ── Análise Tab ───────────────────────────────────────────────────────────────
 function AnaliseTab({investimentos,profileId,market,currency}){
   const WL_KEY=`watchlist_${profileId}`;
@@ -977,16 +978,36 @@ function AnaliseTab({investimentos,profileId,market,currency}){
   const [sugestoes,setSugestoes]=useState(null);const [sugestLoading,setSugestLoading]=useState(false);
   const [erro,setErro]=useState("");
   const isBR=profileId==="br";
+
+  // ── NOVOS ESTADOS ──────────────────────────────────────────────────────────
+  // Chat com analista IA
+  const [chatMsgs,setChatMsgs]=useState([{role:"assistant",content:`Olá! Sou seu analista financeiro IA. Posso responder perguntas sobre ações, FIIs, ETFs, análise fundamentalista, comparativos e estratégias de investimento no mercado ${isBR?"brasileiro":"australiano"}. Como posso ajudar?`}]);
+  const [chatInput,setChatInput]=useState("");const [chatLoading,setChatLoading]=useState(false);
+  const chatRef=useRef(null);
+
+  // Extended Thinking para sugestões
+  const [thinkingMode,setThinkingMode]=useState(false);
+  const [thinkingLog,setThinkingLog]=useState("");const [showThinking,setShowThinking]=useState(false);
+
+  // Análise de notícias + impacto no preço
+  const [newsImpact,setNewsImpact]=useState({});const [newsImpactLoading,setNewsImpactLoading]=useState(false);
+
+  // Análise de carteira pessoal vs sugestões
+  const [carteirAnalise,setCarteiraAnalise]=useState(null);const [carteiraLoading,setCarteiraLoading]=useState(false);
+
+  // Relatório detalhado por ação
+  const [relatorio,setRelatorio]=useState(null);const [relatorioTicker,setRelatorioTicker]=useState("");const [relatorioLoading,setRelatorioLoading]=useState(false);
+
   useEffect(()=>{lsSet(WL_KEY,watchlist);},[watchlist]);
 
-  const wlRefreshRef = useRef(null);
+  const wlRefreshRef=useRef(null);
   useEffect(()=>{
     async function refreshAll(){
       if(!watchlist.length) return;
-      const updated = await Promise.all(watchlist.map(async w=>{
-        const real = await fetchPrecoReal(w.ticker, profileId);
+      const updated=await Promise.all(watchlist.map(async w=>{
+        const real=await fetchPrecoReal(w.ticker,profileId);
         if(!real) return w;
-        return {...w, preco:real.preco_atual, variacao_dia:real.variacao_dia};
+        return{...w,preco:real.preco_atual,variacao_dia:real.variacao_dia};
       }));
       setWatchlist(updated);
     }
@@ -995,32 +1016,32 @@ function AnaliseTab({investimentos,profileId,market,currency}){
     return()=>clearInterval(wlRefreshRef.current);
   },[profileId]);
 
-  async function addWatch() {
-    const t = wInput.trim().toUpperCase();
-    if (!t || watchlist.find(w => w.ticker === t)) { setWInput(""); return; }
+  // Scroll automático do chat
+  useEffect(()=>{if(chatRef.current)chatRef.current.scrollTop=chatRef.current.scrollHeight;},[chatMsgs]);
+
+  async function addWatch(){
+    const t=wInput.trim().toUpperCase();
+    if(!t||watchlist.find(w=>w.ticker===t)){setWInput("");return;}
     setWLoading(true);
-    const real = await fetchPrecoReal(t, profileId);
-    let obj = { ticker: t, nome: t, categoria: wCat || "Outros", preco: real?.preco_atual || null, variacao_dia: real?.variacao_dia || null, pl: null, dy: real?.dy || null, roe: null, currency };
-    try {
-      const mercado = isBR ? "brasileira B3" : "australiana ASX";
-      const txt = await askClaude(`Para o ativo ${t} na bolsa ${mercado}, retorne APENAS JSON com nome e indicadores fundamentais (não preço): {"nome":"nome curto","categoria":"Banco|Infraestrutura|Fundo Imobiliário|Energia|Tecnologia|Varejo|Saúde|Agronegócio|Mineração|Petróleo|ETF|Exterior|Outros","pl":number_or_null,"dy":number_or_null,"roe":number_or_null}`,300);
-      const parsed = JSON.parse(txt);
-      obj = { ...obj, nome: parsed.nome || obj.nome, categoria: wCat || parsed.categoria || "Outros", pl: parsed.pl || null, dy: real?.dy || parsed.dy || null, roe: parsed.roe || null };
-    } catch {}
-    setWatchlist(p => [...p, obj]);
-    setWInput(""); setWLoading(false);
+    const real=await fetchPrecoReal(t,profileId);
+    let obj={ticker:t,nome:t,categoria:wCat||"Outros",preco:real?.preco_atual||null,variacao_dia:real?.variacao_dia||null,pl:null,dy:real?.dy||null,roe:null,currency};
+    try{
+      const mercado=isBR?"brasileira B3":"australiana ASX";
+      const txt=await askClaude(`Para o ativo ${t} na bolsa ${mercado}, retorne APENAS JSON: {"nome":"nome curto","categoria":"Banco|Infraestrutura|Fundo Imobiliário|Energia|Tecnologia|Varejo|Saúde|Agronegócio|Mineração|Petróleo|ETF|Exterior|Outros","pl":number_or_null,"dy":number_or_null,"roe":number_or_null}`,300);
+      const parsed=JSON.parse(txt);
+      obj={...obj,nome:parsed.nome||obj.nome,categoria:wCat||parsed.categoria||"Outros",pl:parsed.pl||null,dy:real?.dy||parsed.dy||null,roe:parsed.roe||null};
+    }catch{}
+    setWatchlist(p=>[...p,obj]);
+    setWInput("");setWLoading(false);
   }
 
   function addToComp(ticker){if(!compList.includes(ticker))setCompList(p=>[...p,ticker]);}
 
-  // ── fetchNews com Google News RSS real ──────────────────────────────────────
+  // ── fetchNews com Google News RSS real ─────────────────────────────────────
   async function fetchNews(){
     if(!watchlist.length){setErro("Adicione ativos à watchlist.");return;}
     setNewsLoading(true);setErro("");
-    const tickers=[...new Set([
-      ...watchlist.map(w=>w.ticker),
-      ...investimentos.map(i=>i.ticker).filter(Boolean)
-    ])];
+    const tickers=[...new Set([...watchlist.map(w=>w.ticker),...investimentos.map(i=>i.ticker).filter(Boolean)])];
     try{
       const map={};
       for(const ticker of tickers){
@@ -1029,36 +1050,184 @@ function AnaliseTab({investimentos,profileId,market,currency}){
         if(!d.items||d.items.length===0){map[ticker]=[];continue;}
         const lista=d.items.map((it,i)=>`${i+1}. "${it.title}" (${new Date(it.pubDate).toLocaleDateString("pt-BR")})`).join("\n");
         try{
-          const txt=await askClaude(
-            `Para cada notícia abaixo sobre ${ticker}, classifique tipo e impacto e escreva um resumo curto em português (1-2 frases) sobre o que isso significa para o investidor. Notícias:\n${lista}\nRetorne APENAS JSON array na mesma ordem: [{"tipo":"resultado|dividendo|fato_relevante|noticia|macro","impacto":"positivo|negativo|neutro","resumo":"..."}]`,
-            600
-          );
+          const txt=await askClaude(`Para cada notícia abaixo sobre ${ticker}, classifique tipo e impacto e escreva um resumo curto em português (1-2 frases). Notícias:\n${lista}\nRetorne APENAS JSON array: [{"tipo":"resultado|dividendo|fato_relevante|noticia|macro","impacto":"positivo|negativo|neutro","resumo":"..."}]`,600);
           const s=txt.indexOf("["),e=txt.lastIndexOf("]");
           const class_=JSON.parse(txt.slice(s,e+1));
-          map[ticker]=d.items.map((it,i)=>({
-            titulo:it.title,
-            data:it.pubDate?new Date(it.pubDate).toISOString().slice(0,10):"",
-            link:it.link,
-            fonte:it.source,
-            tipo:class_[i]?.tipo||"noticia",
-            impacto:class_[i]?.impacto||"neutro",
-            resumo:class_[i]?.resumo||""
-          }));
+          map[ticker]=d.items.map((it,i)=>({titulo:it.title,data:it.pubDate?new Date(it.pubDate).toISOString().slice(0,10):"",link:it.link,fonte:it.source,tipo:class_[i]?.tipo||"noticia",impacto:class_[i]?.impacto||"neutro",resumo:class_[i]?.resumo||""}));
         }catch{
-          map[ticker]=d.items.map(it=>({
-            titulo:it.title,
-            data:it.pubDate?new Date(it.pubDate).toISOString().slice(0,10):"",
-            link:it.link,
-            fonte:it.source,
-            tipo:"noticia",
-            impacto:"neutro",
-            resumo:""
-          }));
+          map[ticker]=d.items.map(it=>({titulo:it.title,data:it.pubDate?new Date(it.pubDate).toISOString().slice(0,10):"",link:it.link,fonte:it.source,tipo:"noticia",impacto:"neutro",resumo:""}));
         }
       }
       setNews(map);
     }catch(e){setErro("Erro ao buscar notícias: "+e.message);}
     setNewsLoading(false);
+  }
+
+  // ── NOVO: Análise de impacto das notícias no preço ─────────────────────────
+  async function analisarImpactoNoticias(ticker, noticias){
+    if(!noticias||noticias.length===0) return;
+    setNewsImpactLoading(true);
+    try{
+      const precoReal=await fetchPrecoReal(ticker,profileId);
+      const preco=precoReal?.preco_atual||"desconhecido";
+      const resumoNoticias=noticias.map((n,i)=>`${i+1}. [${n.tipo}] ${n.titulo} — ${n.data}`).join("\n");
+      const txt=await askClaude(
+        `Analista sênior de mercado. Ativo: ${ticker}. Preço atual: ${currency} ${preco}.\n\nNotícias recentes:\n${resumoNoticias}\n\nRetorne APENAS JSON: {"tendencia":"alta|baixa|lateral","confianca":"alta|media|baixa","preco_alvo_curto":number_or_null,"preco_alvo_medio":number_or_null,"resumo_impacto":"3 frases sobre impacto consolidado das notícias no preço","acao_recomendada":"Comprar|Manter|Vender|Aguardar","principais_riscos":["r1","r2"],"principais_catalisadores":["c1","c2"]}`,
+        800
+      );
+      const s=txt.indexOf("{"),e=txt.lastIndexOf("}");
+      const impact=JSON.parse(txt.slice(s,e+1));
+      setNewsImpact(prev=>({...prev,[ticker]:impact}));
+    }catch(err){console.error(err);}
+    setNewsImpactLoading(false);
+  }
+
+  // ── NOVO: Chat com analista IA ─────────────────────────────────────────────
+  async function enviarChat(){
+    if(!chatInput.trim()||chatLoading) return;
+    const userMsg={role:"user",content:chatInput.trim()};
+    const novaMsgs=[...chatMsgs,userMsg];
+    setChatMsgs(novaMsgs);setChatInput("");setChatLoading(true);
+    try{
+      const mercado=isBR?"brasileira B3":"australiana ASX";
+      const carteira=investimentos.length>0?`\nCarteira do usuário: ${investimentos.map(i=>`${i.ticker||i.tipo}:${currency}${i.valorAtual||i.valorInvestido||0}`).join(", ")}`:"";
+      const watchStr=watchlist.length>0?`\nWatchlist: ${watchlist.map(w=>`${w.ticker}@${currency}${w.preco||"?"}`).join(", ")}`:"";
+      const systemPrompt=`Você é um analista financeiro especialista na bolsa ${mercado}. Responda em português de forma clara, objetiva e com dados quando possível.${carteira}${watchStr}`;
+      const msgs=novaMsgs.slice(-10).map(m=>({role:m.role,content:m.content}));
+      const res=await fetch(WORKER,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:1500,system:systemPrompt,messages:msgs})});
+      const d=await res.json();
+      const resposta=d.content?.filter(b=>b.type==="text").map(b=>b.text).join("")||"Erro ao obter resposta.";
+      setChatMsgs(prev=>[...prev,{role:"assistant",content:resposta}]);
+    }catch{setChatMsgs(prev=>[...prev,{role:"assistant",content:"Erro ao conectar com o analista. Tente novamente."}]);}
+    setChatLoading(false);
+  }
+
+  // ── NOVO: Sugestões com Extended Thinking (Adaptive) ──────────────────────
+  async function buscarSugestoesThinking(){
+    setSugestLoading(true);setErro("");setThinkingLog("");setShowThinking(false);
+    const mercado=isBR?"brasileira B3":"australiana ASX";
+    try{
+      // Busca preços reais da watchlist para contexto
+      const precoCtx=watchlist.length>0?`\nAtivos em acompanhamento: ${watchlist.map(w=>`${w.ticker}@${currency}${w.preco||"?"} (P/L:${w.pl||"?"}, DY:${w.dy||"?"}%)`).join(", ")}`:"";
+      const carteiraCtx=investimentos.length>0?`\nCarteira atual: ${investimentos.map(i=>`${i.ticker||i.tipo}:${currency}${i.valorAtual||i.valorInvestido||0}`).join(", ")}`:"";
+
+      const res=await fetch(WORKER,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+        model:"claude-sonnet-4-6",
+        max_tokens:8000,
+        thinking:{type:"adaptive"},
+        messages:[{role:"user",content:`Você é um analista fundamentalista sênior. Analise profundamente o mercado ${mercado} e identifique as 5 melhores oportunidades de compra considerando: P/L justo, DY atrativo, ROE elevado, crescimento de lucros, saúde financeira e momento de mercado.${precoCtx}${carteiraCtx}\n\nRetorne APENAS JSON sem markdown: {"mercado":"${isBR?"Brasil":"Austrália"}","metodologia":"breve descrição da análise","acoes":[{"ticker":"str","nome":"str","setor":"str","preco":number,"pl":number,"pvp":number,"dy":number,"roe":number,"cagr_lucro":number,"score":0-10,"recomendacao":"Compra Forte|Compra|Neutro","justificativa":"3-4 frases detalhadas sobre tese de investimento","riscos":"2 riscos principais","potencial_upside":"XX%","horizonte":"Curto|Médio|Longo prazo"}]}`}]
+      })});
+      const d=await res.json();
+
+      // Extrai thinking se disponível
+      const thinkingBlock=d.content?.find(b=>b.type==="thinking");
+      if(thinkingBlock?.thinking){setThinkingLog(thinkingBlock.thinking);}
+
+      const textBlock=d.content?.find(b=>b.type==="text");
+      if(!textBlock) throw new Error("Sem resposta");
+      const txt=textBlock.text.replace(/```json|```/g,"").trim();
+      const s=txt.indexOf("{"),e=txt.lastIndexOf("}");
+      if(s===-1) throw new Error("JSON inválido");
+      const result=JSON.parse(txt.slice(s,e+1));
+
+      // Enriquece com preços reais
+      if(result.acoes){
+        for(const acao of result.acoes){
+          const real=await fetchPrecoReal(acao.ticker,profileId);
+          if(real?.preco_atual){acao.preco=real.preco_atual;acao.variacao_dia=real.variacao_dia||null;}
+        }
+      }
+      setSugestoes(result);
+    }catch(e){setErro("Erro ao analisar mercado: "+e.message);}
+    setSugestLoading(false);
+  }
+
+  // Sugestões sem thinking (modo rápido)
+  async function buscarSugestoes(){
+    if(thinkingMode){buscarSugestoesThinking();return;}
+    setSugestLoading(true);setErro("");
+    const mercado=isBR?"brasileira B3":"australiana ASX";
+    try{
+      const txt=await askClaude(`Analista fundamentalista. Melhores 5 oportunidades de compra na bolsa ${mercado} hoje. Critérios: P/L baixo, DY alto, ROE alto, crescimento, saúde financeira. JSON: {"mercado":"${isBR?"Brasil":"Austrália"}","acoes":[{"ticker":"str","nome":"str","setor":"str","preco":number,"pl":number,"pvp":number,"dy":number,"roe":number,"cagr_lucro":number,"score":0-10,"recomendacao":"Compra Forte|Compra|Neutro","justificativa":"3-4 frases","riscos":"2 riscos principais","potencial_upside":"XX%","horizonte":"Curto|Médio|Longo prazo"}]}`,1500);
+      const s=txt.indexOf("{"),e=txt.lastIndexOf("}");
+      if(s===-1) throw new Error();
+      const result=JSON.parse(txt.slice(s,e+1));
+      // Enriquece com preços reais
+      if(result.acoes){
+        for(const acao of result.acoes){
+          const real=await fetchPrecoReal(acao.ticker,profileId);
+          if(real?.preco_atual){acao.preco=real.preco_atual;acao.variacao_dia=real.variacao_dia||null;}
+        }
+      }
+      setSugestoes(result);
+    }catch{setErro("Erro ao buscar sugestões.");}
+    setSugestLoading(false);
+  }
+
+  // ── NOVO: Relatório detalhado por ação ─────────────────────────────────────
+  async function gerarRelatorio(ticker){
+    setRelatorioTicker(ticker);setRelatorioLoading(true);setRelatorio(null);
+    const mercado=isBR?"brasileira B3":"australiana ASX";
+    try{
+      const real=await fetchPrecoReal(ticker,profileId);
+      const preco=real?.preco_atual?`${currency} ${real.preco_atual}`:"preço não disponível";
+      const variacao=real?.variacao_dia!=null?`(${real.variacao_dia>=0?"+":""}${real.variacao_dia.toFixed(2)}% hoje)`:"";
+
+      // Busca notícias reais
+      let noticiasCtx="";
+      try{
+        const rn=await fetch(`${WORKER}/news?ticker=${encodeURIComponent(ticker)}&market=${profileId}`);
+        const dn=await rn.json();
+        if(dn.items?.length>0) noticiasCtx=`\nNotícias recentes: ${dn.items.slice(0,3).map(n=>n.title).join(" | ")}`;
+      }catch{}
+
+      const res=await fetch(WORKER,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+        model:"claude-sonnet-4-6",
+        max_tokens:6000,
+        thinking:{type:"adaptive"},
+        messages:[{role:"user",content:`Gere um relatório completo de análise fundamentalista para ${ticker} na bolsa ${mercado}. Preço atual: ${preco} ${variacao}.${noticiasCtx}\n\nRetorne APENAS JSON: {"ticker":"${ticker}","nome":"nome completo","setor":"setor","subsetor":"subsetor","preco_atual":"${preco}","variacao_dia":"${variacao}","resumo_empresa":"3 frases sobre o negócio","tese_investimento":"4-5 frases detalhadas","indicadores":{"pl":number_or_null,"pvp":number_or_null,"dy":number_or_null,"roe":number_or_null,"roic":number_or_null,"margem_liquida":number_or_null,"divida_ebitda":number_or_null,"cagr_lucro_5a":number_or_null},"pontos_fortes":["p1","p2","p3"],"pontos_fracos":["f1","f2","f3"],"riscos":["r1","r2","r3"],"catalisadores":["c1","c2","c3"],"valuation":"justo|descontado|sobrevalorizado","score_geral":0-10,"recomendacao":"Compra Forte|Compra|Neutro|Vender","preco_alvo_12m":number_or_null,"upside_potencial":"XX%","horizonte_recomendado":"Curto|Médio|Longo prazo","conclusao":"3 frases de conclusão"}`}]
+      })});
+      const d=await res.json();
+      const textBlock=d.content?.find(b=>b.type==="text");
+      if(!textBlock) throw new Error("Sem resposta");
+      const txt=textBlock.text.replace(/```json|```/g,"").trim();
+      const s=txt.indexOf("{"),e=txt.lastIndexOf("}");
+      if(s===-1) throw new Error();
+      setRelatorio(JSON.parse(txt.slice(s,e+1)));
+    }catch(e){setErro("Erro ao gerar relatório: "+e.message);}
+    setRelatorioLoading(false);
+  }
+
+  // ── NOVO: Análise de carteira pessoal vs sugestões ────────────────────────
+  async function analisarCarteira(){
+    if(!investimentos.length){setErro("Adicione investimentos primeiro.");return;}
+    setCarteiraLoading(true);setErro("");
+    const mercado=isBR?"brasileira B3":"australiana ASX";
+    try{
+      // Busca preços atuais de todos os investimentos
+      const invComPrecos=await Promise.all(investimentos.map(async inv=>{
+        if(!inv.ticker) return inv;
+        const real=await fetchPrecoReal(inv.ticker,profileId);
+        return{...inv,preco_atual:real?.preco_atual||inv.preco_atual||null,variacao_dia:real?.variacao_dia||null};
+      }));
+
+      const carteiraDetalhada=invComPrecos.map(i=>`${i.ticker||i.tipo}: investido ${currency}${i.valorInvestido||i.valor||0}, atual ${currency}${i.valorAtual||i.valorInvestido||0}, preço ${i.preco_atual||"?"}`).join("\n");
+
+      const res=await fetch(WORKER,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+        model:"claude-sonnet-4-6",
+        max_tokens:6000,
+        thinking:{type:"adaptive"},
+        messages:[{role:"user",content:`Você é um gestor de portfólio sênior. Analise profundamente a carteira de investimentos abaixo na bolsa ${mercado} e forneça recomendações precisas.\n\nCarteira atual:\n${carteiraDetalhada}\n\nRetorne APENAS JSON: {"resumo_carteira":"3 frases sobre estado atual","score_carteira":0-10,"diversificacao":"boa|regular|fraca","concentracao_risco":"baixo|medio|alto","retorno_estimado_12m":"XX%","recomendacoes":[{"ativo":"ticker ou tipo","acao":"Manter|Aumentar|Reduzir|Vender|Diversificar","prioridade":"alta|media|baixa","justificativa":"2 frases","percentual_sugerido":"XX% da carteira"}],"ativos_adicionar":[{"ticker":"str","justificativa":"por que faz sentido com sua carteira atual","complementaridade":"como complementa o portfólio"}],"ativos_remover":[{"ticker":"str","motivo":"str"}],"alocacao_ideal":[{"classe":"Ações|FII|ETF|Renda Fixa|Cripto|Outros","pct_atual":0,"pct_ideal":0}],"conclusao":"3 frases finais com plano de ação"}`}]
+      })});
+      const d=await res.json();
+      const textBlock=d.content?.find(b=>b.type==="text");
+      if(!textBlock) throw new Error();
+      const txt=textBlock.text.replace(/```json|```/g,"").trim();
+      const s=txt.indexOf("{"),e=txt.lastIndexOf("}");
+      if(s===-1) throw new Error();
+      setCarteiraAnalise(JSON.parse(txt.slice(s,e+1)));
+    }catch(e){setErro("Erro ao analisar carteira: "+e.message);}
+    setCarteiraLoading(false);
   }
 
   async function compararAtivos(){
@@ -1075,7 +1244,7 @@ function AnaliseTab({investimentos,profileId,market,currency}){
       const txt=await askClaude(`Analista financeiro. Bolsa ${mercado} em ${moeda}. Retorne APENAS JSON array com indicadores fundamentais (NÃO preço) para [${compList.join(",")}]: [{"ticker":"","nome":"","pl":number_or_null,"pvp":number_or_null,"dy":number_or_null,"roe":number_or_null,"divida_ebitda":number_or_null,"cagr_lucro":number_or_null,"margem_liquida":number_or_null}]`,1200);
       const s=txt.indexOf("["),e=txt.lastIndexOf("]");if(s===-1)throw new Error();
       const arr=JSON.parse(txt.slice(s,e+1));
-      const final=arr.map(a=>({...a,preco:precos[a.ticker]?.preco_atual||precos[a.ticker.replace(".AX","")]?.preco_atual||a.preco||null,variacao_dia:precos[a.ticker]?.variacao_dia||null}));
+      const final=arr.map(a=>({...a,preco:precos[a.ticker]?.preco_atual||precos[a.ticker?.replace(".AX","")]?.preco_atual||a.preco||null,variacao_dia:precos[a.ticker]?.variacao_dia||null}));
       setCompData(final);
     }catch{setErro("Erro ao comparar.");}
     setCompLoading(false);
@@ -1093,15 +1262,6 @@ function AnaliseTab({investimentos,profileId,market,currency}){
     setRiscoLoading(true);setErro("");
     try{const txt=await askClaude(`Analista de risco. Carteira: ${investimentos.map(i=>`${i.tipo}:${i.valorInvestido||i.valor||0}`).join(",")}. JSON: {"perfil":"Conservador|Moderado|Arrojado","nota":0,"descricao":"2 frases","riscos":["r1","r2","r3"]}`,600);const s=txt.indexOf("{"),e=txt.lastIndexOf("}");if(s===-1)throw new Error();setNotaRisco(JSON.parse(txt.slice(s,e+1)));}
     catch{setErro("Erro ao avaliar risco.");}setRiscoLoading(false);
-  }
-
-  async function buscarSugestoes(){
-    setSugestLoading(true);setErro("");
-    const mercado=isBR?"brasileira B3":"australiana ASX";
-    try{
-      const txt=await askClaude(`Analista fundamentalista. Melhores 5 oportunidades de compra na bolsa ${mercado} hoje. Critérios: P/L baixo, DY alto, ROE alto, crescimento, saúde financeira. JSON: {"mercado":"${isBR?"Brasil":"Austrália"}","acoes":[{"ticker":"str","nome":"str","setor":"str","preco":number,"pl":number,"dy":number,"roe":number,"score":0-10,"recomendacao":"Compra Forte|Compra|Neutro","justificativa":"2-3 frases","potencial_upside":"XX%"}]}`,1200);
-      const s=txt.indexOf("{"),e=txt.lastIndexOf("}");if(s===-1)throw new Error();setSugestoes(JSON.parse(txt.slice(s,e+1)));
-    }catch{setErro("Erro ao buscar sugestões.");}setSugestLoading(false);
   }
 
   function calcRent(){
@@ -1126,41 +1286,297 @@ function AnaliseTab({investimentos,profileId,market,currency}){
   function isBest(key,val,arr){if(val==null)return false;const vals=arr.map(a=>a[key]).filter(v=>v!=null);if(vals.length<2)return false;const ind=IND_COMP.find(i=>i.key===key);return ind?.higher?val===Math.max(...vals):val===Math.min(...vals);}
   const tipoIcons={resultado:"📊",dividendo:"💰",fato_relevante:"📢",noticia:"📰"};
   const tipoLine={resultado:D.blue,dividendo:D.green,fato_relevante:D.gold,noticia:D.text3};
-
   const screenerSymbol=screenerSearch.trim().toUpperCase()||null;
+
+  const recScore=carteirAnalise?.score_carteira||0;
+  const recCor=recScore>=7?D.green:recScore>=5?D.gold:D.red;
 
   return <div style={{display:"flex",flexDirection:"column",gap:"1.25rem"}}>
     {chartTicker&&<ChartModal ticker={chartTicker} onClose={()=>setChartTicker(null)}/>}
     {erro&&<div style={{background:D.red+"22",border:`1px solid ${D.red}44`,borderRadius:10,padding:"10px 14px",fontSize:12,color:D.red,display:"flex",justifyContent:"space-between"}}>{erro}<button onClick={()=>setErro("")} style={{border:"none",background:"none",cursor:"pointer",color:D.red}}>✕</button></div>}
 
-    {/* Sugestões */}
-    <Card style={{border:`1px solid ${D.gold}33`}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
-        <p style={{fontSize:14,fontWeight:700,color:D.text}}>🔍 Melhores ações para comprar agora</p>
-        <Btn sm color={D.gold} onClick={buscarSugestoes} disabled={sugestLoading}>{sugestLoading?"Analisando...":"Analisar mercado"}</Btn>
+    {/* ── NOVO: Chat com Analista IA ───────────────────────────────────────── */}
+    <Card style={{border:`1px solid ${D.blue}33`}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+        <div>
+          <p style={{fontSize:14,fontWeight:700,color:D.text}}>🤖 Analista IA</p>
+          <p style={{fontSize:11,color:D.text3}}>Pergunte sobre ações, estratégias e mercado</p>
+        </div>
+        <Badge color={D.blue}>claude-sonnet-4-6</Badge>
       </div>
-      {!sugestoes&&!sugestLoading&&<p style={{fontSize:12,color:D.text3}}>Análise fundamentalista do mercado {isBR?"brasileiro":"australiano"}.</p>}
-      {sugestoes&&<div style={{display:"flex",flexDirection:"column",gap:10}}>
-        {sugestoes.acoes?.map((a,i)=><div key={i} style={{background:D.bg3,borderRadius:10,padding:"12px 14px",border:`1px solid ${a.recomendacao==="Compra Forte"?D.green+"44":D.blue+"33"}`}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
-            <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-              <span onClick={()=>setChartTicker(a.ticker)} style={{fontSize:15,fontWeight:700,color:D.green,cursor:"pointer"}}>{a.ticker}</span>
-              <span style={{fontSize:12,color:D.text2}}>{a.nome}</span>
-              <Badge color={D.purple}>{a.setor}</Badge>
-              <Badge color={a.recomendacao==="Compra Forte"?D.green:D.blue}>{a.recomendacao}</Badge>
-            </div>
-            <div style={{textAlign:"right",flexShrink:0}}>
-              <p style={{margin:0,fontSize:13,fontWeight:700,color:D.text}}>{fmtM(a.preco,currency)}</p>
-              <p style={{margin:0,fontSize:11,color:D.green}}>↑ {a.potencial_upside}</p>
-              <button onClick={()=>addToComp(a.ticker)} title="Adicionar ao comparador" style={{marginTop:4,border:`1px solid ${D.blue}`,background:"transparent",color:D.blue,borderRadius:6,padding:"2px 8px",fontSize:10,cursor:"pointer"}}>+ Comparar</button>
-            </div>
+      <div ref={chatRef} style={{height:220,overflowY:"auto",display:"flex",flexDirection:"column",gap:8,marginBottom:10,padding:"8px",background:D.bg3,borderRadius:10}}>
+        {chatMsgs.map((m,i)=><div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start"}}>
+          <div style={{maxWidth:"85%",padding:"8px 12px",borderRadius:m.role==="user"?"12px 12px 4px 12px":"12px 12px 12px 4px",background:m.role==="user"?D.blue:D.card2,fontSize:12,color:D.text,lineHeight:1.6,whiteSpace:"pre-wrap"}}>
+            {m.role==="assistant"&&<span style={{fontSize:10,color:D.blue,display:"block",marginBottom:4}}>🤖 Analista IA</span>}
+            {m.content}
           </div>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
-            <Badge color={D.blue}>P/L {a.pl}</Badge><Badge color={D.gold}>DY {a.dy}%</Badge><Badge color={D.purple}>ROE {a.roe}%</Badge>
-            <div style={{display:"flex",alignItems:"center",gap:3}}>{Array.from({length:10},(_,j)=><div key={j} style={{width:7,height:7,borderRadius:1,background:j<a.score?D.gold:D.bg2}}/>)}<span style={{fontSize:10,color:D.gold,fontWeight:700,marginLeft:3}}>{a.score}/10</span></div>
-          </div>
-          <p style={{margin:0,fontSize:12,color:D.text2,lineHeight:1.5}}>{a.justificativa}</p>
         </div>)}
+        {chatLoading&&<div style={{display:"flex",justifyContent:"flex-start"}}>
+          <div style={{padding:"8px 12px",borderRadius:"12px 12px 12px 4px",background:D.card2,fontSize:12,color:D.text3}}>⏳ Analisando...</div>
+        </div>}
+      </div>
+      <div style={{display:"flex",gap:8}}>
+        <input value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&enviarChat()} placeholder={`Pergunte sobre ${isBR?"PETR4, VALE3, dividendos...":"BHP, CBA, dividends..."}`} style={{flex:1,fontSize:12}}/>
+        <Btn onClick={enviarChat} disabled={chatLoading||!chatInput.trim()} color={D.blue} sm>Enviar</Btn>
+        <Btn onClick={()=>setChatMsgs([{role:"assistant",content:`Olá! Sou seu analista financeiro IA. Como posso ajudar?`}])} color={D.text3} outline sm>Limpar</Btn>
+      </div>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+        {[`Quais ${isBR?"ações":"stocks"} pagam mais dividendos?`,"Compare FIIs de logística","Qual o melhor setor agora?","Explique P/L e P/VP"].map((q,i)=><button key={i} onClick={()=>{setChatInput(q);}} style={{fontSize:10,padding:"3px 8px",borderRadius:12,border:`1px solid ${D.border2}`,background:"transparent",color:D.text3,cursor:"pointer"}}>{q}</button>)}
+      </div>
+    </Card>
+
+    {/* ── Sugestões com Extended Thinking ─────────────────────────────────── */}
+    <Card style={{border:`1px solid ${D.gold}33`}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,flexWrap:"wrap",gap:8}}>
+        <div>
+          <p style={{fontSize:14,fontWeight:700,color:D.text}}>🔍 Melhores ações para comprar agora</p>
+          <p style={{fontSize:11,color:D.text3}}>Análise fundamentalista com preços reais</p>
+        </div>
+        <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+          <button onClick={()=>setThinkingMode(t=>!t)} style={{fontSize:11,padding:"4px 10px",borderRadius:16,border:`1px solid ${thinkingMode?D.purple:D.border2}`,background:thinkingMode?D.purple+"22":"transparent",color:thinkingMode?D.purple:D.text3,cursor:"pointer"}}>
+            {thinkingMode?"🧠 Thinking ON":"🧠 Thinking OFF"}
+          </button>
+          <Btn sm color={D.gold} onClick={buscarSugestoes} disabled={sugestLoading}>{sugestLoading?"Analisando...":"Analisar mercado"}</Btn>
+        </div>
+      </div>
+
+      {thinkingMode&&<div style={{background:D.purple+"11",border:`1px solid ${D.purple}33`,borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:11,color:D.purple}}>
+        🧠 <strong>Extended Thinking ativo</strong> — Claude vai raciocinar profundamente antes de responder. Mais lento, mas mais preciso.
+      </div>}
+
+      {!sugestoes&&!sugestLoading&&<p style={{fontSize:12,color:D.text3}}>Análise fundamentalista do mercado {isBR?"brasileiro":"australiano"} com preços em tempo real.</p>}
+
+      {sugestoes&&<>
+        {sugestoes.metodologia&&<p style={{fontSize:11,color:D.text3,marginBottom:10,padding:"6px 10px",background:D.bg3,borderRadius:6}}>📋 Metodologia: {sugestoes.metodologia}</p>}
+
+        {thinkingLog&&<div style={{marginBottom:10}}>
+          <button onClick={()=>setShowThinking(t=>!t)} style={{fontSize:11,padding:"4px 10px",borderRadius:16,border:`1px solid ${D.purple}44`,background:"transparent",color:D.purple,cursor:"pointer"}}>
+            {showThinking?"▲ Ocultar":"▼ Ver"} raciocínio do Claude ({Math.round(thinkingLog.length/4)} tokens)
+          </button>
+          {showThinking&&<div style={{marginTop:8,padding:"10px 14px",background:D.purple+"11",borderRadius:8,fontSize:11,color:D.text3,lineHeight:1.7,maxHeight:200,overflowY:"auto",whiteSpace:"pre-wrap"}}>{thinkingLog}</div>}
+        </div>}
+
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {sugestoes.acoes?.map((a,i)=><div key={i} style={{background:D.bg3,borderRadius:12,padding:"14px 16px",border:`1px solid ${a.recomendacao==="Compra Forte"?D.green+"55":a.recomendacao==="Compra"?D.blue+"44":D.border}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,flexWrap:"wrap",gap:8}}>
+              <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                <span onClick={()=>setChartTicker(a.ticker)} style={{fontSize:16,fontWeight:800,color:D.green,cursor:"pointer"}}>{a.ticker}</span>
+                <span style={{fontSize:12,color:D.text2}}>{a.nome}</span>
+                <Badge color={D.purple}>{a.setor}</Badge>
+                <Badge color={a.recomendacao==="Compra Forte"?D.green:a.recomendacao==="Compra"?D.blue:D.text3}>{a.recomendacao}</Badge>
+                {a.horizonte&&<Badge color={D.gold}>{a.horizonte}</Badge>}
+              </div>
+              <div style={{textAlign:"right",flexShrink:0}}>
+                <p style={{margin:0,fontSize:16,fontWeight:700,color:D.text}}>{a.preco?`${currency} ${Number(a.preco).toFixed(2)}`:"—"}</p>
+                {a.variacao_dia!=null&&<p style={{margin:0,fontSize:11,fontWeight:600,color:a.variacao_dia>=0?D.green:D.red}}>{a.variacao_dia>=0?"▲":"▼"} {Math.abs(a.variacao_dia).toFixed(2)}% hoje</p>}
+                <p style={{margin:0,fontSize:12,color:D.green,fontWeight:600}}>↑ {a.potencial_upside}</p>
+              </div>
+            </div>
+
+            <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:8}}>
+              {a.pl!=null&&<Badge color={D.blue}>P/L {Number(a.pl).toFixed(1)}x</Badge>}
+              {a.pvp!=null&&<Badge color={D.blue}>P/VP {Number(a.pvp).toFixed(2)}x</Badge>}
+              {a.dy!=null&&<Badge color={D.gold}>DY {Number(a.dy).toFixed(1)}%</Badge>}
+              {a.roe!=null&&<Badge color={D.purple}>ROE {Number(a.roe).toFixed(1)}%</Badge>}
+              {a.cagr_lucro!=null&&<Badge color={D.green}>CAGR {Number(a.cagr_lucro).toFixed(1)}%</Badge>}
+              <div style={{display:"flex",alignItems:"center",gap:3,padding:"2px 8px",borderRadius:20,background:D.gold+"22",border:`1px solid ${D.gold}44`}}>
+                {Array.from({length:10},(_,j)=><div key={j} style={{width:6,height:6,borderRadius:1,background:j<a.score?D.gold:D.bg2}}/>)}
+                <span style={{fontSize:10,color:D.gold,fontWeight:700,marginLeft:2}}>{a.score}/10</span>
+              </div>
+            </div>
+
+            <p style={{margin:"0 0 6px",fontSize:12,color:D.text2,lineHeight:1.6}}>{a.justificativa}</p>
+            {a.riscos&&<p style={{margin:0,fontSize:11,color:D.red,opacity:0.8}}>⚠️ {a.riscos}</p>}
+
+            <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
+              <button onClick={()=>addToComp(a.ticker)} style={{border:`1px solid ${D.blue}`,background:"transparent",color:D.blue,borderRadius:6,padding:"3px 10px",fontSize:10,cursor:"pointer"}}>+ Comparar</button>
+              <button onClick={()=>setWatchlist(w=>w.find(x=>x.ticker===a.ticker)?w:[...w,{ticker:a.ticker,nome:a.nome,categoria:a.setor,preco:a.preco,variacao_dia:a.variacao_dia,dy:a.dy,pl:a.pl,currency}])} style={{border:`1px solid ${D.green}`,background:"transparent",color:D.green,borderRadius:6,padding:"3px 10px",fontSize:10,cursor:"pointer"}}>+ Watchlist</button>
+              <button onClick={()=>gerarRelatorio(a.ticker)} style={{border:`1px solid ${D.gold}`,background:"transparent",color:D.gold,borderRadius:6,padding:"3px 10px",fontSize:10,cursor:"pointer"}}>📄 Relatório</button>
+            </div>
+          </div>)}
+        </div>
+      </>}
+    </Card>
+
+    {/* ── NOVO: Relatório Detalhado ─────────────────────────────────────────── */}
+    {(relatorio||relatorioLoading)&&<Card style={{border:`1px solid ${D.gold}44`}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <div>
+          <p style={{fontSize:14,fontWeight:700,color:D.text}}>📄 Relatório: {relatorioTicker}</p>
+          <p style={{fontSize:11,color:D.text3}}>Análise fundamentalista completa com Extended Thinking</p>
+        </div>
+        {relatorio&&<button onClick={()=>setRelatorio(null)} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:18}}>✕</button>}
+      </div>
+      {relatorioLoading&&<div style={{textAlign:"center",padding:"30px 0"}}>
+        <p style={{color:D.purple,fontSize:13}}>🧠 Claude está analisando profundamente {relatorioTicker}...</p>
+        <p style={{color:D.text3,fontSize:11,marginTop:4}}>Extended Thinking ativo — isso pode levar alguns segundos</p>
+      </div>}
+      {relatorio&&<div style={{display:"flex",flexDirection:"column",gap:12}}>
+        {/* Header */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
+          <div>
+            <p style={{margin:0,fontSize:18,fontWeight:800,color:D.text}}>{relatorio.ticker} <span style={{fontSize:13,color:D.text3,fontWeight:400}}>— {relatorio.nome}</span></p>
+            <p style={{margin:"2px 0",fontSize:12,color:D.text3}}>{relatorio.setor} › {relatorio.subsetor}</p>
+            <p style={{margin:0,fontSize:11,color:D.text3,lineHeight:1.6}}>{relatorio.resumo_empresa}</p>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <p style={{margin:0,fontSize:22,fontWeight:800,color:D.text}}>{relatorio.preco_atual}</p>
+            <p style={{margin:0,fontSize:12,color:D.text3}}>{relatorio.variacao_dia}</p>
+            <Badge color={relatorio.recomendacao==="Compra Forte"?D.green:relatorio.recomendacao==="Compra"?D.blue:relatorio.recomendacao==="Vender"?D.red:D.text3}>{relatorio.recomendacao}</Badge>
+          </div>
+        </div>
+
+        {/* Indicadores */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(90px,1fr))",gap:6}}>
+          {[["P/L",relatorio.indicadores?.pl,"x"],["P/VP",relatorio.indicadores?.pvp,"x"],["DY",relatorio.indicadores?.dy,"%"],["ROE",relatorio.indicadores?.roe,"%"],["ROIC",relatorio.indicadores?.roic,"%"],["Margem",relatorio.indicadores?.margem_liquida,"%"],["Dív/EBITDA",relatorio.indicadores?.divida_ebitda,"x"],["CAGR 5a",relatorio.indicadores?.cagr_lucro_5a,"%"]].map(([l,v,u])=>v!=null&&<div key={l} style={{background:D.bg3,borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
+            <p style={{margin:0,fontSize:9,color:D.text3,textTransform:"uppercase"}}>{l}</p>
+            <p style={{margin:"2px 0 0",fontSize:14,fontWeight:700,color:D.blue}}>{Number(v).toFixed(2)}{u}</p>
+          </div>)}
+        </div>
+
+        {/* Score + Alvo */}
+        <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+          <div style={{flex:1,minWidth:120,background:D.bg3,borderRadius:10,padding:"10px 14px"}}>
+            <p style={{margin:0,fontSize:11,color:D.text3}}>Score Geral</p>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginTop:4}}>
+              {Array.from({length:10},(_,j)=><div key={j} style={{width:10,height:10,borderRadius:2,background:j<relatorio.score_geral?D.gold:D.bg2}}/>)}
+              <span style={{fontSize:16,fontWeight:700,color:D.gold}}>{relatorio.score_geral}/10</span>
+            </div>
+          </div>
+          {relatorio.preco_alvo_12m&&<div style={{flex:1,minWidth:120,background:D.bg3,borderRadius:10,padding:"10px 14px"}}>
+            <p style={{margin:0,fontSize:11,color:D.text3}}>Preço alvo 12m</p>
+            <p style={{margin:"4px 0 0",fontSize:18,fontWeight:700,color:D.green}}>{currency} {Number(relatorio.preco_alvo_12m).toFixed(2)}</p>
+            <p style={{margin:0,fontSize:11,color:D.green}}>↑ {relatorio.upside_potencial} · {relatorio.horizonte_recomendado}</p>
+          </div>}
+          <div style={{flex:1,minWidth:120,background:D.bg3,borderRadius:10,padding:"10px 14px"}}>
+            <p style={{margin:0,fontSize:11,color:D.text3}}>Valuation</p>
+            <p style={{margin:"4px 0 0",fontSize:14,fontWeight:700,color:relatorio.valuation==="descontado"?D.green:relatorio.valuation==="sobrevalorizado"?D.red:D.gold,textTransform:"capitalize"}}>{relatorio.valuation}</p>
+          </div>
+        </div>
+
+        {/* Tese */}
+        <div style={{background:D.bg3,borderRadius:10,padding:"12px 14px"}}>
+          <p style={{margin:"0 0 6px",fontSize:12,fontWeight:700,color:D.text}}>📈 Tese de Investimento</p>
+          <p style={{margin:0,fontSize:12,color:D.text2,lineHeight:1.7}}>{relatorio.tese_investimento}</p>
+        </div>
+
+        {/* Pontos fortes/fracos/riscos/catalisadores */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <div style={{background:D.green+"11",borderRadius:10,padding:"10px 12px",border:`1px solid ${D.green}33`}}>
+            <p style={{margin:"0 0 6px",fontSize:11,fontWeight:700,color:D.green}}>✅ Pontos Fortes</p>
+            {relatorio.pontos_fortes?.map((p,i)=><p key={i} style={{margin:"0 0 3px",fontSize:11,color:D.text2}}>• {p}</p>)}
+          </div>
+          <div style={{background:D.red+"11",borderRadius:10,padding:"10px 12px",border:`1px solid ${D.red}33`}}>
+            <p style={{margin:"0 0 6px",fontSize:11,fontWeight:700,color:D.red}}>❌ Pontos Fracos</p>
+            {relatorio.pontos_fracos?.map((p,i)=><p key={i} style={{margin:"0 0 3px",fontSize:11,color:D.text2}}>• {p}</p>)}
+          </div>
+          <div style={{background:D.gold+"11",borderRadius:10,padding:"10px 12px",border:`1px solid ${D.gold}33`}}>
+            <p style={{margin:"0 0 6px",fontSize:11,fontWeight:700,color:D.gold}}>⚠️ Riscos</p>
+            {relatorio.riscos?.map((p,i)=><p key={i} style={{margin:"0 0 3px",fontSize:11,color:D.text2}}>• {p}</p>)}
+          </div>
+          <div style={{background:D.blue+"11",borderRadius:10,padding:"10px 12px",border:`1px solid ${D.blue}33`}}>
+            <p style={{margin:"0 0 6px",fontSize:11,fontWeight:700,color:D.blue}}>🚀 Catalisadores</p>
+            {relatorio.catalisadores?.map((p,i)=><p key={i} style={{margin:"0 0 3px",fontSize:11,color:D.text2}}>• {p}</p>)}
+          </div>
+        </div>
+
+        {/* Conclusão */}
+        <div style={{background:`linear-gradient(135deg,${D.bg3},${D.card2})`,borderRadius:10,padding:"12px 14px",border:`1px solid ${D.border2}`}}>
+          <p style={{margin:"0 0 6px",fontSize:12,fontWeight:700,color:D.text}}>🎯 Conclusão</p>
+          <p style={{margin:0,fontSize:12,color:D.text2,lineHeight:1.7}}>{relatorio.conclusao}</p>
+        </div>
+      </div>}
+    </Card>}
+
+    {/* ── NOVO: Análise de Carteira Pessoal ────────────────────────────────── */}
+    <Card style={{border:`1px solid ${D.purple}33`}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,flexWrap:"wrap",gap:8}}>
+        <div>
+          <p style={{fontSize:14,fontWeight:700,color:D.text}}>💼 Análise da Minha Carteira</p>
+          <p style={{fontSize:11,color:D.text3}}>IA analisa seu portfólio e sugere melhorias com Extended Thinking</p>
+        </div>
+        <Btn sm color={D.purple} onClick={analisarCarteira} disabled={carteiraLoading}>{carteiraLoading?"Analisando...":"Analisar carteira"}</Btn>
+      </div>
+
+      {carteiraLoading&&<div style={{textAlign:"center",padding:"20px 0"}}>
+        <p style={{color:D.purple,fontSize:13}}>🧠 Analisando seu portfólio com Extended Thinking...</p>
+        <p style={{color:D.text3,fontSize:11,marginTop:4}}>Buscando preços reais e calculando performance</p>
+      </div>}
+
+      {!carteirAnalise&&!carteiraLoading&&<p style={{fontSize:12,color:D.text3}}>Análise profunda da sua carteira com recomendações personalizadas, ativos para adicionar/remover e alocação ideal.</p>}
+
+      {carteirAnalise&&<div style={{display:"flex",flexDirection:"column",gap:10}}>
+        {/* Score carteira */}
+        <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+          <div style={{flex:1,minWidth:150,background:D.bg3,borderRadius:10,padding:"12px 14px"}}>
+            <p style={{margin:"0 0 4px",fontSize:11,color:D.text3}}>Score da Carteira</p>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <p style={{margin:0,fontSize:28,fontWeight:800,color:recCor}}>{carteirAnalise.score_carteira}/10</p>
+              <div><p style={{margin:0,fontSize:11,color:recCor,fontWeight:600}}>Diversificação: {carteirAnalise.diversificacao}</p><p style={{margin:0,fontSize:11,color:D.text3}}>Risco: {carteirAnalise.concentracao_risco}</p></div>
+            </div>
+          </div>
+          <div style={{flex:1,minWidth:150,background:D.bg3,borderRadius:10,padding:"12px 14px"}}>
+            <p style={{margin:"0 0 4px",fontSize:11,color:D.text3}}>Retorno estimado 12m</p>
+            <p style={{margin:0,fontSize:22,fontWeight:700,color:D.green}}>{carteirAnalise.retorno_estimado_12m}</p>
+          </div>
+        </div>
+
+        <p style={{fontSize:12,color:D.text2,lineHeight:1.6,padding:"8px 12px",background:D.bg3,borderRadius:8}}>{carteirAnalise.resumo_carteira}</p>
+
+        {/* Recomendações por ativo */}
+        {carteirAnalise.recomendacoes?.length>0&&<div>
+          <p style={{fontSize:12,fontWeight:700,color:D.text,marginBottom:8}}>Recomendações por ativo</p>
+          {carteirAnalise.recomendacoes.map((r,i)=>{
+            const ac=r.acao;
+            const cor=ac==="Aumentar"?D.green:ac==="Vender"||ac==="Reduzir"?D.red:ac==="Diversificar"?D.gold:D.blue;
+            return <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",padding:"8px 12px",background:D.bg3,borderRadius:8,marginBottom:6,border:`1px solid ${cor}33`}}>
+              <div style={{flex:1}}>
+                <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:3}}><span style={{fontSize:13,fontWeight:700,color:D.text}}>{r.ativo}</span><Badge color={cor}>{r.acao}</Badge><Badge color={r.prioridade==="alta"?D.red:r.prioridade==="media"?D.gold:D.text3}>{r.prioridade}</Badge></div>
+                <p style={{margin:0,fontSize:11,color:D.text3}}>{r.justificativa}</p>
+                {r.percentual_sugerido&&<p style={{margin:"2px 0 0",fontSize:10,color:cor}}>Sugestão: {r.percentual_sugerido}</p>}
+              </div>
+            </div>;
+          })}
+        </div>}
+
+        {/* Ativos para adicionar */}
+        {carteirAnalise.ativos_adicionar?.length>0&&<div>
+          <p style={{fontSize:12,fontWeight:700,color:D.green,marginBottom:6}}>➕ Adicionar à carteira</p>
+          {carteirAnalise.ativos_adicionar.map((a,i)=><div key={i} style={{padding:"8px 12px",background:D.green+"11",borderRadius:8,marginBottom:6,border:`1px solid ${D.green}33`}}>
+            <p style={{margin:"0 0 2px",fontSize:13,fontWeight:700,color:D.green}}>{a.ticker}</p>
+            <p style={{margin:0,fontSize:11,color:D.text3}}>{a.justificativa}</p>
+            <p style={{margin:"2px 0 0",fontSize:10,color:D.text3,fontStyle:"italic"}}>{a.complementaridade}</p>
+          </div>)}
+        </div>}
+
+        {/* Ativos para remover */}
+        {carteirAnalise.ativos_remover?.length>0&&<div>
+          <p style={{fontSize:12,fontWeight:700,color:D.red,marginBottom:6}}>➖ Considerar remover</p>
+          {carteirAnalise.ativos_remover.map((a,i)=><div key={i} style={{padding:"8px 12px",background:D.red+"11",borderRadius:8,marginBottom:6,border:`1px solid ${D.red}33`}}>
+            <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:13,fontWeight:700,color:D.red}}>{a.ticker}</span></div>
+            <p style={{margin:"2px 0 0",fontSize:11,color:D.text3}}>{a.motivo}</p>
+          </div>)}
+        </div>}
+
+        {/* Alocação ideal */}
+        {carteirAnalise.alocacao_ideal?.length>0&&<div>
+          <p style={{fontSize:12,fontWeight:700,color:D.text,marginBottom:8}}>📊 Alocação ideal</p>
+          {carteirAnalise.alocacao_ideal.map((a,i)=><div key={i} style={{marginBottom:8}}>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}>
+              <span style={{color:D.text2}}>{a.classe}</span>
+              <span style={{color:D.text3}}>{a.pct_atual}% → <strong style={{color:D.green}}>{a.pct_ideal}%</strong></span>
+            </div>
+            <div style={{background:D.bg3,borderRadius:4,height:6,overflow:"hidden",display:"flex"}}>
+              <div style={{width:a.pct_atual+"%",background:D.text3,height:6}}/>
+              <div style={{width:Math.max(0,a.pct_ideal-a.pct_atual)+"%",background:D.green+"66",height:6}}/>
+            </div>
+          </div>)}
+        </div>}
+
+        <div style={{background:`linear-gradient(135deg,${D.bg3},${D.card2})`,borderRadius:10,padding:"12px 14px",border:`1px solid ${D.border2}`}}>
+          <p style={{margin:"0 0 4px",fontSize:12,fontWeight:700,color:D.text}}>🎯 Plano de Ação</p>
+          <p style={{margin:0,fontSize:12,color:D.text2,lineHeight:1.7}}>{carteirAnalise.conclusao}</p>
+        </div>
       </div>}
     </Card>
 
@@ -1186,7 +1602,10 @@ function AnaliseTab({investimentos,profileId,market,currency}){
             {w.pl!=null&&<Badge color={D.blue}>P/L {Number(w.pl).toFixed(1)}</Badge>}
             {w.dy!=null&&<Badge color={D.gold}>DY {Number(w.dy).toFixed(1)}%</Badge>}
           </div>
-          <button onClick={()=>addToComp(w.ticker)} style={{marginTop:5,border:`1px solid ${D.blue}44`,background:"transparent",color:D.blue,borderRadius:5,padding:"2px 6px",fontSize:9,cursor:"pointer",width:"100%"}}>+ Comparar</button>
+          <div style={{display:"flex",gap:4,marginTop:6,flexWrap:"wrap"}}>
+            <button onClick={()=>addToComp(w.ticker)} style={{flex:1,border:`1px solid ${D.blue}44`,background:"transparent",color:D.blue,borderRadius:5,padding:"2px 4px",fontSize:9,cursor:"pointer"}}>+ Comp</button>
+            <button onClick={()=>gerarRelatorio(w.ticker)} style={{flex:1,border:`1px solid ${D.gold}44`,background:"transparent",color:D.gold,borderRadius:5,padding:"2px 4px",fontSize:9,cursor:"pointer"}}>📄 Rep.</button>
+          </div>
         </div>)}
       </div>
     </Card>
@@ -1203,7 +1622,7 @@ function AnaliseTab({investimentos,profileId,market,currency}){
           <div><p style={{margin:0,fontSize:15,fontWeight:700,color:D.text}}>{notaRisco.perfil}</p><p style={{margin:"2px 0 0",fontSize:12,color:D.text3}}>{notaRisco.descricao}</p></div>
         </div>
         {notaRisco.riscos?.map((r,i)=><div key={i} style={{fontSize:12,color:D.text3,padding:"4px 10px",background:D.bg3,borderRadius:6,borderLeft:`2px solid ${D.gold}`,marginBottom:4}}>⚠️ {r}</div>)}
-      </div>:<p style={{fontSize:12,color:D.text3}}>Clique "Avaliar" para análise de risco.</p>}
+      </div>:<p style={{fontSize:12,color:D.text3}}>Clique "Avaliar" para análise de risco da carteira.</p>}
     </Card>
 
     {/* Comparador */}
@@ -1233,26 +1652,47 @@ function AnaliseTab({investimentos,profileId,market,currency}){
       </div>}
     </Card>
 
-    {/* Alertas — notícias reais do Google News */}
+    {/* Alertas — notícias reais */}
     <Card>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
         <p style={{fontSize:14,fontWeight:700,color:D.text}}>🔔 Alertas e anúncios</p>
         <Btn sm onClick={fetchNews} disabled={newsLoading}>{newsLoading?"Buscando...":"Atualizar"}</Btn>
       </div>
-      {Object.keys(news).length===0&&!newsLoading&&<p style={{fontSize:12,color:D.text3}}>Clique "Atualizar" para buscar anúncios.</p>}
-      {Object.entries(news).map(([ticker,noticias])=><div key={ticker} style={{marginBottom:12}}>
-        <p style={{fontSize:13,fontWeight:700,color:D.green,margin:"0 0 6px"}}>{ticker}</p>
+      {Object.keys(news).length===0&&!newsLoading&&<p style={{fontSize:12,color:D.text3}}>Clique "Atualizar" para buscar notícias reais via Google News.</p>}
+      {Object.entries(news).map(([ticker,noticias])=><div key={ticker} style={{marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+          <p style={{fontSize:13,fontWeight:700,color:D.green,margin:0}}>{ticker}</p>
+          <Btn sm color={D.blue} outline onClick={()=>analisarImpactoNoticias(ticker,noticias)} disabled={newsImpactLoading}>
+            {newsImpactLoading?"Analisando...":"📊 Impacto no preço"}
+          </Btn>
+        </div>
+
+        {/* Análise de impacto */}
+        {newsImpact[ticker]&&<div style={{marginBottom:8,padding:"10px 14px",background:D.bg3,borderRadius:10,border:`1px solid ${newsImpact[ticker].tendencia==="alta"?D.green+"44":newsImpact[ticker].tendencia==="baixa"?D.red+"44":D.border}`}}>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:6}}>
+            <Badge color={newsImpact[ticker].tendencia==="alta"?D.green:newsImpact[ticker].tendencia==="baixa"?D.red:D.text3}>
+              {newsImpact[ticker].tendencia==="alta"?"▲ Tendência Alta":newsImpact[ticker].tendencia==="baixa"?"▼ Tendência Baixa":"→ Lateral"}
+            </Badge>
+            <Badge color={newsImpact[ticker].confianca==="alta"?D.green:newsImpact[ticker].confianca==="media"?D.gold:D.text3}>Confiança {newsImpact[ticker].confianca}</Badge>
+            <Badge color={newsImpact[ticker].acao_recomendada==="Comprar"?D.green:newsImpact[ticker].acao_recomendada==="Vender"?D.red:D.gold}>{newsImpact[ticker].acao_recomendada}</Badge>
+            {newsImpact[ticker].preco_alvo_curto&&<Badge color={D.blue}>Alvo curto: {currency} {newsImpact[ticker].preco_alvo_curto}</Badge>}
+          </div>
+          <p style={{margin:"0 0 6px",fontSize:12,color:D.text2,lineHeight:1.6}}>{newsImpact[ticker].resumo_impacto}</p>
+          {newsImpact[ticker].principais_catalisadores?.length>0&&<p style={{margin:"0 0 3px",fontSize:11,color:D.green}}>🚀 {newsImpact[ticker].principais_catalisadores.join(" · ")}</p>}
+          {newsImpact[ticker].principais_riscos?.length>0&&<p style={{margin:0,fontSize:11,color:D.red}}>⚠️ {newsImpact[ticker].principais_riscos.join(" · ")}</p>}
+        </div>}
+
         {noticias.length===0&&<p style={{fontSize:12,color:D.text3}}>Nenhuma notícia recente encontrada.</p>}
         {noticias.map((n,i)=>{
           const impactoCor=n.impacto==="positivo"?D.green:n.impacto==="negativo"?D.red:D.text3;
           return <div key={i} style={{background:D.bg3,borderRadius:8,padding:"8px 12px",marginBottom:6,borderLeft:`3px solid ${tipoLine[n.tipo]||D.text3}`}}>
-            <div style={{display:"flex",gap:6,marginBottom:3,alignItems:"center"}}>
+            <div style={{display:"flex",gap:6,marginBottom:3,alignItems:"center",flexWrap:"wrap"}}>
               <span>{tipoIcons[n.tipo]||"📰"}</span>
-              <a href={n.link} target="_blank" rel="noopener noreferrer" style={{fontSize:12,fontWeight:600,color:D.text,flex:1,textDecoration:"none"}}>{n.titulo}</a>
-              <span style={{fontSize:10,background:impactoCor+"22",color:impactoCor,borderRadius:4,padding:"2px 6px",fontWeight:600,border:`1px solid ${impactoCor}44`}}>
+              <a href={n.link} target="_blank" rel="noopener noreferrer" style={{fontSize:12,fontWeight:600,color:D.text,flex:1,textDecoration:"none",minWidth:0}}>{n.titulo}</a>
+              <span style={{fontSize:10,background:impactoCor+"22",color:impactoCor,borderRadius:4,padding:"2px 6px",fontWeight:600,border:`1px solid ${impactoCor}44`,flexShrink:0}}>
                 {n.impacto==="positivo"?"▲ Positivo":n.impacto==="negativo"?"▼ Negativo":"● Neutro"}
               </span>
-              <span style={{fontSize:10,color:D.text3}}>{n.data}</span>
+              <span style={{fontSize:10,color:D.text3,flexShrink:0}}>{n.data}</span>
             </div>
             {n.resumo&&<p style={{margin:0,fontSize:12,color:D.text2}}>{n.resumo}</p>}
             {n.fonte&&<p style={{margin:"2px 0 0",fontSize:10,color:D.text3}}>Fonte: {n.fonte}</p>}
@@ -1276,7 +1716,7 @@ function AnaliseTab({investimentos,profileId,market,currency}){
     <Card>
       <p style={{fontSize:14,fontWeight:700,color:D.text,marginBottom:6}}>Screener de ações</p>
       <div style={{display:"flex",gap:8,marginBottom:10}}>
-        <input value={screenerSearch} onChange={e=>setScreenerSearch(e.target.value.toUpperCase())} placeholder={`Buscar ticker manualmente (ex: ${isBR?"VALE3":"RIO.AX"})...`} style={{flex:1}}/>
+        <input value={screenerSearch} onChange={e=>setScreenerSearch(e.target.value.toUpperCase())} placeholder={`Buscar ticker (ex: ${isBR?"VALE3":"RIO.AX"})...`} style={{flex:1}}/>
         {screenerSearch&&<Btn sm color={D.text3} outline onClick={()=>setScreenerSearch("")}>Limpar</Btn>}
       </div>
       {screenerSearch?<TVWidget type="financials" config={{symbol:isBR&&!/\./.test(screenerSearch)?"BMFBOVESPA:"+screenerSearch:screenerSearch,displayMode:"regular",width:"100%",height:490,locale:"pt_BR"}}/>:<TVWidget type="screener" config={{width:"100%",height:490,defaultColumn:"overview",defaultScreen:"most_capitalized",market,showToolbar:true,locale:"pt_BR"}}/>}
@@ -1343,6 +1783,7 @@ function AnaliseTab({investimentos,profileId,market,currency}){
     </Card>
   </div>;
 }
+
 
 // ── Cartão Tab ────────────────────────────────────────────────────────────────
 function CartaoTab({data,setData,currency,mes}){
