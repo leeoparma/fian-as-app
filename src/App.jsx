@@ -2121,7 +2121,9 @@ export default function App(){
 
   const profile=PROFILES.find(p=>p.id===profileId);
   const currency=profile.currency;
-  const data=allData[profileId]||{...EMPTY};
+  // Mescla com EMPTY para garantir que campos novos (historico, alertas, watchlist, etc)
+  // sempre existam, mesmo em perfis salvos antes dessas features. Evita tela branca.
+  const data={...EMPTY,...(allData[profileId]||{})};
   const catD=data.catD||CAT_D_DEF,catR=data.catR||CAT_R_DEF;
 
   const txMes=data.transacoes.filter(t=>{const d=new Date(t.data);return d.getMonth()===mes&&d.getFullYear()===ANO_ATUAL;});
