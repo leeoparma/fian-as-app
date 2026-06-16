@@ -38,7 +38,7 @@ const IND_COMP=[
 ];
 
 const hoje=new Date(),MES_ATUAL=hoje.getMonth(),ANO_ATUAL=hoje.getFullYear();
-const EMPTY={transacoes:[],faturas:[],investimentos:[],metas:[],bancos:[],orcamentos:[],recorrencias:[],dividendos:[],catD:[...CAT_D_DEF],catR:[...CAT_R_DEF]};
+const EMPTY={transacoes:[],faturas:[],investimentos:[],metas:[],bancos:[],orcamentos:[],recorrencias:[],dividendos:[],watchlist:[],catD:[...CAT_D_DEF],catR:[...CAT_R_DEF]};
 const EMPTY_ALL={br:{...EMPTY},au:{...EMPTY}};
 const lsGet=k=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch{return null;}};
 const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch{}};
@@ -61,13 +61,23 @@ async function askClaude(prompt,maxTokens=900,images=[]){
   }catch(e){console.error("askClaude:",e);throw e;}
 }
 
-async function fetchPrecoReal(ticker, profileId) {
+// Cache de preços em memória (evita buscar o mesmo ticker repetidamente)
+const _precoCache = {};
+const PRECO_TTL = 30000; // 30 segundos
+
+async function fetchPrecoReal(ticker, profileId, full=false) {
+  const market = profileId || "au";
+  const cacheKey = `${ticker}_${market}_${full?"f":"s"}`;
+  const cached = _precoCache[cacheKey];
+  if (cached && (Date.now() - cached.ts) < PRECO_TTL) return cached.data;
   try {
-    const market = profileId || "au";
-    const r = await fetch(`${WORKER}/quote?ticker=${encodeURIComponent(ticker)}&market=${market}`);
+    const r = await fetch(`${WORKER}/quote?ticker=${encodeURIComponent(ticker)}&market=${market}${full?"&full=1":""}`);
     if (!r.ok) return null;
     const d = await r.json();
-    if (d?.preco_atual) return d;
+    if (d?.preco_atual) {
+      _precoCache[cacheKey] = { data: d, ts: Date.now() };
+      return d;
+    }
   } catch {}
   return null;
 }
@@ -962,9 +972,16 @@ function SplitwiseTab({currency,userEmail}){
 
 
 // ── Análise Tab ───────────────────────────────────────────────────────────────
-function AnaliseTab({investimentos,profileId,market,currency}){
-  const WL_KEY=`watchlist_${profileId}`;
-  const [watchlist,setWatchlist]=useState(()=>lsGet(WL_KEY)||[]);
+function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
+  // Watchlist agora vem do Supabase (data.watchlist), sincroniza entre dispositivos
+  const watchlist=data.watchlist||[];
+  const setWatchlist=(updater)=>{
+    setData(d=>{
+      const atual=d.watchlist||[];
+      const nova=typeof updater==="function"?updater(atual):updater;
+      return{...d,watchlist:nova};
+    });
+  };
   const [wInput,setWInput]=useState("");const [wCat,setWCat]=useState("");const [wFiltro,setWFiltro]=useState("Todas");const [wLoading,setWLoading]=useState(false);
   const [chartTicker,setChartTicker]=useState(null);
   const [news,setNews]=useState({});const [newsLoading,setNewsLoading]=useState(false);
@@ -998,20 +1015,31 @@ function AnaliseTab({investimentos,profileId,market,currency}){
   // Relatório detalhado por ação
   const [relatorio,setRelatorio]=useState(null);const [relatorioTicker,setRelatorioTicker]=useState("");const [relatorioLoading,setRelatorioLoading]=useState(false);
 
-  useEffect(()=>{lsSet(WL_KEY,watchlist);},[watchlist]);
+  // Migração: se havia watchlist no localStorage antigo, move pro Supabase uma vez
+  useEffect(()=>{
+    const old=lsGet(`watchlist_${profileId}`);
+    if(old&&old.length&&(!data.watchlist||data.watchlist.length===0)){
+      setWatchlist(old);
+      lsSet(`watchlist_${profileId}`,[]); // limpa o antigo após migrar
+    }
+  },[profileId]);
 
+  // Watchlist persiste automaticamente via Supabase (data.watchlist).
+  // Atualiza preços periodicamente, lendo o estado mais recente via ref.
+  const wlRef=useRef(watchlist);
+  useEffect(()=>{wlRef.current=watchlist;},[watchlist]);
   const wlRefreshRef=useRef(null);
   useEffect(()=>{
     async function refreshAll(){
-      if(!watchlist.length) return;
-      const updated=await Promise.all(watchlist.map(async w=>{
-        const real=await fetchPrecoReal(w.ticker,profileId);
+      const atual=wlRef.current||[];
+      if(!atual.length) return;
+      const updated=await Promise.all(atual.map(async w=>{
+        const real=await fetchPrecoReal(w.ticker,profileId,true);
         if(!real) return w;
-        return{...w,preco:real.preco_atual,variacao_dia:real.variacao_dia};
+        return{...w,preco:real.preco_atual,variacao_dia:real.variacao_dia,pl:real.pl??w.pl,dy:real.dy??w.dy,roe:real.roe??w.roe};
       }));
       setWatchlist(updated);
     }
-    refreshAll();
     wlRefreshRef.current=setInterval(refreshAll,60000);
     return()=>clearInterval(wlRefreshRef.current);
   },[profileId]);
@@ -1023,13 +1051,21 @@ function AnaliseTab({investimentos,profileId,market,currency}){
     const t=wInput.trim().toUpperCase();
     if(!t||watchlist.find(w=>w.ticker===t)){setWInput("");return;}
     setWLoading(true);
-    const real=await fetchPrecoReal(t,profileId);
-    let obj={ticker:t,nome:t,categoria:wCat||"Outros",preco:real?.preco_atual||null,variacao_dia:real?.variacao_dia||null,pl:null,dy:real?.dy||null,roe:null,currency};
+    // Busca preço + indicadores fundamentalistas reais do Yahoo (full=true)
+    const real=await fetchPrecoReal(t,profileId,true);
+    let obj={ticker:t,nome:real?.nome||t,categoria:wCat||"Outros",preco:real?.preco_atual||null,variacao_dia:real?.variacao_dia||null,pl:real?.pl??null,dy:real?.dy??null,roe:real?.roe??null,pvp:real?.pvp??null,currency};
+    // Claude só para nome curto e categoria (e indicadores que o Yahoo não tiver)
     try{
       const mercado=isBR?"brasileira B3":"australiana ASX";
-      const txt=await askClaude(`Para o ativo ${t} na bolsa ${mercado}, retorne APENAS JSON: {"nome":"nome curto","categoria":"Banco|Infraestrutura|Fundo Imobiliário|Energia|Tecnologia|Varejo|Saúde|Agronegócio|Mineração|Petróleo|ETF|Exterior|Outros","pl":number_or_null,"dy":number_or_null,"roe":number_or_null}`,300);
+      const precisaIA=!obj.pl||!obj.dy||!obj.roe;
+      const txt=await askClaude(`Para o ativo ${t} na bolsa ${mercado}, retorne APENAS JSON: {"nome":"nome curto","categoria":"Banco|Infraestrutura|Fundo Imobiliário|Energia|Tecnologia|Varejo|Saúde|Agronegócio|Mineração|Petróleo|ETF|Exterior|Outros"${precisaIA?',"pl":number_or_null,"dy":number_or_null,"roe":number_or_null':''}}`,300);
       const parsed=JSON.parse(txt);
-      obj={...obj,nome:parsed.nome||obj.nome,categoria:wCat||parsed.categoria||"Outros",pl:parsed.pl||null,dy:real?.dy||parsed.dy||null,roe:parsed.roe||null};
+      obj={...obj,
+        nome:(obj.nome&&obj.nome!==t)?obj.nome:(parsed.nome||t),
+        categoria:wCat||parsed.categoria||"Outros",
+        pl:obj.pl??parsed.pl??null,
+        dy:obj.dy??parsed.dy??null,
+        roe:obj.roe??parsed.roe??null};
     }catch{}
     setWatchlist(p=>[...p,obj]);
     setWInput("");setWLoading(false);
@@ -1941,7 +1977,7 @@ export default function App(){
       {tab===3&&<CartaoTab data={data} setData={setData} currency={currency} mes={mes}/>}
       {tab===4&&<InvestimentosTab data={data} setData={setData} currency={currency} profileId={profileId}/>}
       {tab===5&&<MetasTab data={data} setData={setData} currency={currency}/>}
-      {tab===6&&<AnaliseTab investimentos={data.investimentos} profileId={profileId} market={profile.market} currency={currency}/>}
+      {tab===6&&<AnaliseTab data={data} setData={setData} investimentos={data.investimentos} profileId={profileId} market={profile.market} currency={currency}/>}
       {tab===7&&<SplitwiseTab currency={currency} userEmail={session?.user?.email}/>}
     </div>
   </>;
