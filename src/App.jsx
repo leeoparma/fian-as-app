@@ -1113,22 +1113,25 @@ function AnaliseTab({investimentos,profileId,market,currency}){
 
       const res=await fetch(WORKER,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
         model:"claude-sonnet-4-6",
-        max_tokens:8000,
+        max_tokens:5000,
         thinking:{type:"adaptive"},
         messages:[{role:"user",content:`Você é um analista fundamentalista sênior. Analise profundamente o mercado ${mercado} e identifique as 5 melhores oportunidades de compra considerando: P/L justo, DY atrativo, ROE elevado, crescimento de lucros, saúde financeira e momento de mercado.${precoCtx}${carteiraCtx}\n\nRetorne APENAS JSON sem markdown: {"mercado":"${isBR?"Brasil":"Austrália"}","metodologia":"breve descrição da análise","acoes":[{"ticker":"str","nome":"str","setor":"str","preco":number,"pl":number,"pvp":number,"dy":number,"roe":number,"cagr_lucro":number,"score":0-10,"recomendacao":"Compra Forte|Compra|Neutro","justificativa":"3-4 frases detalhadas sobre tese de investimento","riscos":"2 riscos principais","potencial_upside":"XX%","horizonte":"Curto|Médio|Longo prazo"}]}`}]
       })});
       const d=await res.json();
+      if(d.error) throw new Error(d.error.message||"Erro na API");
 
       // Extrai thinking se disponível
       const thinkingBlock=d.content?.find(b=>b.type==="thinking");
       if(thinkingBlock?.thinking){setThinkingLog(thinkingBlock.thinking);}
 
       const textBlock=d.content?.find(b=>b.type==="text");
-      if(!textBlock) throw new Error("Sem resposta");
+      if(!textBlock||!textBlock.text) throw new Error("A IA não retornou resposta. Tente novamente ou desligue o Thinking.");
       const txt=textBlock.text.replace(/```json|```/g,"").trim();
       const s=txt.indexOf("{"),e=txt.lastIndexOf("}");
-      if(s===-1) throw new Error("JSON inválido");
-      const result=JSON.parse(txt.slice(s,e+1));
+      if(s===-1||e===-1) throw new Error("Resposta em formato inesperado. Tente novamente.");
+      let result;
+      try{result=JSON.parse(txt.slice(s,e+1));}
+      catch{throw new Error("A análise veio incompleta. Tente novamente ou desligue o Thinking.");}
 
       // Enriquece com preços reais
       if(result.acoes){
@@ -1138,7 +1141,7 @@ function AnaliseTab({investimentos,profileId,market,currency}){
         }
       }
       setSugestoes(result);
-    }catch(e){setErro("Erro ao analisar mercado: "+e.message);}
+    }catch(e){setErro("Erro ao analisar mercado: "+(e.message||"erro desconhecido")+(/524|timeout/i.test(e.message||"")?" (a análise demorou demais — tente desligar o Thinking)":""));}
     setSugestLoading(false);
   }
 
@@ -1183,8 +1186,7 @@ function AnaliseTab({investimentos,profileId,market,currency}){
 
       const res=await fetch(WORKER,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
         model:"claude-sonnet-4-6",
-        max_tokens:8000,
-        thinking:{type:"adaptive"},
+        max_tokens:4000,
         messages:[{role:"user",content:`Gere um relatório completo de análise fundamentalista para ${ticker} na bolsa ${mercado}. Preço atual: ${preco} ${variacao}.${noticiasCtx}\n\nRetorne APENAS JSON válido e completo, sem markdown e sem texto antes ou depois: {"ticker":"${ticker}","nome":"nome completo","setor":"setor","subsetor":"subsetor","preco_atual":"${preco}","variacao_dia":"${variacao}","resumo_empresa":"3 frases sobre o negócio","tese_investimento":"4-5 frases detalhadas","indicadores":{"pl":number_or_null,"pvp":number_or_null,"dy":number_or_null,"roe":number_or_null,"roic":number_or_null,"margem_liquida":number_or_null,"divida_ebitda":number_or_null,"cagr_lucro_5a":number_or_null},"pontos_fortes":["p1","p2","p3"],"pontos_fracos":["f1","f2","f3"],"riscos":["r1","r2","r3"],"catalisadores":["c1","c2","c3"],"valuation":"justo|descontado|sobrevalorizado","score_geral":0-10,"recomendacao":"Compra Forte|Compra|Neutro|Vender","preco_alvo_12m":number_or_null,"upside_potencial":"XX%","horizonte_recomendado":"Curto|Médio|Longo prazo","conclusao":"3 frases de conclusão"}`}]
       })});
       const d=await res.json();
@@ -1219,9 +1221,8 @@ function AnaliseTab({investimentos,profileId,market,currency}){
 
       const res=await fetch(WORKER,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
         model:"claude-sonnet-4-6",
-        max_tokens:8000,
-        thinking:{type:"adaptive"},
-        messages:[{role:"user",content:`Você é um gestor de portfólio sênior. Analise profundamente a carteira de investimentos abaixo na bolsa ${mercado} e forneça recomendações precisas.\n\nCarteira atual:\n${carteiraDetalhada}\n\nRetorne APENAS JSON válido e completo, sem markdown e sem texto antes ou depois: {"resumo_carteira":"3 frases sobre estado atual","score_carteira":0-10,"diversificacao":"boa|regular|fraca","concentracao_risco":"baixo|medio|alto","retorno_estimado_12m":"XX%","recomendacoes":[{"ativo":"ticker ou tipo","acao":"Manter|Aumentar|Reduzir|Vender|Diversificar","prioridade":"alta|media|baixa","justificativa":"2 frases","percentual_sugerido":"XX% da carteira"}],"ativos_adicionar":[{"ticker":"str","justificativa":"por que faz sentido com sua carteira atual","complementaridade":"como complementa o portfólio"}],"ativos_remover":[{"ticker":"str","motivo":"str"}],"alocacao_ideal":[{"classe":"Ações|FII|ETF|Renda Fixa|Cripto|Outros","pct_atual":0,"pct_ideal":0}],"conclusao":"3 frases finais com plano de ação"}`}]
+        max_tokens:4000,
+        messages:[{role:"user",content:`Você é um gestor de portfólio sênior. Analise a carteira de investimentos abaixo na bolsa ${mercado} e forneça recomendações precisas.\n\nCarteira atual:\n${carteiraDetalhada}\n\nRetorne APENAS JSON válido e completo, sem markdown e sem texto antes ou depois: {"resumo_carteira":"3 frases sobre estado atual","score_carteira":0-10,"diversificacao":"boa|regular|fraca","concentracao_risco":"baixo|medio|alto","retorno_estimado_12m":"XX%","recomendacoes":[{"ativo":"ticker ou tipo","acao":"Manter|Aumentar|Reduzir|Vender|Diversificar","prioridade":"alta|media|baixa","justificativa":"2 frases","percentual_sugerido":"XX% da carteira"}],"ativos_adicionar":[{"ticker":"str","justificativa":"por que faz sentido com sua carteira atual","complementaridade":"como complementa o portfólio"}],"ativos_remover":[{"ticker":"str","motivo":"str"}],"alocacao_ideal":[{"classe":"Ações|FII|ETF|Renda Fixa|Cripto|Outros","pct_atual":0,"pct_ideal":0}],"conclusao":"3 frases finais com plano de ação"}`}]
       })});
       const d=await res.json();
       if(d.error) throw new Error(d.error.message||"Erro na API");
@@ -1411,13 +1412,13 @@ function AnaliseTab({investimentos,profileId,market,currency}){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
         <div>
           <p style={{fontSize:14,fontWeight:700,color:D.text}}>📄 Relatório: {relatorioTicker}</p>
-          <p style={{fontSize:11,color:D.text3}}>Análise fundamentalista completa com Extended Thinking</p>
+          <p style={{fontSize:11,color:D.text3}}>Análise fundamentalista completa</p>
         </div>
         {relatorio&&<button onClick={()=>setRelatorio(null)} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:18}}>✕</button>}
       </div>
       {relatorioLoading&&<div style={{textAlign:"center",padding:"30px 0"}}>
-        <p style={{color:D.purple,fontSize:13}}>🧠 Claude está analisando profundamente {relatorioTicker}...</p>
-        <p style={{color:D.text3,fontSize:11,marginTop:4}}>Extended Thinking ativo — isso pode levar alguns segundos</p>
+        <p style={{color:D.purple,fontSize:13}}>📄 Gerando relatório de {relatorioTicker}...</p>
+        <p style={{color:D.text3,fontSize:11,marginTop:4}}>Buscando preço real e notícias recentes</p>
       </div>}
       {relatorio&&<div style={{display:"flex",flexDirection:"column",gap:12}}>
         {/* Header */}
@@ -1501,13 +1502,13 @@ function AnaliseTab({investimentos,profileId,market,currency}){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,flexWrap:"wrap",gap:8}}>
         <div>
           <p style={{fontSize:14,fontWeight:700,color:D.text}}>💼 Análise da Minha Carteira</p>
-          <p style={{fontSize:11,color:D.text3}}>IA analisa seu portfólio e sugere melhorias com Extended Thinking</p>
+          <p style={{fontSize:11,color:D.text3}}>IA analisa seu portfólio e sugere melhorias</p>
         </div>
         <Btn sm color={D.purple} onClick={analisarCarteira} disabled={carteiraLoading}>{carteiraLoading?"Analisando...":"Analisar carteira"}</Btn>
       </div>
 
       {carteiraLoading&&<div style={{textAlign:"center",padding:"20px 0"}}>
-        <p style={{color:D.purple,fontSize:13}}>🧠 Analisando seu portfólio com Extended Thinking...</p>
+        <p style={{color:D.purple,fontSize:13}}>💼 Analisando seu portfólio...</p>
         <p style={{color:D.text3,fontSize:11,marginTop:4}}>Buscando preços reais e calculando performance</p>
       </div>}
 
