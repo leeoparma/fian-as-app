@@ -1873,12 +1873,57 @@ export default function App(){
   const [grafico,setGrafico]=useState("barras");
   const saveTimer=useRef(null);
   const importRef=useRef(null);
+  // Trava de segurança: só permite salvar no Supabase DEPOIS de carregar com sucesso.
+  // Evita que uma leitura falha (ex: Supabase acordando da pausa) sobrescreva dados bons com vazio.
+  const loadOk=useRef(false);
+  const [syncErro,setSyncErro]=useState(false);
 
-  useEffect(()=>{if(!session)return;(async()=>{setSyncing(true);try{const r=await supa.load(session.token,session.user.id);if(r){setAllData(r);lsSet("all_profiles",r);}}catch{}setSyncing(false);})();},[session?.token]);
+  useEffect(()=>{
+    if(!session) return;
+    loadOk.current=false;
+    setSyncErro(false);
+    (async()=>{
+      setSyncing(true);
+      try{
+        const r=await supa.load(session.token,session.user.id);
+        if(r){
+          // Carregou dados da nuvem com sucesso → libera o salvamento
+          setAllData(r);
+          lsSet("all_profiles",r);
+          loadOk.current=true;
+        }else{
+          // Conta nova/sem dados na nuvem: usa o que tem local e libera salvamento
+          loadOk.current=true;
+        }
+      }catch{
+        // Leitura falhou (Supabase fora/instável). NÃO libera salvamento,
+        // mantém os dados locais e avisa o usuário — nada é sobrescrito.
+        setSyncErro(true);
+        loadOk.current=false;
+      }
+      setSyncing(false);
+    })();
+  },[session?.token]);
 
-  function setData(upd){setAllData(all=>{const prev=all[profileId]||{...EMPTY};const next=typeof upd==="function"?upd(prev):{...prev,...upd};const updated={...all,[profileId]:next};lsSet("all_profiles",updated);if(session){clearTimeout(saveTimer.current);saveTimer.current=setTimeout(()=>supa.save(session.token,session.user.id,updated).catch(()=>{}),1500);}return updated;});}
+  function setData(upd){setAllData(all=>{
+    const prev=all[profileId]||{...EMPTY};
+    const next=typeof upd==="function"?upd(prev):{...prev,...upd};
+    const updated={...all,[profileId]:next};
+    lsSet("all_profiles",updated);
+    // Só envia ao Supabase se a leitura inicial tiver dado certo (loadOk).
+    // Assim nunca salvamos vazio por cima de dados bons quando a nuvem está fora.
+    if(session&&loadOk.current){
+      clearTimeout(saveTimer.current);
+      saveTimer.current=setTimeout(()=>supa.save(session.token,session.user.id,updated).catch(()=>{}),1500);
+    }
+    return updated;
+  });}
   function handleLogin(t,u){const s={token:t,user:u};setSession(s);lsSet("session",s);}
-  async function handleLogout(){if(session)await supa.signOut(session.token);setSession(null);lsSet("session",null);}
+  async function handleLogout(){
+    // Logout local imediato — não trava se o Supabase estiver fora
+    try{ if(session) supa.signOut(session.token).catch(()=>{}); }catch{}
+    setSession(null);lsSet("session",null);
+  }
   useEffect(()=>{lsSet("active_profile",profileId);setTab(0);},[profileId]);
 
   function exportar(){const p={version:4,exportedAt:new Date().toISOString(),all_profiles:allData,watchlist_br:lsGet("watchlist_br")||[],watchlist_au:lsGet("watchlist_au")||[]};const b=new Blob([JSON.stringify(p,null,2)],{type:"application/json"});const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download=`financas_${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(u);}
@@ -1918,7 +1963,7 @@ export default function App(){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem",flexWrap:"wrap",gap:8,padding:"0.75rem 1rem",background:D.card,borderRadius:14,border:`1px solid ${D.border}`,position:"sticky",top:8,zIndex:50}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
           <span style={{fontSize:22,filter:`drop-shadow(0 0 8px ${D.green})`}}>💰</span>
-          <div><p style={{margin:0,fontSize:15,fontWeight:800,color:D.text}}>Controle Financeiro</p>{syncing&&<p style={{margin:0,fontSize:10,color:D.green}}>● sincronizando...</p>}</div>
+          <div><p style={{margin:0,fontSize:15,fontWeight:800,color:D.text}}>Controle Financeiro</p>{syncing&&<p style={{margin:0,fontSize:10,color:D.green}}>● sincronizando...</p>}{!syncing&&syncErro&&<p style={{margin:0,fontSize:10,color:D.gold}}>⚠ sem conexão com a nuvem — alterações não estão sendo salvas online</p>}</div>
         </div>
         <div style={{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
           {PROFILES.map(p=><button key={p.id} onClick={()=>setProfileId(p.id)} style={{padding:"5px 12px",borderRadius:20,fontSize:12,cursor:"pointer",fontWeight:profileId===p.id?700:400,background:profileId===p.id?D.green:"transparent",color:profileId===p.id?"#000":D.text3,border:`1px solid ${profileId===p.id?D.green:D.border}`}}>{p.label}</button>)}
