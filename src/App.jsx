@@ -1183,18 +1183,22 @@ function AnaliseTab({investimentos,profileId,market,currency}){
 
       const res=await fetch(WORKER,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
         model:"claude-sonnet-4-6",
-        max_tokens:6000,
+        max_tokens:8000,
         thinking:{type:"adaptive"},
-        messages:[{role:"user",content:`Gere um relatório completo de análise fundamentalista para ${ticker} na bolsa ${mercado}. Preço atual: ${preco} ${variacao}.${noticiasCtx}\n\nRetorne APENAS JSON: {"ticker":"${ticker}","nome":"nome completo","setor":"setor","subsetor":"subsetor","preco_atual":"${preco}","variacao_dia":"${variacao}","resumo_empresa":"3 frases sobre o negócio","tese_investimento":"4-5 frases detalhadas","indicadores":{"pl":number_or_null,"pvp":number_or_null,"dy":number_or_null,"roe":number_or_null,"roic":number_or_null,"margem_liquida":number_or_null,"divida_ebitda":number_or_null,"cagr_lucro_5a":number_or_null},"pontos_fortes":["p1","p2","p3"],"pontos_fracos":["f1","f2","f3"],"riscos":["r1","r2","r3"],"catalisadores":["c1","c2","c3"],"valuation":"justo|descontado|sobrevalorizado","score_geral":0-10,"recomendacao":"Compra Forte|Compra|Neutro|Vender","preco_alvo_12m":number_or_null,"upside_potencial":"XX%","horizonte_recomendado":"Curto|Médio|Longo prazo","conclusao":"3 frases de conclusão"}`}]
+        messages:[{role:"user",content:`Gere um relatório completo de análise fundamentalista para ${ticker} na bolsa ${mercado}. Preço atual: ${preco} ${variacao}.${noticiasCtx}\n\nRetorne APENAS JSON válido e completo, sem markdown e sem texto antes ou depois: {"ticker":"${ticker}","nome":"nome completo","setor":"setor","subsetor":"subsetor","preco_atual":"${preco}","variacao_dia":"${variacao}","resumo_empresa":"3 frases sobre o negócio","tese_investimento":"4-5 frases detalhadas","indicadores":{"pl":number_or_null,"pvp":number_or_null,"dy":number_or_null,"roe":number_or_null,"roic":number_or_null,"margem_liquida":number_or_null,"divida_ebitda":number_or_null,"cagr_lucro_5a":number_or_null},"pontos_fortes":["p1","p2","p3"],"pontos_fracos":["f1","f2","f3"],"riscos":["r1","r2","r3"],"catalisadores":["c1","c2","c3"],"valuation":"justo|descontado|sobrevalorizado","score_geral":0-10,"recomendacao":"Compra Forte|Compra|Neutro|Vender","preco_alvo_12m":number_or_null,"upside_potencial":"XX%","horizonte_recomendado":"Curto|Médio|Longo prazo","conclusao":"3 frases de conclusão"}`}]
       })});
       const d=await res.json();
+      if(d.error) throw new Error(d.error.message||"Erro na API");
       const textBlock=d.content?.find(b=>b.type==="text");
-      if(!textBlock) throw new Error("Sem resposta");
+      if(!textBlock||!textBlock.text) throw new Error("A IA não retornou o relatório. Tente novamente.");
       const txt=textBlock.text.replace(/```json|```/g,"").trim();
       const s=txt.indexOf("{"),e=txt.lastIndexOf("}");
-      if(s===-1) throw new Error();
-      setRelatorio(JSON.parse(txt.slice(s,e+1)));
-    }catch(e){setErro("Erro ao gerar relatório: "+e.message);}
+      if(s===-1||e===-1) throw new Error("Resposta em formato inesperado. Tente novamente.");
+      let parsed;
+      try{parsed=JSON.parse(txt.slice(s,e+1));}
+      catch{throw new Error("O relatório veio incompleto. Tente novamente.");}
+      setRelatorio(parsed);
+    }catch(e){setErro("Erro ao gerar relatório: "+(e.message||"erro desconhecido"));}
     setRelatorioLoading(false);
   }
 
@@ -1215,18 +1219,22 @@ function AnaliseTab({investimentos,profileId,market,currency}){
 
       const res=await fetch(WORKER,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
         model:"claude-sonnet-4-6",
-        max_tokens:6000,
+        max_tokens:8000,
         thinking:{type:"adaptive"},
-        messages:[{role:"user",content:`Você é um gestor de portfólio sênior. Analise profundamente a carteira de investimentos abaixo na bolsa ${mercado} e forneça recomendações precisas.\n\nCarteira atual:\n${carteiraDetalhada}\n\nRetorne APENAS JSON: {"resumo_carteira":"3 frases sobre estado atual","score_carteira":0-10,"diversificacao":"boa|regular|fraca","concentracao_risco":"baixo|medio|alto","retorno_estimado_12m":"XX%","recomendacoes":[{"ativo":"ticker ou tipo","acao":"Manter|Aumentar|Reduzir|Vender|Diversificar","prioridade":"alta|media|baixa","justificativa":"2 frases","percentual_sugerido":"XX% da carteira"}],"ativos_adicionar":[{"ticker":"str","justificativa":"por que faz sentido com sua carteira atual","complementaridade":"como complementa o portfólio"}],"ativos_remover":[{"ticker":"str","motivo":"str"}],"alocacao_ideal":[{"classe":"Ações|FII|ETF|Renda Fixa|Cripto|Outros","pct_atual":0,"pct_ideal":0}],"conclusao":"3 frases finais com plano de ação"}`}]
+        messages:[{role:"user",content:`Você é um gestor de portfólio sênior. Analise profundamente a carteira de investimentos abaixo na bolsa ${mercado} e forneça recomendações precisas.\n\nCarteira atual:\n${carteiraDetalhada}\n\nRetorne APENAS JSON válido e completo, sem markdown e sem texto antes ou depois: {"resumo_carteira":"3 frases sobre estado atual","score_carteira":0-10,"diversificacao":"boa|regular|fraca","concentracao_risco":"baixo|medio|alto","retorno_estimado_12m":"XX%","recomendacoes":[{"ativo":"ticker ou tipo","acao":"Manter|Aumentar|Reduzir|Vender|Diversificar","prioridade":"alta|media|baixa","justificativa":"2 frases","percentual_sugerido":"XX% da carteira"}],"ativos_adicionar":[{"ticker":"str","justificativa":"por que faz sentido com sua carteira atual","complementaridade":"como complementa o portfólio"}],"ativos_remover":[{"ticker":"str","motivo":"str"}],"alocacao_ideal":[{"classe":"Ações|FII|ETF|Renda Fixa|Cripto|Outros","pct_atual":0,"pct_ideal":0}],"conclusao":"3 frases finais com plano de ação"}`}]
       })});
       const d=await res.json();
+      if(d.error) throw new Error(d.error.message||"Erro na API");
       const textBlock=d.content?.find(b=>b.type==="text");
-      if(!textBlock) throw new Error();
+      if(!textBlock||!textBlock.text) throw new Error("A IA não retornou análise (resposta vazia). Tente novamente.");
       const txt=textBlock.text.replace(/```json|```/g,"").trim();
       const s=txt.indexOf("{"),e=txt.lastIndexOf("}");
-      if(s===-1) throw new Error();
-      setCarteiraAnalise(JSON.parse(txt.slice(s,e+1)));
-    }catch(e){setErro("Erro ao analisar carteira: "+e.message);}
+      if(s===-1||e===-1) throw new Error("Resposta em formato inesperado. Tente novamente.");
+      let parsed;
+      try{parsed=JSON.parse(txt.slice(s,e+1));}
+      catch{throw new Error("A análise veio incompleta. Tente novamente (o resultado pode ter sido cortado).");}
+      setCarteiraAnalise(parsed);
+    }catch(e){setErro("Erro ao analisar carteira: "+(e.message||"erro desconhecido. Tente novamente."));}
     setCarteiraLoading(false);
   }
 
