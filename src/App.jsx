@@ -9,7 +9,13 @@ const supa={
   async signUp(e,p){return(await fetch(`${SUPA_URL}/auth/v1/signup`,{method:"POST",headers:supa.h,body:JSON.stringify({email:e,password:p})})).json();},
   async signIn(e,p){return(await fetch(`${SUPA_URL}/auth/v1/token?grant_type=password`,{method:"POST",headers:supa.h,body:JSON.stringify({email:e,password:p})})).json();},
   async signOut(t){await fetch(`${SUPA_URL}/auth/v1/logout`,{method:"POST",headers:supa.ah(t)});},
-  async load(t,id){const r=await(await fetch(`${SUPA_URL}/rest/v1/profiles?id=eq.${id}&select=data`,{headers:supa.ah(t)})).json();return r?.[0]?.data||null;},
+  async load(t,id){
+    const resp=await fetch(`${SUPA_URL}/rest/v1/profiles?id=eq.${id}&select=data`,{headers:supa.ah(t)});
+    if(!resp.ok) throw new Error("Supabase load HTTP "+resp.status); // 4xx/5xx (ex: restoring) -> erro, NÃO conta vazia
+    const r=await resp.json();
+    if(!Array.isArray(r)) throw new Error("Resposta inesperada do servidor"); // formato errado -> erro
+    return r?.[0]?.data||null; // array vazio = conta realmente nova
+  },
   async save(t,id,d){await fetch(`${SUPA_URL}/rest/v1/profiles`,{method:"POST",headers:{...supa.ah(t),"Prefer":"resolution=merge-duplicates"},body:JSON.stringify({id,data:d,updated_at:new Date().toISOString()})});},
   async loadShared(codigo){const r=await(await fetch(`${SUPA_URL}/rest/v1/splitwise?codigo=eq.${codigo}&select=data`,{headers:supa.h})).json();return r?.[0]?.data||null;},
   async saveShared(codigo,d){await fetch(`${SUPA_URL}/rest/v1/splitwise`,{method:"POST",headers:{...supa.h,"Prefer":"resolution=merge-duplicates"},body:JSON.stringify({codigo,data:d,updated_at:new Date().toISOString()})});},
@@ -2067,8 +2073,15 @@ export default function App(){
           lsSet("all_profiles",r);
           loadOk.current=true;
         }else{
-          // Conta nova/sem dados na nuvem: usa o que tem local e libera salvamento
+          // load retornou null = conta sem dados na nuvem.
+          // Se há dados locais com conteúdo real, faz um "upload" inicial seguro
+          // (envia o local para a nuvem) em vez de só liberar o save.
+          const local=lsGet("all_profiles");
+          const temConteudo=local&&Object.values(local).some(p=>p&&((p.transacoes?.length)||(p.investimentos?.length)||(p.bancos?.length)));
           loadOk.current=true;
+          if(temConteudo){
+            try{await supa.save(session.token,session.user.id,local);}catch{}
+          }
         }
       }catch{
         // Leitura falhou (Supabase fora/instável). NÃO libera salvamento,
