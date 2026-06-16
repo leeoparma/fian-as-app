@@ -576,7 +576,11 @@ function InvestimentosTab({data,setData,currency,profileId}){
 
   const divMes=(data.dividendos||[]).filter(d=>{const dt=new Date(d.data);return dt.getMonth()===MES_ATUAL&&dt.getFullYear()===ANO_ATUAL;});
   const totDiv=divMes.reduce((a,b)=>a+b.valor,0);
-  const proxDiv=data.investimentos.filter(i=>i.prox_dividendo).sort((a,b)=>a.prox_dividendo.localeCompare(b.prox_dividendo));
+  const hojeStr=hoje.toISOString().slice(0,10);
+  // Próximos dividendos: só os com data futura (ou no máximo 7 dias atrás), evita datas velhas
+  const proxDiv=data.investimentos.filter(i=>i.prox_dividendo&&i.prox_dividendo>=hojeStr).sort((a,b)=>a.prox_dividendo.localeCompare(b.prox_dividendo));
+  // Dividendos com data já vencida (para avisar que precisam atualizar)
+  const divVencidos=data.investimentos.filter(i=>i.prox_dividendo&&i.prox_dividendo<hojeStr);
 
   async function buscarDados(inv){
     if(inv.tipo==="Renda Fixa"||inv.tipo==="Tesouro Direto"){
@@ -586,17 +590,32 @@ function InvestimentosTab({data,setData,currency,profileId}){
     }
     if(!inv.ticker) return;
     setLoadingId(inv.id);
-    const real=await fetchPrecoReal(inv.ticker, profileId);
+    const real=await fetchPrecoReal(inv.ticker, profileId, true);
     if(real?.preco_atual){
       const va=real.preco_atual*(inv.quantidade||1);
       const lucro=va-(inv.precoMedio||0)*(inv.quantidade||1);
-      setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,preco_atual:real.preco_atual,variacao_dia:real.variacao_dia,valorAtual:va,lucro,ultimaAtualizacao:new Date().toLocaleTimeString("pt-BR")}:x)}));
-      try{
-        const mercado=isBR?"bolsa brasileira B3":"bolsa australiana ASX";
-        const txt=await askClaude(`Para o ativo ${inv.ticker} na ${mercado} com preço atual de ${real.preco_atual}, retorne APENAS JSON: {"dy":number_or_null,"prox_dividendo":"YYYY-MM-DD or null","valor_dividendo":number_or_null,"resumo":"1 frase sobre perspectiva atual"}`,300);
-        const extra=JSON.parse(txt);
-        setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,...extra}:x)}));
-      }catch{}
+      // Usa dados de dividendo REAIS do Yahoo quando disponíveis
+      const divUpdate={};
+      if(real.dy!=null) divUpdate.dy=Math.round(real.dy*100)/100;
+      if(real.prox_dividendo) divUpdate.prox_dividendo=real.prox_dividendo;
+      if(real.ex_dividendo) divUpdate.ex_dividendo=real.ex_dividendo;
+      if(real.valor_dividendo!=null) divUpdate.valor_dividendo=Math.round(real.valor_dividendo*100)/100;
+      setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,preco_atual:real.preco_atual,variacao_dia:real.variacao_dia,valorAtual:va,lucro,...divUpdate,ultimaAtualizacao:new Date().toLocaleTimeString("pt-BR")}:x)}));
+      // Só pede ao Claude o que o Yahoo NÃO trouxe (resumo, ou dividendo faltante)
+      if(!real.dy||!real.prox_dividendo){
+        try{
+          const mercado=isBR?"bolsa brasileira B3":"bolsa australiana ASX";
+          const txt=await askClaude(`Para o ativo ${inv.ticker} na ${mercado} com preço atual de ${real.preco_atual}, retorne APENAS JSON: {${!real.dy?'"dy":number_or_null,':''}${!real.prox_dividendo?'"prox_dividendo":"YYYY-MM-DD or null","valor_dividendo":number_or_null,':''}"resumo":"1 frase sobre perspectiva atual"}. Use a data real do próximo pagamento de dividendo se souber; caso contrário use null.`,300);
+          const extra=JSON.parse(txt);
+          // Não sobrescreve o que o Yahoo já trouxe
+          const limpo={};
+          if(!real.dy&&extra.dy!=null) limpo.dy=extra.dy;
+          if(!real.prox_dividendo&&extra.prox_dividendo) limpo.prox_dividendo=extra.prox_dividendo;
+          if(!real.valor_dividendo&&extra.valor_dividendo!=null) limpo.valor_dividendo=extra.valor_dividendo;
+          if(extra.resumo) limpo.resumo=extra.resumo;
+          if(Object.keys(limpo).length) setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,...limpo}:x)}));
+        }catch{}
+      }
     }else{
       try{
         const mercado=isBR?"bolsa brasileira B3":"bolsa australiana ASX";
@@ -767,11 +786,14 @@ function InvestimentosTab({data,setData,currency,profileId}){
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div>
             <p style={{margin:0,fontSize:14,fontWeight:700,color:D.green}}>{inv.ticker}</p>
-            <p style={{margin:"2px 0 0",fontSize:11,color:D.text3}}>Pagamento: {inv.prox_dividendo}</p>
+            <p style={{margin:"2px 0 0",fontSize:11,color:D.text3}}>Pagamento: {inv.prox_dividendo}{inv.ex_dividendo?` · Ex: ${inv.ex_dividendo}`:""}</p>
           </div>
           {inv.valor_dividendo&&<p style={{fontSize:15,fontWeight:700,color:D.gold}}>{fmtM(inv.valor_dividendo,currency)}/ação</p>}
         </div>
       </Card>)}</>}
+      {divVencidos.length>0&&<Card style={{border:`1px solid ${D.gold}33`,background:D.gold+"08"}}>
+        <p style={{fontSize:12,color:D.gold,margin:0}}>⏰ {divVencidos.length} ativo{divVencidos.length>1?"s":""} com data de dividendo vencida ({divVencidos.map(d=>d.ticker).join(", ")}). Clique em <strong>"🔄 Atualizar todos"</strong> no topo para buscar as datas mais recentes do mercado.</p>
+      </Card>}
     </div>}
 
     {view==="evolucao"&&<div style={{display:"flex",flexDirection:"column",gap:12}}>
