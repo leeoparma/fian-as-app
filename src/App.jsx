@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, Component } from "react";
 
 const SUPA_URL="https://llpzdrqgvkpxjnecttkb.supabase.co";
 const SUPA_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxscHpkcnFndmtweGpuZWN0dGtiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3MDA2MjAsImV4cCI6MjA5NjI3NjYyMH0.X3DDKVRppRO-NiC5a2Cc0JrpFAaf5J-hymFHv6vNQ6Q";
@@ -2043,8 +2043,31 @@ function CartaoTab({data,setData,currency,mes}){
   </div>;
 }
 
+// ── Error Boundary: mostra o erro na tela em vez de tela branca ───────────────
+class ErrorBoundary extends Component{
+  constructor(props){super(props);this.state={erro:null,info:null};}
+  static getDerivedStateFromError(erro){return{erro};}
+  componentDidCatch(erro,info){this.setState({info});try{console.error("App crash:",erro,info);}catch{}}
+  render(){
+    if(this.state.erro){
+      const msg=this.state.erro?.message||String(this.state.erro);
+      const stack=this.state.info?.componentStack||this.state.erro?.stack||"";
+      return <div style={{minHeight:"100vh",background:"#0a0e1a",color:"#f1f5f9",padding:"24px",fontFamily:"system-ui,sans-serif"}}>
+        <div style={{maxWidth:680,margin:"0 auto"}}>
+          <h2 style={{color:"#ff4757",fontSize:18}}>⚠️ Ocorreu um erro no app</h2>
+          <p style={{color:"#94a3b8",fontSize:13,marginTop:8}}>Os seus dados estão seguros. Tire um print desta tela e envie. Depois clique em Recarregar.</p>
+          <button onClick={()=>{try{location.reload();}catch{}}} style={{margin:"12px 0",padding:"10px 16px",background:"#00d084",color:"#000",border:"none",borderRadius:8,fontWeight:700,cursor:"pointer"}}>🔄 Recarregar</button>
+          <pre style={{whiteSpace:"pre-wrap",wordBreak:"break-word",background:"#111827",border:"1px solid #1e2d4a",borderRadius:8,padding:"12px",fontSize:11,color:"#f59e0b",marginTop:8}}>{msg}</pre>
+          <pre style={{whiteSpace:"pre-wrap",wordBreak:"break-word",background:"#111827",border:"1px solid #1e2d4a",borderRadius:8,padding:"12px",fontSize:10,color:"#64748b",marginTop:8,maxHeight:300,overflow:"auto"}}>{stack}</pre>
+        </div>
+      </div>;
+    }
+    return this.props.children;
+  }
+}
+
 // ── App Principal ─────────────────────────────────────────────────────────────
-export default function App(){
+function AppInner(){
   const [session,setSession]=useState(()=>lsGet("session"));
   const [allData,setAllData]=useState(()=>lsGet("all_profiles")||EMPTY_ALL);
   const [syncing,setSyncing]=useState(false);
@@ -2244,4 +2267,8 @@ export default function App(){
       {tab===7&&<SplitwiseTab currency={currency} userEmail={session?.user?.email}/>}
     </div>
   </>;
+}
+
+export default function App(){
+  return <ErrorBoundary><AppInner/></ErrorBoundary>;
 }
