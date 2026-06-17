@@ -550,8 +550,6 @@ function InvestimentosTab({data,setData,currency,profileId}){
   const [chartTicker,setChartTicker]=useState(null);const [loadingId,setLoadingId]=useState(null);
   const [modalDiv,setModalDiv]=useState(false);const [divForm,setDivForm]=useState({});
   const [atualizandoTodos,setAtualizandoTodos]=useState(false);
-  const [aporteInput,setAporteInput]=useState(String(data.aporteMensal||""));
-  const [indiceData,setIndiceData]=useState(null);const [indiceLoading,setIndiceLoading]=useState(false);
 
   const isBR=profileId==="br";
   const totalInvest=data.investimentos.reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0);
@@ -565,20 +563,6 @@ function InvestimentosTab({data,setData,currency,profileId}){
   const totalRV=rendaVariavel.reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||0),0);
   const totalRF=rendaFixa.reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||0),0);
   const totalOu=outros.reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||0),0);
-  const totalRVInvestido=rendaVariavel.reduce((a,b)=>a+(b.valorInvestido||b.valor||0),0);
-  const totalRFInvestido=rendaFixa.reduce((a,b)=>a+(b.valorInvestido||b.valor||0),0);
-
-  // Compara a rentabilidade da carteira com o índice de mercado (Ibov / ASX200)
-  async function comparaIndice(){
-    setIndiceLoading(true);
-    try{
-      const simbolo=isBR?"^BVSP":"^AXJO"; // Ibovespa / ASX 200
-      const r=await fetch(`${WORKER}/indice?symbol=${encodeURIComponent(simbolo)}`);
-      const d=await r.json();
-      setIndiceData({variacao:d?.variacao_12m??d?.variacao_dia??0});
-    }catch{setIndiceData({variacao:0});}
-    setIndiceLoading(false);
-  }
 
   const divMes=(data.dividendos||[]).filter(d=>{const dt=new Date(d.data);return dt.getMonth()===MES_ATUAL&&dt.getFullYear()===ANO_ATUAL;});
   const totDiv=divMes.reduce((a,b)=>a+b.valor,0);
@@ -712,7 +696,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
     </Card>
 
     <div style={{display:"flex",gap:4,background:D.card,borderRadius:10,padding:4,border:`1px solid ${D.border}`}}>
-      {[["classe","Por Classe"],["rv","Renda Variável"],["rf","Renda Fixa"],["proventos","Proventos"],["evolucao","Evolução"]].map(([v,l])=><button key={v} onClick={()=>setView(v)} style={{flex:1,padding:"7px 8px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:view===v?700:400,background:view===v?D.blue:"transparent",color:view===v?"#fff":D.text3,whiteSpace:"nowrap"}}>{l}</button>)}
+      {[["classe","Por Classe"],["rv","Renda Variável"],["rf","Renda Fixa"],["proventos","Proventos"]].map(([v,l])=><button key={v} onClick={()=>setView(v)} style={{flex:1,padding:"7px 8px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:view===v?700:400,background:view===v?D.blue:"transparent",color:view===v?"#fff":D.text3,whiteSpace:"nowrap"}}>{l}</button>)}
     </div>
 
     {view==="classe"&&<div style={{display:"flex",flexDirection:"column",gap:10}}>
@@ -754,27 +738,6 @@ function InvestimentosTab({data,setData,currency,profileId}){
         <p style={{fontSize:28,fontWeight:800,color:D.gold}}>{fmtM(totDiv,currency)}</p>
         <p style={{fontSize:11,color:D.text3,marginTop:2}}>{divMes.length} ativo{divMes.length!==1?"s":""} encontrado{divMes.length!==1?"s":""}</p>
       </Card>
-
-      {/* Calendário de dividendos — recebidos por mês (últimos/próximos 6 meses) */}
-      {(()=>{
-        const todos=data.dividendos||[];
-        if(!todos.length) return null;
-        const meses=Array.from({length:6},(_,i)=>{const dt=new Date(ANO_ATUAL,MES_ATUAL-2+i,1);return{m:dt.getMonth(),a:dt.getFullYear(),label:MESES[dt.getMonth()]};});
-        const valores=meses.map(mes=>todos.filter(d=>{const dt=new Date(d.data);return dt.getMonth()===mes.m&&dt.getFullYear()===mes.a;}).reduce((a,b)=>a+b.valor,0));
-        const max=Math.max(...valores,1);
-        return <Card>
-          <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>📅 Calendário de proventos</p>
-          <div style={{display:"flex",gap:6,alignItems:"flex-end",height:100}}>
-            {meses.map((mes,i)=>{const atual=mes.m===MES_ATUAL&&mes.a===ANO_ATUAL;return <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
-              <span style={{fontSize:9,color:valores[i]>0?D.gold:D.text3,fontWeight:600}}>{valores[i]>0?fmtM(valores[i],currency).replace(/\s/g,""):""}</span>
-              <div style={{width:"100%",background:atual?D.gold:D.gold+"66",borderRadius:"3px 3px 0 0",height:Math.max(3,(valores[i]/max)*70)+"px"}}/>
-              <span style={{fontSize:9,color:atual?D.gold:D.text3,fontWeight:atual?700:400}}>{mes.label}</span>
-            </div>;})}
-          </div>
-          <p style={{fontSize:10,color:D.text3,marginTop:6,textAlign:"center"}}>Proventos recebidos por mês · destaque = mês atual</p>
-        </Card>;
-      })()}
-
       <p style={{fontSize:13,fontWeight:700,color:D.text}}>Meus Ativos</p>
       {divMes.length===0&&<p style={{fontSize:13,color:D.text3}}>Nenhum provento registrado este mês. Clique em "💰 Dividendo" para registrar.</p>}
       {divMes.map(d=><Card key={d.id} style={{border:`1px solid ${D.gold}33`}}>
@@ -800,76 +763,6 @@ function InvestimentosTab({data,setData,currency,profileId}){
       {divVencidos.length>0&&<Card style={{border:`1px solid ${D.gold}33`,background:D.gold+"08"}}>
         <p style={{fontSize:12,color:D.gold,margin:0}}>⏰ {divVencidos.length} ativo{divVencidos.length>1?"s":""} com data de dividendo vencida ({divVencidos.map(d=>d.ticker).join(", ")}). Clique em <strong>"🔄 Atualizar todos"</strong> no topo para buscar as datas mais recentes do mercado.</p>
       </Card>}
-    </div>}
-
-    {view==="evolucao"&&<div style={{display:"flex",flexDirection:"column",gap:12}}>
-      {/* Meta de aporte mensal */}
-      <Card style={{border:`1px solid ${D.green}33`}}>
-        <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:8}}>🎯 Meta de aporte mensal</p>
-        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-          <input type="number" value={aporteInput} onChange={e=>setAporteInput(e.target.value)} placeholder={`Valor (${currency})`} style={{flex:1,minWidth:120}}/>
-          <Btn sm color={D.green} onClick={()=>setData(d=>({...d,aporteMensal:parseFloat(aporteInput)||0}))}>Salvar meta</Btn>
-        </div>
-        {data.aporteMensal>0&&(()=>{
-          // Quanto foi aportado este mês (dividendos + novos investimentos do mês)
-          const invMes=data.investimentos.filter(i=>{const dt=new Date(i.data);return dt.getMonth()===MES_ATUAL&&dt.getFullYear()===ANO_ATUAL;}).reduce((a,b)=>a+(b.valorInvestido||b.valor||0),0);
-          const pct=Math.min(100,Math.round(invMes/data.aporteMensal*100));
-          const cor=pct>=100?D.green:pct>=50?D.gold:D.red;
-          return <div style={{marginTop:10}}>
-            <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:4}}>
-              <span style={{color:D.text2}}>Aportado este mês</span>
-              <span style={{color:cor,fontWeight:600}}>{fmtM(invMes,currency)} / {fmtM(data.aporteMensal,currency)}</span>
-            </div>
-            <div style={{background:D.bg3,borderRadius:6,height:8,overflow:"hidden"}}><div style={{width:pct+"%",background:cor,height:8,borderRadius:6}}/></div>
-            <p style={{margin:"4px 0 0",fontSize:11,color:D.text3}}>{pct>=100?"✅ Meta atingida este mês!":`Faltam ${fmtM(Math.max(0,data.aporteMensal-invMes),currency)} para a meta`}</p>
-          </div>;
-        })()}
-      </Card>
-
-      {/* Rentabilidade da carteira */}
-      <Card>
-        <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>📈 Rentabilidade da carteira</p>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:8}}>
-          <MetricCard label="Investido" value={fmtM(totalInvestido,currency)}/>
-          <MetricCard label="Valor atual" value={fmtM(totalInvest,currency)} color={D.blue}/>
-          <MetricCard label="Lucro/Prejuízo" value={fmtM(totalLucro,currency)} color={totalLucro>=0?D.green:D.red} sub={(rentTotal>=0?"+":"")+rentTotal.toFixed(2)+"%"}/>
-        </div>
-        <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:6}}>
-          {[{label:"Renda Variável",v:totalRV,c:totalRVInvestido,color:D.blue},{label:"Renda Fixa",v:totalRF,c:totalRFInvestido,color:D.gold}].filter(x=>x.v>0).map(x=>{
-            const lucro=x.v-x.c,pct=x.c>0?(lucro/x.c*100):0;
-            return <div key={x.label} style={{background:D.bg3,borderRadius:8,padding:"8px 12px"}}>
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:12}}>
-                <span style={{color:D.text2}}>{x.label}</span>
-                <span style={{color:lucro>=0?D.green:D.red,fontWeight:600}}>{lucro>=0?"+":""}{fmtM(lucro,currency)} ({pct>=0?"+":""}{pct.toFixed(1)}%)</span>
-              </div>
-            </div>;
-          })}
-        </div>
-      </Card>
-
-      {/* Comparação com índice */}
-      <Card>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-          <div><p style={{fontSize:13,fontWeight:700,color:D.text,margin:0}}>⚖️ Carteira vs {isBR?"Ibovespa":"ASX 200"}</p><p style={{fontSize:11,color:D.text3,margin:0}}>Compare seu desempenho com o mercado</p></div>
-          <Btn sm color={D.purple} onClick={comparaIndice} disabled={indiceLoading}>{indiceLoading?"...":"Comparar"}</Btn>
-        </div>
-        {indiceData&&<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-          <div style={{flex:1,minWidth:130,background:D.bg3,borderRadius:8,padding:"10px 12px"}}>
-            <p style={{margin:0,fontSize:11,color:D.text3}}>Sua carteira (rent. total)</p>
-            <p style={{margin:"2px 0 0",fontSize:18,fontWeight:700,color:rentTotal>=0?D.green:D.red}}>{rentTotal>=0?"+":""}{rentTotal.toFixed(2)}%</p>
-          </div>
-          <div style={{flex:1,minWidth:130,background:D.bg3,borderRadius:8,padding:"10px 12px"}}>
-            <p style={{margin:0,fontSize:11,color:D.text3}}>{isBR?"Ibovespa":"ASX 200"} (12 meses)</p>
-            <p style={{margin:"2px 0 0",fontSize:18,fontWeight:700,color:indiceData.variacao>=0?D.green:D.red}}>{indiceData.variacao>=0?"+":""}{indiceData.variacao?.toFixed(2)}%</p>
-          </div>
-          <div style={{flex:1,minWidth:130,background:(rentTotal>=indiceData.variacao?D.green:D.red)+"11",borderRadius:8,padding:"10px 12px",border:`1px solid ${rentTotal>=indiceData.variacao?D.green:D.red}33`}}>
-            <p style={{margin:0,fontSize:11,color:D.text3}}>Resultado</p>
-            <p style={{margin:"2px 0 0",fontSize:14,fontWeight:700,color:rentTotal>=indiceData.variacao?D.green:D.red}}>{rentTotal>=indiceData.variacao?"🎉 Batendo o mercado":"Abaixo do mercado"}</p>
-          </div>
-        </div>}
-        {!indiceData&&<p style={{fontSize:12,color:D.text3}}>Clique em "Comparar" para ver se sua carteira está rendendo mais que o índice {isBR?"Ibovespa":"ASX 200"}.</p>}
-        <p style={{fontSize:10,color:D.text3,marginTop:8}}>⚠️ Comparação aproximada: rentabilidade total da carteira vs variação do índice em 12 meses.</p>
-      </Card>
     </div>}
 
     {modal&&<Modal title={form.editId?"Editar ativo":"Novo ativo"} onClose={()=>setModal(false)}>
@@ -1118,7 +1011,6 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
     });
   };
   const [wInput,setWInput]=useState("");const [wCat,setWCat]=useState("");const [wFiltro,setWFiltro]=useState("Todas");const [wLoading,setWLoading]=useState(false);
-  const [alertaEdit,setAlertaEdit]=useState(null);const [alertaPreco,setAlertaPreco]=useState("");const [alertaTipo,setAlertaTipo]=useState("acima");
   const [chartTicker,setChartTicker]=useState(null);
   const [news,setNews]=useState({});const [newsLoading,setNewsLoading]=useState(false);
   const [compInput,setCompInput]=useState("");const [compList,setCompList]=useState([]);const [compLoading,setCompLoading]=useState(false);const [compData,setCompData]=useState([]);
@@ -1209,27 +1101,6 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
 
   function addToComp(ticker){if(!compList.includes(ticker))setCompList(p=>[...p,ticker]);}
 
-  // ── Alertas de preço ───────────────────────────────────────────────────────
-  const alertas=data.alertas||[];
-  function salvarAlerta(ticker){
-    const preco=parseFloat(alertaPreco);
-    if(!preco){setAlertaEdit(null);return;}
-    setData(d=>{
-      const outros=(d.alertas||[]).filter(a=>a.ticker!==ticker);
-      return{...d,alertas:[...outros,{ticker,preco,tipo:alertaTipo,criado:new Date().toISOString(),disparado:false}]};
-    });
-    setAlertaEdit(null);setAlertaPreco("");
-  }
-  function removerAlerta(ticker){
-    setData(d=>({...d,alertas:(d.alertas||[]).filter(a=>a.ticker!==ticker)}));
-  }
-  function alertaDoTicker(ticker){return alertas.find(a=>a.ticker===ticker);}
-  // Verifica se um alerta foi atingido com base no preço atual
-  function alertaAtingido(ticker,precoAtual){
-    const a=alertaDoTicker(ticker);
-    if(!a||precoAtual==null) return false;
-    return a.tipo==="acima"?precoAtual>=a.preco:precoAtual<=a.preco;
-  }
 
   // ── fetchNews com Google News RSS real ─────────────────────────────────────
   async function fetchNews(){
@@ -1497,12 +1368,6 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
   return <div style={{display:"flex",flexDirection:"column",gap:"1.25rem"}}>
     {chartTicker&&<ChartModal ticker={chartTicker} onClose={()=>setChartTicker(null)}/>}
     {erro&&<div style={{background:D.red+"22",border:`1px solid ${D.red}44`,borderRadius:10,padding:"10px 14px",fontSize:12,color:D.red,display:"flex",justifyContent:"space-between"}}>{erro}<button onClick={()=>setErro("")} style={{border:"none",background:"none",cursor:"pointer",color:D.red}}>✕</button></div>}
-
-    {/* Banner de alertas de preço atingidos */}
-    {(()=>{const atingidos=watchlist.filter(w=>alertaAtingido(w.ticker,w.preco));if(!atingidos.length)return null;return <div style={{background:D.gold+"22",border:`1px solid ${D.gold}55`,borderRadius:10,padding:"10px 14px",boxShadow:`0 0 12px ${D.gold}33`}}>
-      <p style={{margin:"0 0 6px",fontSize:13,fontWeight:700,color:D.gold}}>🔔 Alerta{atingidos.length>1?"s":""} de preço atingido{atingidos.length>1?"s":""}!</p>
-      {atingidos.map(w=>{const a=alertaDoTicker(w.ticker);return <p key={w.ticker} style={{margin:"2px 0",fontSize:12,color:D.text2}}><strong style={{color:D.gold}}>{w.ticker}</strong> está em {currency} {Number(w.preco).toFixed(2)} ({a.tipo==="acima"?"≥":"≤"} seu alvo de {currency} {Number(a.preco).toFixed(2)})</p>;})}
-    </div>;})()}
 
     {/* ── NOVO: Chat com Analista IA ───────────────────────────────────────── */}
     <Card style={{border:`1px solid ${D.blue}33`}}>
@@ -1800,10 +1665,9 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
       {watchlist.length>0&&<div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:10}}>{cats.map(c=><button key={c} onClick={()=>setWFiltro(c)} style={{padding:"3px 10px",borderRadius:16,fontSize:11,cursor:"pointer",border:wFiltro===c?`1px solid ${D.green}`:`1px solid ${D.border}`,background:wFiltro===c?D.green+"22":"transparent",color:wFiltro===c?D.green:D.text3}}>{c}{c!=="Todas"?` (${watchlist.filter(w=>(w.categoria||"Outros")===c).length})`:""}</button>)}</div>}
       {wlFilt.length===0&&<p style={{fontSize:13,color:D.text3}}>Nenhum ativo.</p>}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(145px,1fr))",gap:8}}>
-        {wlFilt.map(w=>{const atingido=alertaAtingido(w.ticker,w.preco);const alerta=alertaDoTicker(w.ticker);return <div key={w.ticker} style={{background:D.bg3,borderRadius:10,padding:"10px 12px",border:`1px solid ${atingido?D.gold:D.border}`,position:"relative",boxShadow:atingido?`0 0 12px ${D.gold}55`:"none"}} onMouseEnter={e=>{if(!atingido)e.currentTarget.style.borderColor=D.green;}} onMouseLeave={e=>{if(!atingido)e.currentTarget.style.borderColor=D.border;}}>
+        {wlFilt.map(w=><div key={w.ticker} style={{background:D.bg3,borderRadius:10,padding:"10px 12px",border:`1px solid ${D.border}`,position:"relative"}} onMouseEnter={e=>e.currentTarget.style.borderColor=D.green} onMouseLeave={e=>e.currentTarget.style.borderColor=D.border}>
           <button onClick={()=>setWatchlist(p=>p.filter(x=>x.ticker!==w.ticker))} style={{position:"absolute",top:5,right:6,border:"none",background:"none",cursor:"pointer",fontSize:11,color:D.text3}}>✕</button>
-          {atingido&&<div style={{position:"absolute",top:5,left:6,fontSize:11}} title="Alerta atingido!">🔔</div>}
-          <p onClick={()=>setChartTicker(w.ticker)} style={{margin:`${atingido?"12px":"0"} 0 2px`,fontSize:13,fontWeight:700,color:D.green,cursor:"pointer"}}>{w.ticker}</p>
+          <p onClick={()=>setChartTicker(w.ticker)} style={{margin:"0 0 2px",fontSize:13,fontWeight:700,color:D.green,cursor:"pointer"}}>{w.ticker}</p>
           <p style={{margin:"0 0 3px",fontSize:11,color:D.text3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{w.nome||"—"}</p>
           {w.categoria&&<div style={{marginBottom:4}}><Badge color={D.blue}>{w.categoria}</Badge></div>}
           <p style={{margin:"2px 0 2px",fontSize:15,fontWeight:700,color:D.text}}>{w.preco!=null?`${currency} ${Number(w.preco).toFixed(2)}`:"—"}</p>
@@ -1812,27 +1676,11 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
             {w.pl!=null&&<Badge color={D.blue}>P/L {Number(w.pl).toFixed(1)}</Badge>}
             {w.dy!=null&&<Badge color={D.gold}>DY {Number(w.dy).toFixed(1)}%</Badge>}
           </div>
-          {/* Alerta de preço */}
-          {alertaEdit===w.ticker?<div style={{marginTop:6,padding:"6px",background:D.bg2,borderRadius:6}}>
-            <div style={{display:"flex",gap:3,marginBottom:4}}>
-              <button onClick={()=>setAlertaTipo("acima")} style={{flex:1,fontSize:9,padding:"3px",borderRadius:4,border:"none",cursor:"pointer",background:alertaTipo==="acima"?D.green:D.bg3,color:alertaTipo==="acima"?"#000":D.text3}}>≥ Acima</button>
-              <button onClick={()=>setAlertaTipo("abaixo")} style={{flex:1,fontSize:9,padding:"3px",borderRadius:4,border:"none",cursor:"pointer",background:alertaTipo==="abaixo"?D.red:D.bg3,color:alertaTipo==="abaixo"?"#fff":D.text3}}>≤ Abaixo</button>
-            </div>
-            <input type="number" value={alertaPreco} onChange={e=>setAlertaPreco(e.target.value)} onKeyDown={e=>e.key==="Enter"&&salvarAlerta(w.ticker)} placeholder={`Preço (${currency})`} style={{fontSize:11,padding:"4px 6px",marginBottom:4}} autoFocus/>
-            <div style={{display:"flex",gap:3}}>
-              <button onClick={()=>salvarAlerta(w.ticker)} style={{flex:1,fontSize:9,padding:"3px",borderRadius:4,border:"none",cursor:"pointer",background:D.green,color:"#000"}}>Salvar</button>
-              <button onClick={()=>{setAlertaEdit(null);setAlertaPreco("");}} style={{flex:1,fontSize:9,padding:"3px",borderRadius:4,border:`1px solid ${D.border2}`,cursor:"pointer",background:"transparent",color:D.text3}}>Cancelar</button>
-            </div>
-          </div>:alerta?<div style={{marginTop:6,display:"flex",alignItems:"center",gap:4,padding:"3px 6px",background:atingido?D.gold+"22":D.bg2,borderRadius:6,fontSize:10}}>
-            <span style={{color:atingido?D.gold:D.text3}}>🔔 {alerta.tipo==="acima"?"≥":"≤"} {currency} {Number(alerta.preco).toFixed(2)}</span>
-            <button onClick={()=>removerAlerta(w.ticker)} style={{marginLeft:"auto",border:"none",background:"none",cursor:"pointer",color:D.red,fontSize:10}}>✕</button>
-          </div>:null}
           <div style={{display:"flex",gap:4,marginTop:6,flexWrap:"wrap"}}>
             <button onClick={()=>addToComp(w.ticker)} style={{flex:1,border:`1px solid ${D.blue}44`,background:"transparent",color:D.blue,borderRadius:5,padding:"2px 4px",fontSize:9,cursor:"pointer"}}>+ Comp</button>
             <button onClick={()=>gerarRelatorio(w.ticker)} style={{flex:1,border:`1px solid ${D.gold}44`,background:"transparent",color:D.gold,borderRadius:5,padding:"2px 4px",fontSize:9,cursor:"pointer"}}>📄 Rep.</button>
-            {!alerta&&alertaEdit!==w.ticker&&<button onClick={()=>{setAlertaEdit(w.ticker);setAlertaPreco(w.preco?String(w.preco):"");setAlertaTipo("acima");}} style={{flex:1,border:`1px solid ${D.purple}44`,background:"transparent",color:D.purple,borderRadius:5,padding:"2px 4px",fontSize:9,cursor:"pointer"}}>🔔 Alerta</button>}
           </div>
-        </div>;})}
+        </div>)}
       </div>
     </Card>
 
@@ -2147,10 +1995,16 @@ function AppInner(){
 
   const profile=PROFILES.find(p=>p.id===profileId);
   const currency=profile.currency;
-  // Mescla com EMPTY para garantir que campos novos (historico, alertas, watchlist, etc)
-  // sempre existam, mesmo em perfis salvos antes dessas features. Evita tela branca.
-  const data={...EMPTY,...(allData[profileId]||{})};
-  const catD=data.catD||CAT_D_DEF,catR=data.catR||CAT_R_DEF;
+  // Mescla com EMPTY e SANITIZA: garante que campos que devem ser array sejam array,
+  // mesmo se vierem corrompidos do localStorage/nuvem. Evita crash de renderização.
+  const data=(()=>{
+    const raw={...EMPTY,...(allData[profileId]||{})};
+    const arrayFields=["transacoes","faturas","investimentos","metas","bancos","orcamentos","recorrencias","dividendos","watchlist","alertas","historico","catD","catR"];
+    for(const f of arrayFields){ if(!Array.isArray(raw[f])) raw[f]=Array.isArray(EMPTY[f])?[...EMPTY[f]]:[]; }
+    if(typeof raw.aporteMensal!=="number") raw.aporteMensal=0;
+    return raw;
+  })();
+  const catD=data.catD.length?data.catD:CAT_D_DEF,catR=data.catR.length?data.catR:CAT_R_DEF;
 
   const txMes=data.transacoes.filter(t=>{const d=new Date(t.data);return d.getMonth()===mes&&d.getFullYear()===ANO_ATUAL;});
   const totR=txMes.filter(t=>t.tipo==="receita").reduce((a,b)=>a+b.valor,0);
@@ -2175,31 +2029,6 @@ function AppInner(){
 
   // Snapshot mensal do patrimônio (para o histórico). Roda no máximo 1x por montagem,
   // após um delay, e com guardas para nunca interferir na renderização.
-  const snapDone=useRef(false);
-  useEffect(()=>{
-    if(snapDone.current) return;
-    const t=setTimeout(()=>{
-      if(!loadOk.current) return;
-      const mesKey=`${ANO_ATUAL}-${String(MES_ATUAL+1).padStart(2,"0")}`;
-      setAllData(all=>{
-        const prof=all[profileId]||{...EMPTY};
-        const hist=prof.historico||[];
-        const tB=(prof.bancos||[]).reduce((a,b)=>a+saldoBanco(b),0);
-        const tI=(prof.investimentos||[]).reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0);
-        const pat=tB+tI;
-        const existente=hist.find(h=>h.mes===mesKey);
-        if(existente&&Math.abs((existente.patrimonio||0)-pat)<=0.01) return all;
-        const novoHist=[...hist.filter(h=>h.mes!==mesKey),{mes:mesKey,patrimonio:Math.round(pat*100)/100,bancos:Math.round(tB*100)/100,investimentos:Math.round(tI*100)/100}].sort((a,b)=>a.mes.localeCompare(b.mes)).slice(-24);
-        const updated={...all,[profileId]:{...prof,historico:novoHist}};
-        lsSet("all_profiles",updated);
-        if(session&&loadOk.current){clearTimeout(saveTimer.current);saveTimer.current=setTimeout(()=>supa.save(session.token,session.user.id,updated).catch(()=>{}),1500);}
-        return updated;
-      });
-      snapDone.current=true;
-    },4000);
-    return()=>clearTimeout(t);
-  },[profileId]);
-
   return <>
     <style>{GS}</style>
     <div style={{maxWidth:780,margin:"0 auto",padding:"0.75rem 1rem 4rem",minHeight:"100vh"}}>
@@ -2244,24 +2073,10 @@ function AppInner(){
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:8}}>
             <p style={{fontSize:14,fontWeight:700,color:D.text}}>Evolução financeira</p>
             <div style={{display:"flex",gap:3}}>
-              {[["barras","📊"],["patrimonio","💰"],["pizza_d","🥧D"],["pizza_r","🥧R"],["linha","📈"]].map(([v,l])=><button key={v} onClick={()=>setGrafico(v)} style={{padding:"4px 10px",borderRadius:16,fontSize:11,cursor:"pointer",border:grafico===v?`1px solid ${D.green}`:`1px solid ${D.border}`,background:grafico===v?D.green+"22":"transparent",color:grafico===v?D.green:D.text3}}>{l}</button>)}
+              {[["barras","📊"],["pizza_d","🥧D"],["pizza_r","🥧R"],["linha","📈"]].map(([v,l])=><button key={v} onClick={()=>setGrafico(v)} style={{padding:"4px 10px",borderRadius:16,fontSize:11,cursor:"pointer",border:grafico===v?`1px solid ${D.green}`:`1px solid ${D.border}`,background:grafico===v?D.green+"22":"transparent",color:grafico===v?D.green:D.text3}}>{l}</button>)}
             </div>
           </div>
           {grafico==="barras"&&<BarChart data={ultimos6} currency={currency}/>}
-          {grafico==="patrimonio"&&(()=>{
-            const h=(data.historico||[]).slice(-12);
-            if(h.length<2) return <p style={{fontSize:12,color:D.text3,padding:"20px 0",textAlign:"center"}}>📊 O histórico de patrimônio aparecerá aqui conforme você usa o app ao longo dos meses. Ainda precisa de pelo menos 2 meses de dados.</p>;
-            const pts=h.map(x=>{const[a,m]=x.mes.split("-");return{label:MESES[parseInt(m)-1],v:x.patrimonio};});
-            const prim=h[0].patrimonio,ult=h[h.length-1].patrimonio;
-            const variacao=prim>0?((ult-prim)/prim*100):0;
-            return <div>
-              <div style={{display:"flex",gap:12,marginBottom:10,flexWrap:"wrap"}}>
-                <div><p style={{margin:0,fontSize:10,color:D.text3,textTransform:"uppercase"}}>Atual</p><p style={{margin:0,fontSize:18,fontWeight:700,color:D.green}}>{fmtM(ult,currency)}</p></div>
-                <div><p style={{margin:0,fontSize:10,color:D.text3,textTransform:"uppercase"}}>Variação período</p><p style={{margin:0,fontSize:18,fontWeight:700,color:variacao>=0?D.green:D.red}}>{variacao>=0?"▲":"▼"} {Math.abs(variacao).toFixed(1)}%</p></div>
-              </div>
-              <LineChart data={pts} currency={currency}/>
-            </div>;
-          })()}
           {grafico==="pizza_d"&&<PieChart slices={catPieD}/>}
           {grafico==="pizza_r"&&<PieChart slices={catPieR}/>}
           {grafico==="linha"&&<LineChart data={lineData} currency={currency}/>}
