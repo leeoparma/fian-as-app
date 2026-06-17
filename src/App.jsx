@@ -2055,8 +2055,11 @@ class ErrorBoundary extends Component{
       return <div style={{minHeight:"100vh",background:"#0a0e1a",color:"#f1f5f9",padding:"24px",fontFamily:"system-ui,sans-serif"}}>
         <div style={{maxWidth:680,margin:"0 auto"}}>
           <h2 style={{color:"#ff4757",fontSize:18}}>⚠️ Ocorreu um erro no app</h2>
-          <p style={{color:"#94a3b8",fontSize:13,marginTop:8}}>Os seus dados estão seguros. Tire um print desta tela e envie. Depois clique em Recarregar.</p>
-          <button onClick={()=>{try{location.reload();}catch{}}} style={{margin:"12px 0",padding:"10px 16px",background:"#00d084",color:"#000",border:"none",borderRadius:8,fontWeight:700,cursor:"pointer"}}>🔄 Recarregar</button>
+          <p style={{color:"#94a3b8",fontSize:13,marginTop:8}}>Os seus dados estão seguros. Tente o "Modo seguro" abaixo — ele recarrega o app numa tela simples. Se não resolver, tire um print desta tela e envie.</p>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",margin:"12px 0"}}>
+            <button onClick={()=>{try{location.reload();}catch{}}} style={{padding:"10px 16px",background:"#00d084",color:"#000",border:"none",borderRadius:8,fontWeight:700,cursor:"pointer"}}>🔄 Recarregar</button>
+            <button onClick={()=>{try{localStorage.setItem("active_profile","br");localStorage.setItem("force_tab","0");location.reload();}catch{}}} style={{padding:"10px 16px",background:"#3b82f6",color:"#fff",border:"none",borderRadius:8,fontWeight:700,cursor:"pointer"}}>🛡️ Modo seguro</button>
+          </div>
           <pre style={{whiteSpace:"pre-wrap",wordBreak:"break-word",background:"#111827",border:"1px solid #1e2d4a",borderRadius:8,padding:"12px",fontSize:11,color:"#f59e0b",marginTop:8}}>{msg}</pre>
           <pre style={{whiteSpace:"pre-wrap",wordBreak:"break-word",background:"#111827",border:"1px solid #1e2d4a",borderRadius:8,padding:"12px",fontSize:10,color:"#64748b",marginTop:8,maxHeight:300,overflow:"auto"}}>{stack}</pre>
         </div>
@@ -2170,19 +2173,32 @@ function AppInner(){
     });
   },[profileId]);
 
-  // Snapshot mensal do patrimônio (para o histórico). Salva/atualiza 1x por mês.
+  // Snapshot mensal do patrimônio (para o histórico). Roda no máximo 1x por montagem,
+  // após um delay, e com guardas para nunca interferir na renderização.
+  const snapDone=useRef(false);
   useEffect(()=>{
-    if(!loadOk.current) return; // só grava depois que a nuvem carregou (evita lixo)
-    const mesKey=`${ANO_ATUAL}-${String(MES_ATUAL+1).padStart(2,"0")}`;
-    const hist=data.historico||[];
-    const existente=hist.find(h=>h.mes===mesKey);
-    // Atualiza se não existe, ou se o valor mudou de forma relevante
-    if(!existente||Math.abs((existente.patrimonio||0)-patrimonioLiq)>0.01){
-      const novoHist=[...hist.filter(h=>h.mes!==mesKey),{mes:mesKey,patrimonio:Math.round(patrimonioLiq*100)/100,bancos:Math.round(totBancos*100)/100,investimentos:Math.round(totInv*100)/100}].sort((a,b)=>a.mes.localeCompare(b.mes)).slice(-24);
-      const t=setTimeout(()=>setData(d=>({...d,historico:novoHist})),2500);
-      return()=>clearTimeout(t);
-    }
-  },[patrimonioLiq,totBancos,totInv,profileId]);
+    if(snapDone.current) return;
+    const t=setTimeout(()=>{
+      if(!loadOk.current) return;
+      const mesKey=`${ANO_ATUAL}-${String(MES_ATUAL+1).padStart(2,"0")}`;
+      setAllData(all=>{
+        const prof=all[profileId]||{...EMPTY};
+        const hist=prof.historico||[];
+        const tB=(prof.bancos||[]).reduce((a,b)=>a+saldoBanco(b),0);
+        const tI=(prof.investimentos||[]).reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0);
+        const pat=tB+tI;
+        const existente=hist.find(h=>h.mes===mesKey);
+        if(existente&&Math.abs((existente.patrimonio||0)-pat)<=0.01) return all;
+        const novoHist=[...hist.filter(h=>h.mes!==mesKey),{mes:mesKey,patrimonio:Math.round(pat*100)/100,bancos:Math.round(tB*100)/100,investimentos:Math.round(tI*100)/100}].sort((a,b)=>a.mes.localeCompare(b.mes)).slice(-24);
+        const updated={...all,[profileId]:{...prof,historico:novoHist}};
+        lsSet("all_profiles",updated);
+        if(session&&loadOk.current){clearTimeout(saveTimer.current);saveTimer.current=setTimeout(()=>supa.save(session.token,session.user.id,updated).catch(()=>{}),1500);}
+        return updated;
+      });
+      snapDone.current=true;
+    },4000);
+    return()=>clearTimeout(t);
+  },[profileId]);
 
   return <>
     <style>{GS}</style>
