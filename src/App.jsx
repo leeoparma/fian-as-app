@@ -1988,6 +1988,17 @@ function AppInner(){
   }
   useEffect(()=>{lsSet("active_profile",profileId);setTab(0);},[profileId]);
 
+  useEffect(()=>{
+    if(!session)return;
+    const prof=allData[profileId];
+    if(!prof||!prof.recorrencias?.length)return;
+    const hojeD=new Date();const mAtual=hojeD.getMonth();const aAtual=hojeD.getFullYear();
+    prof.recorrencias.forEach(rec=>{
+      const jaLancou=(prof.transacoes||[]).some(t=>t.recorrenciaId===rec.id&&new Date(t.data).getMonth()===mAtual&&new Date(t.data).getFullYear()===aAtual);
+      if(!jaLancou&&rec.dia<=hojeD.getDate()){setData(d=>({...d,transacoes:[...d.transacoes,{id:uid(),tipo:rec.tipo,descricao:rec.descricao,valor:rec.valor,categoria:rec.categoria,data:`${aAtual}-${String(mAtual+1).padStart(2,"0")}-${String(rec.dia).padStart(2,"0")}`,bancoId:rec.bancoId||null,recorrenciaId:rec.id}]}));}
+    });
+  },[profileId,session]);
+
   function exportar(){const p={version:4,exportedAt:new Date().toISOString(),all_profiles:allData,watchlist_br:lsGet("watchlist_br")||[],watchlist_au:lsGet("watchlist_au")||[]};const b=new Blob([JSON.stringify(p,null,2)],{type:"application/json"});const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download=`financas_${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(u);}
   function importar(e){const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=ev=>{try{const p=JSON.parse(ev.target.result);if(!p.all_profiles){alert("Arquivo inválido.");return;}if(!window.confirm("Substituir todos os dados?"))return;lsSet("all_profiles",p.all_profiles);if(p.watchlist_br)lsSet("watchlist_br",p.watchlist_br);if(p.watchlist_au)lsSet("watchlist_au",p.watchlist_au);setAllData(p.all_profiles);if(session)supa.save(session.token,session.user.id,p.all_profiles).catch(()=>{});alert("✅ Dados restaurados!");}catch{alert("Arquivo inválido.");}};r.readAsText(file);e.target.value="";}
 
@@ -2019,16 +2030,6 @@ function AppInner(){
   const catPieD=catD.map((c,i)=>({label:c,v:txMes.filter(t=>t.tipo==="despesa"&&t.categoria===c).reduce((a,b)=>a+b.valor,0),color:CORES[i%CORES.length]})).filter(x=>x.v>0);
   const catPieR=catR.map((c,i)=>({label:c,v:txMes.filter(t=>t.tipo==="receita"&&t.categoria===c).reduce((a,b)=>a+b.valor,0),color:CORES[i%CORES.length]})).filter(x=>x.v>0);
 
-  useEffect(()=>{
-    if(!data.recorrencias?.length)return;
-    data.recorrencias.forEach(rec=>{
-      const jaLancou=data.transacoes.some(t=>t.recorrenciaId===rec.id&&new Date(t.data).getMonth()===MES_ATUAL&&new Date(t.data).getFullYear()===ANO_ATUAL);
-      if(!jaLancou&&rec.dia<=hoje.getDate()){setData(d=>({...d,transacoes:[...d.transacoes,{id:uid(),tipo:rec.tipo,descricao:rec.descricao,valor:rec.valor,categoria:rec.categoria,data:`${ANO_ATUAL}-${String(MES_ATUAL+1).padStart(2,"0")}-${String(rec.dia).padStart(2,"0")}`,bancoId:rec.bancoId||null,recorrenciaId:rec.id}]}));}
-    });
-  },[profileId]);
-
-  // Snapshot mensal do patrimônio (para o histórico). Roda no máximo 1x por montagem,
-  // após um delay, e com guardas para nunca interferir na renderização.
   return <>
     <style>{GS}</style>
     <div style={{maxWidth:780,margin:"0 auto",padding:"0.75rem 1rem 4rem",minHeight:"100vh"}}>
