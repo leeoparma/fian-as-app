@@ -77,17 +77,31 @@ function parseCSV(text){
   if(!lines.length)return txs;
   const sep=(lines[0].match(/;/g)||[]).length>0?";":",";
   const cols=_splitCSVLine(lines[0],sep).map(c=>c.toLowerCase().trim());
-  const hasHeader=/data|date|valor|amount|hist|desc|narration/i.test(lines[0]);
-  let iData=cols.findIndex(c=>/data|date/.test(c));
-  let iDesc=cols.findIndex(c=>/desc|hist|memo|detalhe|narration|transaction|lan[çc]amento|movimenta|estabelec|favorecido|benefici/i.test(c));
-  let iValor=cols.findIndex(c=>/valor|amount|montante/.test(c));
-  if(iData<0)iData=0;if(iDesc<0)iDesc=1;if(iValor<0)iValor=cols.length-1;
+  const hasHeader=/data|date|valor|amount|hist|desc|narration|lan[çc]amento/i.test(lines[0])&&!/^\d/.test(lines[0].trim());
+  let iData,iDesc,iValor;
+  if(hasHeader){
+    iData=cols.findIndex(c=>/data|date/.test(c));
+    iDesc=cols.findIndex(c=>/desc|hist|memo|detalhe|narration|transaction|lan[çc]amento|movimenta|estabelec|favorecido|benefici/i.test(c));
+    iValor=cols.findIndex(c=>/valor|amount|montante/.test(c));
+    if(iData<0)iData=0;if(iDesc<0)iDesc=1;if(iValor<0)iValor=cols.length-1;
+  }else{
+    // CSV sem cabeçalho (ex: CommBank "Data,Valor,Descrição,Saldo") — detecta colunas pela natureza
+    const first=_splitCSVLine(lines[0],sep).map(c=>c.trim());
+    iData=first.findIndex(c=>/^\d{1,2}\/\d{1,2}\/\d{4}$|^\d{4}-\d{2}-\d{2}/.test(c));
+    if(iData<0)iData=0;
+    const isNum=s=>/^-?\$?[\d.,]+$/.test(s.replace(/\s/g,""))&&/\d/.test(s);
+    iValor=-1;for(let k=0;k<first.length;k++){if(k===iData)continue;if(isNum(first[k])){iValor=k;break;}}
+    if(iValor<0)iValor=1;
+    let melhor=-1,maxLetras=0;
+    for(let k=0;k<first.length;k++){if(k===iData||k===iValor)continue;const letras=(first[k].match(/[a-zA-Z]/g)||[]).length;if(letras>maxLetras){maxLetras=letras;melhor=k;}}
+    iDesc=melhor>=0?melhor:2;
+  }
   const start=hasHeader?1:0;
   for(let i=start;i<lines.length;i++){
     const parts=_splitCSVLine(lines[i],sep);
     if(parts.length<2)continue;
     const dataRaw=(parts[iData]||"").trim();const desc=(parts[iDesc]||"Sem descrição").trim();
-    let v=(parts[iValor]||"").trim().replace(/\s/g,"");
+    let v=(parts[iValor]||"").trim().replace(/\s/g,"").replace(/\$/g,"");
     if(v.includes(",")&&v.includes(".")){if(v.lastIndexOf(",")>v.lastIndexOf("."))v=v.replace(/\./g,"").replace(",",".");else v=v.replace(/,/g,"");}
     else if(v.includes(","))v=v.replace(",",".");
     const num=parseFloat(v);if(isNaN(num))continue;
@@ -105,11 +119,12 @@ const _CAT_RULES=[
   [/farmacia|drogaria|hospital|clinica|medic|saude|health|pharmacy|chemist|dentist/i,"Saúde"],
   [/netflix|spotify|prime|disney|hbo|youtube|assinatura|subscription|apple\.com|google/i,"Assinatura"],
   [/cinema|teatro|show|ingresso|game|steam|lazer|entertain/i,"Lazer"],
-  [/aluguel|condominio|luz|energia|agua|gas|internet|vivo|claro|tim|rent|electricity|water/i,"Moradia"],
+  [/aluguel|condominio|luz|energia|agua|gas|internet|vivo|claro|tim|rent|electricity|water|stone property/i,"Moradia"],
   [/escola|faculdade|curso|udemy|alura|livro|education|tuition|university/i,"Educação"],
   [/zara|renner|cea|riachuelo|nike|adidas|roupa|vestuario|clothing|myer/i,"Vestuário"],
   [/salario|salary|pagamento|payroll|provento|wage/i,"Salário"],
   [/dividend|jcp|rendiment/i,"Dividendos"],
+  [/finance|mazda|car loan|financ|emprestimo|loan/i,"Transporte"],
 ];
 function categorizar(descricao,tipo){
   const d=descricao||"";
