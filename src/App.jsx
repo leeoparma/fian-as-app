@@ -211,15 +211,95 @@ function TVWidget({type,config}){
   useEffect(()=>{const el=ref.current;if(!el)return;el.innerHTML="";const w=document.createElement("div");w.className="tradingview-widget-container__widget";el.appendChild(w);const s=document.createElement("script");s.type="text/javascript";s.async=true;s.src=`https://s3.tradingview.com/external-embedding/embed-widget-${type}.js`;s.innerHTML=JSON.stringify({...config,theme:"dark",colorTheme:"dark"});el.appendChild(s);return()=>{el.innerHTML="";};},[JSON.stringify(config)]);
   return <div ref={ref} style={{minHeight:config.height||400,borderRadius:10,overflow:"hidden",background:D.bg3,display:"flex",alignItems:"center",justifyContent:"center"}}><p style={{color:D.text3,fontSize:13}}>Carregando TradingView...</p></div>;
 }
-function ChartModal({ticker,onClose}){
+function ChartModal({ticker,onClose,currency="A$",market="au",dyAlvo=6}){
   const sym=/^[A-Z0-9]{1,6}(\.[A-Z]+)?$/.test(ticker)?ticker:"BMFBOVESPA:"+ticker;
-  return <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,backdropFilter:"blur(6px)"}}>
-    <div onClick={e=>e.stopPropagation()} style={{background:D.card,border:`1px solid ${D.border2}`,borderRadius:16,padding:"1rem",width:"min(96vw,800px)"}}>
+  const [dados,setDados]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [erro,setErro]=useState(false);
+  const [aba,setAba]=useState("resumo");
+  const [news,setNews]=useState(null);
+  const [newsLoading,setNewsLoading]=useState(false);
+  useEffect(()=>{
+    let vivo=true;
+    setLoading(true);setErro(false);
+    fetch(`${WORKER}/raiox?ticker=${encodeURIComponent(ticker)}&market=${market}`)
+      .then(r=>r.json()).then(d=>{if(vivo){if(d&&!d.error)setDados(d);else setErro(true);setLoading(false);}})
+      .catch(()=>{if(vivo){setErro(true);setLoading(false);}});
+    return()=>{vivo=false;};
+  },[ticker,market]);
+  function carregarNews(){
+    if(news||newsLoading)return;
+    setNewsLoading(true);
+    fetch(`${WORKER}/news?q=${encodeURIComponent(ticker)}`).then(r=>r.json()).then(d=>{setNews(Array.isArray(d)?d.slice(0,6):(d.items||[]).slice(0,6));setNewsLoading(false);}).catch(()=>{setNews([]);setNewsLoading(false);});
+  }
+  const preco=dados?.preco_atual??dados?.preco??null;
+  const teto=(dados?.dy&&dados.dy>0&&preco)?preco*(dados.dy/dyAlvo):null;
+  const Ind=({label,valor,suf="",bom})=><div style={{background:D.bg3,borderRadius:8,padding:"8px 10px",minWidth:90,flex:"1 1 90px"}}>
+    <p style={{margin:0,fontSize:10,color:D.text3,textTransform:"uppercase"}}>{label}</p>
+    <p style={{margin:"2px 0 0",fontSize:15,fontWeight:700,color:bom===true?D.green:bom===false?D.red:D.text}}>{valor!=null?`${typeof valor==="number"?valor.toFixed(2):valor}${suf}`:"—"}</p>
+  </div>;
+  const Var=({label,v})=><div style={{textAlign:"center",flex:1}}>
+    <p style={{margin:0,fontSize:10,color:D.text3}}>{label}</p>
+    <p style={{margin:"2px 0 0",fontSize:13,fontWeight:700,color:v==null?D.text3:v>=0?D.green:D.red}}>{v==null?"—":`${v>=0?"▲":"▼"} ${Math.abs(v).toFixed(1)}%`}</p>
+  </div>;
+  return <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,backdropFilter:"blur(6px)",padding:12}}>
+    <div onClick={e=>e.stopPropagation()} style={{background:D.card,border:`1px solid ${D.border2}`,borderRadius:16,padding:"1rem",width:"min(96vw,820px)",maxHeight:"92vh",overflowY:"auto"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-        <span style={{fontSize:18,fontWeight:700,color:D.text}}>{ticker}</span>
+        <div>
+          <span style={{fontSize:20,fontWeight:800,color:D.text}}>{ticker}</span>
+          {preco!=null&&<span style={{marginLeft:10,fontSize:18,fontWeight:700,color:D.text}}>{currency} {Number(preco).toFixed(2)}</span>}
+          {dados?.variacao_dia!=null&&<span style={{marginLeft:8,fontSize:13,fontWeight:600,color:dados.variacao_dia>=0?D.green:D.red}}>{dados.variacao_dia>=0?"▲":"▼"} {Math.abs(dados.variacao_dia).toFixed(2)}%</span>}
+        </div>
         <button onClick={onClose} style={{border:"none",background:"none",cursor:"pointer",fontSize:22,color:D.text3}}>✕</button>
       </div>
-      <TVWidget type="advanced-chart" config={{symbol:sym,interval:"D",locale:"pt_BR",style:"1",width:"100%",height:500,allow_symbol_change:true}}/>
+      <div style={{display:"flex",gap:4,marginBottom:12,flexWrap:"wrap"}}>
+        {[["resumo","📊 Resumo"],["dividendos","💰 Dividendos"],["grafico","📈 Gráfico"],["noticias","📰 Notícias"]].map(([v,l])=><button key={v} onClick={()=>{setAba(v);if(v==="noticias")carregarNews();}} style={{padding:"5px 12px",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:aba===v?700:400,background:aba===v?D.blue:D.bg3,color:aba===v?"#fff":D.text3}}>{l}</button>)}
+      </div>
+      {loading&&<p style={{fontSize:13,color:D.text3,padding:"30px 0",textAlign:"center"}}>⏳ Buscando dados de {ticker}...</p>}
+      {erro&&<p style={{fontSize:13,color:D.red,padding:"20px 0",textAlign:"center"}}>Não consegui buscar os dados agora. Tente novamente em instantes.</p>}
+      {!loading&&!erro&&dados&&<>
+        {aba==="resumo"&&<div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
+            <Ind label="P/L" valor={dados.pl} bom={dados.pl!=null?dados.pl<15:undefined}/>
+            <Ind label="P/VP" valor={dados.pvp} bom={dados.pvp!=null?dados.pvp<2:undefined}/>
+            <Ind label="DY" valor={dados.dy} suf="%" bom={dados.dy!=null?dados.dy>=dyAlvo:undefined}/>
+            <Ind label="ROE" valor={dados.roe} suf="%" bom={dados.roe!=null?dados.roe>10:undefined}/>
+          </div>
+          {teto!=null&&<div style={{background:preco<=teto?D.green+"18":D.red+"18",border:`1px solid ${preco<=teto?D.green:D.red}44`,borderRadius:10,padding:"10px 12px",marginBottom:12}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div><p style={{margin:0,fontSize:11,color:D.text3}}>Preço teto (DY alvo {dyAlvo}%, método Bazin)</p>
+              <p style={{margin:"2px 0 0",fontSize:18,fontWeight:800,color:preco<=teto?D.green:D.red}}>{currency} {teto.toFixed(2)}</p></div>
+              <span style={{fontSize:13,fontWeight:700,color:preco<=teto?D.green:D.red}}>{preco<=teto?"✓ Abaixo do teto":"✗ Acima do teto"}</span>
+            </div>
+          </div>}
+          <div style={{display:"flex",gap:6,background:D.bg3,borderRadius:8,padding:"10px 6px",marginBottom:12}}>
+            <Var label="Semana" v={dados.var_semana}/><Var label="Mês" v={dados.var_mes}/><Var label="Ano" v={dados.var_ano}/>
+          </div>
+          {(dados.max_52!=null||dados.min_52!=null)&&<p style={{fontSize:11,color:D.text3,margin:0}}>52 semanas: mín {currency} {dados.min_52?.toFixed(2)||"—"} · máx {currency} {dados.max_52?.toFixed(2)||"—"}</p>}
+          {dados.margem_liquida!=null&&<p style={{fontSize:11,color:D.text3,margin:"4px 0 0"}}>Margem líquida: {dados.margem_liquida.toFixed(1)}%{dados.divida_ebitda!=null?` · Dívida/EBITDA: ${dados.divida_ebitda.toFixed(1)}x`:""}</p>}
+          <p style={{fontSize:10,color:D.text3,marginTop:10,lineHeight:1.5}}>⚠️ Indicadores do Yahoo Finance, podem ter atraso. Preço teto é o método Bazin (uma régua de dividendos), não recomendação de compra/venda.</p>
+        </div>}
+        {aba==="dividendos"&&<div>
+          {dados.prox_dividendo&&<p style={{fontSize:12,color:D.text2,marginBottom:8}}>Próximo pagamento: <b style={{color:D.green}}>{dados.prox_dividendo.split("-").reverse().join("/")}</b>{dados.valor_dividendo?` · ${currency} ${Number(dados.valor_dividendo).toFixed(2)}/ação ao ano`:""}</p>}
+          {dados.hist_dividendos?.length>0?<div>
+            <p style={{fontSize:12,fontWeight:700,color:D.text,marginBottom:8}}>Dividendos pagos por ano</p>
+            {dados.hist_dividendos.map(h=>{const max=Math.max(...dados.hist_dividendos.map(x=>x.valor));return <div key={h.ano} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+              <span style={{fontSize:11,color:D.text3,width:40}}>{h.ano}</span>
+              <div style={{flex:1,height:18,background:D.bg3,borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${max>0?h.valor/max*100:0}%`,background:D.gold,borderRadius:4}}/></div>
+              <span style={{fontSize:11,fontWeight:600,color:D.gold,width:70,textAlign:"right"}}>{currency} {h.valor.toFixed(2)}</span>
+            </div>;})}
+          </div>:<p style={{fontSize:12,color:D.text3}}>Sem histórico de dividendos disponível para este ativo no Yahoo.</p>}
+        </div>}
+        {aba==="grafico"&&<TVWidget type="advanced-chart" config={{symbol:sym,interval:"D",locale:"pt_BR",style:"1",width:"100%",height:440,allow_symbol_change:true}}/>}
+        {aba==="noticias"&&<div>
+          {newsLoading&&<p style={{fontSize:12,color:D.text3,padding:"20px 0",textAlign:"center"}}>⏳ Buscando notícias...</p>}
+          {news&&news.length===0&&<p style={{fontSize:12,color:D.text3}}>Nenhuma notícia recente encontrada.</p>}
+          {news&&news.map((n,i)=><a key={i} href={n.link||n.url} target="_blank" rel="noopener noreferrer" style={{display:"block",padding:"8px 10px",background:D.bg3,borderRadius:8,marginBottom:6,textDecoration:"none"}}>
+            <p style={{margin:0,fontSize:12,color:D.blue,fontWeight:600}}>{n.title||n.titulo}</p>
+            {(n.pubDate||n.data)&&<p style={{margin:"2px 0 0",fontSize:10,color:D.text3}}>{n.pubDate||n.data}</p>}
+          </a>)}
+        </div>}
+      </>}
     </div>
   </div>;
 }
@@ -842,7 +922,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
   }
 
   return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
-    {chartTicker&&<ChartModal ticker={chartTicker} onClose={()=>setChartTicker(null)}/>}
+    {chartTicker&&<ChartModal ticker={chartTicker} currency={currency} market={profileId==="br"?"br":"au"} onClose={()=>setChartTicker(null)}/>}
     <Card glow style={{background:`linear-gradient(135deg,${D.bg3},${D.card2})`,border:`1px solid ${D.blue}33`}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
         <div>
@@ -1579,7 +1659,7 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
   const recCor=recScore>=7?D.green:recScore>=5?D.gold:D.red;
 
   return <div style={{display:"flex",flexDirection:"column",gap:"1.25rem"}}>
-    {chartTicker&&<ChartModal ticker={chartTicker} onClose={()=>setChartTicker(null)}/>}
+    {chartTicker&&<ChartModal ticker={chartTicker} currency={currency} market={market} dyAlvo={dyAlvo} onClose={()=>setChartTicker(null)}/>}
     {erro&&<div style={{background:D.red+"22",border:`1px solid ${D.red}44`,borderRadius:10,padding:"10px 14px",fontSize:12,color:D.red,display:"flex",justifyContent:"space-between"}}>{erro}<button onClick={()=>setErro("")} style={{border:"none",background:"none",cursor:"pointer",color:D.red}}>✕</button></div>}
 
     {/* ── NOVO: Chat com Analista IA ───────────────────────────────────────── */}
