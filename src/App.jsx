@@ -234,72 +234,112 @@ function ChartModal({ticker,onClose,currency="A$",market="au",dyAlvo=6}){
   }
   const preco=dados?.preco_atual??dados?.preco??null;
   const teto=(dados?.dy&&dados.dy>0&&preco)?preco*(dados.dy/dyAlvo):null;
-  const Ind=({label,valor,suf="",bom})=><div style={{background:D.bg3,borderRadius:8,padding:"8px 10px",minWidth:90,flex:"1 1 90px"}}>
-    <p style={{margin:0,fontSize:10,color:D.text3,textTransform:"uppercase"}}>{label}</p>
-    <p style={{margin:"2px 0 0",fontSize:15,fontWeight:700,color:bom===true?D.green:bom===false?D.red:D.text}}>{valor!=null?`${typeof valor==="number"?valor.toFixed(2):valor}${suf}`:"—"}</p>
+  const nomeEmp=dados?.nome&&dados.nome!==ticker?dados.nome:null;
+  // Linha de indicador estilo AGF: label à esquerda, valor à direita
+  const Lin=({label,valor,suf="",cor,pre=""})=><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:`1px solid ${D.border}`}}>
+    <span style={{fontSize:12,color:D.text2}}>{label}</span>
+    <span style={{fontSize:13,fontWeight:700,color:valor==null?D.text3:(cor||D.text)}}>{valor!=null?`${pre}${typeof valor==="number"?valor.toFixed(2):valor}${suf}`:"—"}</span>
+  </div>;
+  // Seção nomeada estilo AGF: título em faixa + card
+  const Sec=({titulo,children})=><div style={{background:D.bg2,borderRadius:12,overflow:"hidden",marginBottom:12,border:`1px solid ${D.border}`}}>
+    <div style={{background:D.green+"18",padding:"9px 14px",borderBottom:`1px solid ${D.green}33`}}><span style={{fontSize:13,fontWeight:800,color:D.green}}>{titulo}</span></div>
+    <div style={{padding:"4px 14px 10px"}}>{children}</div>
   </div>;
   const Var=({label,v})=><div style={{textAlign:"center",flex:1}}>
-    <p style={{margin:0,fontSize:10,color:D.text3}}>{label}</p>
-    <p style={{margin:"2px 0 0",fontSize:13,fontWeight:700,color:v==null?D.text3:v>=0?D.green:D.red}}>{v==null?"—":`${v>=0?"▲":"▼"} ${Math.abs(v).toFixed(1)}%`}</p>
+    <p style={{margin:0,fontSize:10,color:D.text3,textTransform:"uppercase"}}>{label}</p>
+    <p style={{margin:"3px 0 0",fontSize:14,fontWeight:800,color:v==null?D.text3:v>=0?D.green:D.red}}>{v==null?"—":`${v>=0?"▲":"▼"} ${Math.abs(v).toFixed(1)}%`}</p>
+  </div>;
+  const Chip=({label,valor})=><div style={{background:D.bg3,borderRadius:10,padding:"8px 12px",flex:"1 1 120px",border:`1px solid ${D.border}`}}>
+    <p style={{margin:0,fontSize:10,color:D.text3,textTransform:"uppercase"}}>{label}</p>
+    <p style={{margin:"2px 0 0",fontSize:13,fontWeight:700,color:D.text}}>{valor}</p>
   </div>;
   return <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,backdropFilter:"blur(6px)",padding:12}}>
-    <div onClick={e=>e.stopPropagation()} style={{background:D.card,border:`1px solid ${D.border2}`,borderRadius:16,padding:"1rem",width:"min(96vw,820px)",maxHeight:"92vh",overflowY:"auto"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-        <div>
-          <span style={{fontSize:20,fontWeight:800,color:D.text}}>{ticker}</span>
-          {preco!=null&&<span style={{marginLeft:10,fontSize:18,fontWeight:700,color:D.text}}>{currency} {Number(preco).toFixed(2)}</span>}
-          {dados?.variacao_dia!=null&&<span style={{marginLeft:8,fontSize:13,fontWeight:600,color:dados.variacao_dia>=0?D.green:D.red}}>{dados.variacao_dia>=0?"▲":"▼"} {Math.abs(dados.variacao_dia).toFixed(2)}%</span>}
+    <div onClick={e=>e.stopPropagation()} style={{background:D.card,border:`1px solid ${D.border2}`,borderRadius:18,width:"min(96vw,860px)",maxHeight:"94vh",overflowY:"auto"}}>
+      {/* Cabeçalho rico estilo AGF */}
+      <div style={{padding:"16px 18px 0",position:"sticky",top:0,background:D.card,zIndex:2}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+          <div style={{display:"flex",alignItems:"center",gap:12}}>
+            <div style={{width:46,height:46,borderRadius:12,background:`linear-gradient(135deg,${D.green}33,${D.blue}33)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:800,color:D.green,flexShrink:0}}>{ticker.slice(0,2)}</div>
+            <div>
+              <p style={{margin:0,fontSize:22,fontWeight:800,color:D.text,lineHeight:1.1}}>{ticker}</p>
+              <p style={{margin:"1px 0 0",fontSize:11,color:D.text3}}>{market==="br"?"BRASIL · B3":"AUSTRÁLIA · ASX"}{nomeEmp?` · ${nomeEmp}`:""}</p>
+            </div>
+          </div>
+          <button onClick={onClose} style={{border:"none",background:D.bg3,cursor:"pointer",fontSize:18,color:D.text3,width:32,height:32,borderRadius:8,flexShrink:0}}>✕</button>
         </div>
-        <button onClick={onClose} style={{border:"none",background:"none",cursor:"pointer",fontSize:22,color:D.text3}}>✕</button>
+        {!loading&&!erro&&preco!=null&&<div style={{display:"flex",alignItems:"baseline",gap:10,marginBottom:14}}>
+          <span style={{fontSize:30,fontWeight:800,color:D.text}}>{currency} {Number(preco).toFixed(2)}</span>
+          {dados?.variacao_dia!=null&&<span style={{fontSize:15,fontWeight:700,color:dados.variacao_dia>=0?D.green:D.red}}>{dados.variacao_dia>=0?"▲":"▼"} {Math.abs(dados.variacao_dia).toFixed(2)}%</span>}
+          <span style={{fontSize:10,color:D.text3}}>hoje</span>
+        </div>}
+        {/* Abas */}
+        <div style={{display:"flex",gap:4,flexWrap:"wrap",borderBottom:`1px solid ${D.border}`,paddingBottom:0}}>
+          {[["resumo","Indicadores"],["dividendos","Proventos"],["grafico","Cotação"],["noticias","Notícias"]].map(([v,l])=><button key={v} onClick={()=>{setAba(v);if(v==="noticias")carregarNews();}} style={{padding:"8px 14px",border:"none",borderBottom:aba===v?`2px solid ${D.green}`:"2px solid transparent",cursor:"pointer",fontSize:13,fontWeight:aba===v?700:500,background:"transparent",color:aba===v?D.green:D.text3}}>{l}</button>)}
+        </div>
       </div>
-      <div style={{display:"flex",gap:4,marginBottom:12,flexWrap:"wrap"}}>
-        {[["resumo","📊 Resumo"],["dividendos","💰 Dividendos"],["grafico","📈 Gráfico"],["noticias","📰 Notícias"]].map(([v,l])=><button key={v} onClick={()=>{setAba(v);if(v==="noticias")carregarNews();}} style={{padding:"5px 12px",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:aba===v?700:400,background:aba===v?D.blue:D.bg3,color:aba===v?"#fff":D.text3}}>{l}</button>)}
-      </div>
-      {loading&&<p style={{fontSize:13,color:D.text3,padding:"30px 0",textAlign:"center"}}>⏳ Buscando dados de {ticker}...</p>}
-      {erro&&<p style={{fontSize:13,color:D.red,padding:"20px 0",textAlign:"center"}}>Não consegui buscar os dados agora. Tente novamente em instantes.</p>}
+      <div style={{padding:"14px 18px 18px"}}>
+      {loading&&<p style={{fontSize:13,color:D.text3,padding:"40px 0",textAlign:"center"}}>⏳ Buscando dados de {ticker}...</p>}
+      {erro&&<p style={{fontSize:13,color:D.red,padding:"30px 0",textAlign:"center"}}>Não consegui buscar os dados agora. Tente novamente em instantes.</p>}
       {!loading&&!erro&&dados&&<>
         {aba==="resumo"&&<div>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
-            <Ind label="P/L" valor={dados.pl} bom={dados.pl!=null?dados.pl<15:undefined}/>
-            <Ind label="P/VP" valor={dados.pvp} bom={dados.pvp!=null?dados.pvp<2:undefined}/>
-            <Ind label="DY" valor={dados.dy} suf="%" bom={dados.dy!=null?dados.dy>=dyAlvo:undefined}/>
-            <Ind label="ROE" valor={dados.roe} suf="%" bom={dados.roe!=null?dados.roe>10:undefined}/>
+          {/* Chips de contexto estilo AGF */}
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
+            {(dados.max_52!=null||dados.min_52!=null)&&<Chip label="Mín/Máx 52 sem" valor={`${dados.min_52?.toFixed(2)||"—"} / ${dados.max_52?.toFixed(2)||"—"}`}/>}
+            {dados.margem_liquida!=null&&<Chip label="Margem líquida" valor={`${dados.margem_liquida.toFixed(1)}%`}/>}
+            {dados.divida_ebitda!=null&&<Chip label="Dívida/EBITDA" valor={`${dados.divida_ebitda.toFixed(1)}x`}/>}
           </div>
-          {teto!=null&&<div style={{background:preco<=teto?D.green+"18":D.red+"18",border:`1px solid ${preco<=teto?D.green:D.red}44`,borderRadius:10,padding:"10px 12px",marginBottom:12}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div><p style={{margin:0,fontSize:11,color:D.text3}}>Preço teto (DY alvo {dyAlvo}%, método Bazin)</p>
-              <p style={{margin:"2px 0 0",fontSize:18,fontWeight:800,color:preco<=teto?D.green:D.red}}>{currency} {teto.toFixed(2)}</p></div>
-              <span style={{fontSize:13,fontWeight:700,color:preco<=teto?D.green:D.red}}>{preco<=teto?"✓ Abaixo do teto":"✗ Acima do teto"}</span>
-            </div>
-          </div>}
-          <div style={{display:"flex",gap:6,background:D.bg3,borderRadius:8,padding:"10px 6px",marginBottom:12}}>
+          {/* Variações */}
+          <div style={{display:"flex",gap:6,background:D.bg2,borderRadius:12,padding:"12px 6px",marginBottom:12,border:`1px solid ${D.border}`}}>
             <Var label="Semana" v={dados.var_semana}/><Var label="Mês" v={dados.var_mes}/><Var label="Ano" v={dados.var_ano}/>
           </div>
-          {(dados.max_52!=null||dados.min_52!=null)&&<p style={{fontSize:11,color:D.text3,margin:0}}>52 semanas: mín {currency} {dados.min_52?.toFixed(2)||"—"} · máx {currency} {dados.max_52?.toFixed(2)||"—"}</p>}
-          {dados.margem_liquida!=null&&<p style={{fontSize:11,color:D.text3,margin:"4px 0 0"}}>Margem líquida: {dados.margem_liquida.toFixed(1)}%{dados.divida_ebitda!=null?` · Dívida/EBITDA: ${dados.divida_ebitda.toFixed(1)}x`:""}</p>}
-          <p style={{fontSize:10,color:D.text3,marginTop:10,lineHeight:1.5}}>⚠️ Indicadores do Yahoo Finance, podem ter atraso. Preço teto é o método Bazin (uma régua de dividendos), não recomendação de compra/venda.</p>
+          {/* Preço teto */}
+          {teto!=null&&<div style={{background:preco<=teto?D.green+"18":D.red+"18",border:`1px solid ${preco<=teto?D.green:D.red}44`,borderRadius:12,padding:"12px 14px",marginBottom:12}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div><p style={{margin:0,fontSize:11,color:D.text3}}>Preço teto · método Bazin (DY alvo {dyAlvo}%)</p>
+              <p style={{margin:"3px 0 0",fontSize:20,fontWeight:800,color:preco<=teto?D.green:D.red}}>{currency} {teto.toFixed(2)}</p></div>
+              <span style={{fontSize:13,fontWeight:700,color:preco<=teto?D.green:D.red,textAlign:"right"}}>{preco<=teto?"✓ Abaixo\ndo teto":"✗ Acima\ndo teto"}</span>
+            </div>
+          </div>}
+          {/* Seções de indicadores estilo AGF */}
+          <Sec titulo="Indicadores de avaliação">
+            <Lin label="P/L (Preço/Lucro)" valor={dados.pl} cor={dados.pl!=null?(dados.pl<15?D.green:dados.pl>25?D.red:D.text):undefined}/>
+            <Lin label="P/VP (Preço/Valor patrim.)" valor={dados.pvp} cor={dados.pvp!=null?(dados.pvp<1.5?D.green:dados.pvp>3?D.red:D.text):undefined}/>
+          </Sec>
+          <Sec titulo="Indicadores de rentabilidade">
+            <Lin label="ROE (Retorno s/ patrimônio)" valor={dados.roe} suf="%" cor={dados.roe!=null?(dados.roe>15?D.green:dados.roe<8?D.red:D.text):undefined}/>
+            <Lin label="Margem líquida" valor={dados.margem_liquida} suf="%" cor={dados.margem_liquida!=null?(dados.margem_liquida>15?D.green:D.text):undefined}/>
+          </Sec>
+          <Sec titulo="Indicadores de dividendos">
+            <Lin label="Dividend Yield (DY)" valor={dados.dy} suf="%" cor={dados.dy!=null?(dados.dy>=dyAlvo?D.green:D.text):undefined}/>
+            {dados.valor_dividendo!=null&&<Lin label="Dividendo/ação (ano)" valor={dados.valor_dividendo} pre={currency+" "} cor={D.gold}/>}
+          </Sec>
+          <p style={{fontSize:10,color:D.text3,marginTop:6,lineHeight:1.5}}>⚠️ Dados do Yahoo Finance, podem ter atraso. Preço teto é o método Bazin (régua baseada em dividendos), não é recomendação de compra ou venda. Cores são referência geral, não conselho de investimento.</p>
         </div>}
         {aba==="dividendos"&&<div>
-          {dados.prox_dividendo&&<p style={{fontSize:12,color:D.text2,marginBottom:8}}>Próximo pagamento: <b style={{color:D.green}}>{dados.prox_dividendo.split("-").reverse().join("/")}</b>{dados.valor_dividendo?` · ${currency} ${Number(dados.valor_dividendo).toFixed(2)}/ação ao ano`:""}</p>}
-          {dados.hist_dividendos?.length>0?<div>
-            <p style={{fontSize:12,fontWeight:700,color:D.text,marginBottom:8}}>Dividendos pagos por ano</p>
-            {dados.hist_dividendos.map(h=>{const max=Math.max(...dados.hist_dividendos.map(x=>x.valor));return <div key={h.ano} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-              <span style={{fontSize:11,color:D.text3,width:40}}>{h.ano}</span>
-              <div style={{flex:1,height:18,background:D.bg3,borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${max>0?h.valor/max*100:0}%`,background:D.gold,borderRadius:4}}/></div>
-              <span style={{fontSize:11,fontWeight:600,color:D.gold,width:70,textAlign:"right"}}>{currency} {h.valor.toFixed(2)}</span>
+          {dados.prox_dividendo&&<div style={{background:D.green+"18",border:`1px solid ${D.green}44`,borderRadius:12,padding:"12px 14px",marginBottom:14}}>
+            <p style={{margin:0,fontSize:11,color:D.text3}}>Próximo pagamento</p>
+            <p style={{margin:"3px 0 0",fontSize:18,fontWeight:800,color:D.green}}>{dados.prox_dividendo.split("-").reverse().join("/")}</p>
+            {dados.valor_dividendo&&<p style={{margin:"2px 0 0",fontSize:12,color:D.text2}}>{currency} {Number(dados.valor_dividendo).toFixed(2)}/ação ao ano</p>}
+          </div>}
+          {dados.hist_dividendos?.length>0?<Sec titulo="Histórico de proventos por ano">
+            {dados.hist_dividendos.map(h=>{const max=Math.max(...dados.hist_dividendos.map(x=>x.valor));return <div key={h.ano} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 0"}}>
+              <span style={{fontSize:12,fontWeight:700,color:D.text2,width:42}}>{h.ano}</span>
+              <div style={{flex:1,height:20,background:D.bg3,borderRadius:5,overflow:"hidden"}}><div style={{height:"100%",width:`${max>0?h.valor/max*100:0}%`,background:`linear-gradient(90deg,${D.gold}cc,${D.gold})`,borderRadius:5}}/></div>
+              <span style={{fontSize:12,fontWeight:700,color:D.gold,width:78,textAlign:"right"}}>{currency} {h.valor.toFixed(2)}</span>
             </div>;})}
-          </div>:<p style={{fontSize:12,color:D.text3}}>Sem histórico de dividendos disponível para este ativo no Yahoo.</p>}
+          </Sec>:<p style={{fontSize:12,color:D.text3,padding:"20px 0",textAlign:"center"}}>Sem histórico de dividendos disponível para este ativo no Yahoo.</p>}
         </div>}
-        {aba==="grafico"&&<TVWidget type="advanced-chart" config={{symbol:sym,interval:"D",locale:"pt_BR",style:"1",width:"100%",height:440,allow_symbol_change:true}}/>}
+        {aba==="grafico"&&<div style={{borderRadius:12,overflow:"hidden"}}><TVWidget type="advanced-chart" config={{symbol:sym,interval:"D",locale:"pt_BR",style:"1",width:"100%",height:440,allow_symbol_change:true}}/></div>}
         {aba==="noticias"&&<div>
           {newsLoading&&<p style={{fontSize:12,color:D.text3,padding:"20px 0",textAlign:"center"}}>⏳ Buscando notícias...</p>}
-          {news&&news.length===0&&<p style={{fontSize:12,color:D.text3}}>Nenhuma notícia recente encontrada.</p>}
-          {news&&news.map((n,i)=><a key={i} href={n.link||n.url} target="_blank" rel="noopener noreferrer" style={{display:"block",padding:"8px 10px",background:D.bg3,borderRadius:8,marginBottom:6,textDecoration:"none"}}>
-            <p style={{margin:0,fontSize:12,color:D.blue,fontWeight:600}}>{n.title||n.titulo}</p>
-            {(n.pubDate||n.data)&&<p style={{margin:"2px 0 0",fontSize:10,color:D.text3}}>{n.pubDate||n.data}</p>}
+          {news&&news.length===0&&<p style={{fontSize:12,color:D.text3,padding:"20px 0",textAlign:"center"}}>Nenhuma notícia recente encontrada.</p>}
+          {news&&news.map((n,i)=><a key={i} href={n.link||n.url} target="_blank" rel="noopener noreferrer" style={{display:"block",padding:"11px 13px",background:D.bg2,borderRadius:10,marginBottom:7,textDecoration:"none",border:`1px solid ${D.border}`}}>
+            <p style={{margin:0,fontSize:13,color:D.text,fontWeight:600,lineHeight:1.35}}>{n.title||n.titulo}</p>
+            {(n.pubDate||n.data)&&<p style={{margin:"4px 0 0",fontSize:10,color:D.text3}}>{n.pubDate||n.data}</p>}
           </a>)}
         </div>}
       </>}
+      </div>
     </div>
   </div>;
 }
