@@ -52,6 +52,68 @@ const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,5);
 const fmtM=(v,cur="R$")=>cur+" "+Number(v||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtPct=v=>v!=null?Number(v).toFixed(2)+"%":"—";
 
+// ===== IMPORTAÇÃO DE EXTRATO (OFX / CSV) =====
+function _splitCSVLine(line,sep){const out=[];let cur="";let inQ=false;for(let i=0;i<line.length;i++){const c=line[i];if(c==='"'){inQ=!inQ;continue;}if(c===sep&&!inQ){out.push(cur);cur="";continue;}cur+=c;}out.push(cur);return out;}
+function parseOFX(text){
+  const txs=[];
+  const blocks=text.split(/<STMTTRN>/i).slice(1);
+  for(const b of blocks){
+    const get=tag=>{const m=b.match(new RegExp("<"+tag+">([^<\\r\\n]*)","i"));return m?m[1].trim():"";};
+    const dtRaw=get("DTPOSTED");const valorRaw=get("TRNAMT");const memo=get("MEMO")||get("NAME")||"Sem descrição";
+    if(!valorRaw||!dtRaw)continue;
+    const data=`${dtRaw.slice(0,4)}-${dtRaw.slice(4,6)}-${dtRaw.slice(6,8)}`;
+    const num=parseFloat(valorRaw.replace(",","."));
+    if(isNaN(num))continue;
+    txs.push({data,descricao:memo,valor:Math.abs(num),tipo:num>0?"receita":"despesa"});
+  }
+  return txs;
+}
+function parseCSV(text){
+  const txs=[];
+  const lines=text.split(/\r?\n/).filter(l=>l.trim());
+  if(!lines.length)return txs;
+  const sep=(lines[0].match(/;/g)||[]).length>0?";":",";
+  const cols=_splitCSVLine(lines[0],sep).map(c=>c.toLowerCase().trim());
+  const hasHeader=/data|date|valor|amount|hist|desc|narration/i.test(lines[0]);
+  let iData=cols.findIndex(c=>/data|date/.test(c));
+  let iDesc=cols.findIndex(c=>/desc|hist|memo|detalhe|narration|transaction/.test(c));
+  let iValor=cols.findIndex(c=>/valor|amount|montante/.test(c));
+  if(iData<0)iData=0;if(iDesc<0)iDesc=1;if(iValor<0)iValor=cols.length-1;
+  const start=hasHeader?1:0;
+  for(let i=start;i<lines.length;i++){
+    const parts=_splitCSVLine(lines[i],sep);
+    if(parts.length<2)continue;
+    const dataRaw=(parts[iData]||"").trim();const desc=(parts[iDesc]||"Sem descrição").trim();
+    let v=(parts[iValor]||"").trim().replace(/\s/g,"");
+    if(v.includes(",")&&v.includes(".")){if(v.lastIndexOf(",")>v.lastIndexOf("."))v=v.replace(/\./g,"").replace(",",".");else v=v.replace(/,/g,"");}
+    else if(v.includes(","))v=v.replace(",",".");
+    const num=parseFloat(v);if(isNaN(num))continue;
+    let data=dataRaw;
+    const br=dataRaw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);if(br)data=`${br[3]}-${br[2].padStart(2,"0")}-${br[1].padStart(2,"0")}`;
+    const iso=dataRaw.match(/^(\d{4})-(\d{2})-(\d{2})/);if(iso)data=`${iso[1]}-${iso[2]}-${iso[3]}`;
+    txs.push({data,descricao:desc,valor:Math.abs(num),tipo:num>0?"receita":"despesa"});
+  }
+  return txs;
+}
+// Categorização automática por palavra-chave na descrição
+const _CAT_RULES=[
+  [/uber|99|cabify|taxi|posto|shell|ipiranga|combustivel|fuel|metro|onibus|estacion|parking/i,"Transporte"],
+  [/ifood|rappi|mercado|supermerc|restaurant|padaria|lanchonete|food|cafe|bar |pizzaria|grocery|woolworths|coles|aldi/i,"Alimentação"],
+  [/farmacia|drogaria|hospital|clinica|medic|saude|health|pharmacy|chemist|dentist/i,"Saúde"],
+  [/netflix|spotify|prime|disney|hbo|youtube|assinatura|subscription|apple\.com|google/i,"Assinatura"],
+  [/cinema|teatro|show|ingresso|game|steam|lazer|entertain/i,"Lazer"],
+  [/aluguel|condominio|luz|energia|agua|gas|internet|vivo|claro|tim|rent|electricity|water/i,"Moradia"],
+  [/escola|faculdade|curso|udemy|alura|livro|education|tuition|university/i,"Educação"],
+  [/zara|renner|cea|riachuelo|nike|adidas|roupa|vestuario|clothing|myer/i,"Vestuário"],
+  [/salario|salary|pagamento|payroll|provento|wage/i,"Salário"],
+  [/dividend|jcp|rendiment/i,"Dividendos"],
+];
+function categorizar(descricao,tipo){
+  const d=descricao||"";
+  for(const[re,cat]of _CAT_RULES){if(re.test(d)){if(tipo==="receita"&&!["Salário","Dividendos"].includes(cat))continue;return cat;}}
+  return null; // null = precisa categorizar manualmente
+}
+
 function calcRFAnual(inv){const indice=inv.indice||"CDI",taxa=parseFloat(inv.taxaRF)||0,pct=parseFloat(inv.pctIndice)||100;if(indice==="Prefixado")return taxa;const base=INDICES_RATE[indice]||10.5;return inv.rfTipo==="pct"?base*(pct/100):base+taxa;}
 function calcValorAtualRF(inv){const anos=(new Date()-new Date(inv.data))/(1000*60*60*24*365);return(inv.valorInvestido||inv.valor||0)*Math.pow(1+calcRFAnual(inv)/100,Math.max(0,anos));}
 function calcImpostoBR(r,m){if(r<=0)return 0;if(m<=6)return r*0.225;if(m<=12)return r*0.20;if(m<=24)return r*0.175;return r*0.15;}
@@ -373,6 +435,9 @@ function LancamentosTab({data,setData,currency,mes}){
   const [quickOrigem,setQuickOrigem]=useState("Conta Corrente");
   const [quickCat,setQuickCat]=useState("Outros");
   const [quickTipo,setQuickTipo]=useState("despesa");
+  const [impItens,setImpItens]=useState(null);
+  const [impBanco,setImpBanco]=useState("");
+  const impRef=useRef(null);
   const ORIGENS=["Conta Corrente","Pix","TED","DOC","Cartão Débito","Dinheiro"];
   const catD=data.catD||CAT_D_DEF,catR=data.catR||CAT_R_DEF;
 
@@ -400,6 +465,41 @@ function LancamentosTab({data,setData,currency,mes}){
     setData(d=>({...d,transacoes:form.editId?d.transacoes.map(x=>x.id===form.editId?t:x):[...d.transacoes,t]}));
     setModal(null);setForm({});
   }
+
+  function abrirImport(){
+    if(data.bancos.length===0){alert("Cadastre um banco primeiro na aba Bancos!");return;}
+    impRef.current?.click();
+  }
+  function lerArquivo(e){
+    const file=e.target.files[0];if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      try{
+        const txt=ev.target.result;
+        const isOFX=/\.ofx$/i.test(file.name)||/<STMTTRN>|<OFX>/i.test(txt);
+        let parsed=isOFX?parseOFX(txt):parseCSV(txt);
+        if(!parsed.length){alert("Não encontrei lançamentos nesse arquivo. Verifique se é um extrato OFX ou CSV do seu banco.");e.target.value="";return;}
+        // Detecta duplicados: mesma data + mesmo valor + mesmo tipo já existente
+        const existentes=data.transacoes;
+        const itens=parsed.map(p=>{
+          const dup=existentes.some(t=>t.data===p.data&&Math.abs(t.valor-p.valor)<0.01&&t.tipo===p.tipo);
+          const catSugerida=categorizar(p.descricao,p.tipo);
+          return {...p,dup,incluir:!dup,categoria:catSugerida||(p.tipo==="receita"?catR[0]:catD[0]),autoCat:!!catSugerida};
+        });
+        setImpBanco(data.bancos[0]?.id||"");
+        setImpItens(itens);
+      }catch(err){alert("Erro ao ler o arquivo. Tente exportar novamente do banco em formato OFX.");}
+      e.target.value="";
+    };
+    reader.readAsText(file,"ISO-8859-1"); // bancos BR usam latin1; CSVs UTF-8 também leem ok
+  }
+  function confirmarImport(){
+    const novos=impItens.filter(i=>i.incluir).map(i=>({id:uid(),tipo:i.tipo,descricao:i.descricao,valor:i.valor,categoria:i.categoria,data:i.data,bancoId:impBanco||null,nfImg:null,nfManual:false}));
+    if(!novos.length){setImpItens(null);return;}
+    setData(d=>({...d,transacoes:[...d.transacoes,...novos]}));
+    setImpItens(null);
+    alert(`✅ ${novos.length} lançamento${novos.length!==1?"s":""} importado${novos.length!==1?"s":""}!`);
+  }
   function saveOrc(){const o={id:orcForm.editId||uid(),categoria:orcForm.categoria||catD[0],valor:parseFloat(orcForm.valor)||0};setData(d=>({...d,orcamentos:orcForm.editId?(d.orcamentos||[]).map(x=>x.id===orcForm.editId?o:x):[...(d.orcamentos||[]),o]}));setModalOrc(false);setOrcForm({});}
   function saveRec(){const r={id:recForm.editId||uid(),tipo:recForm.tipo||"despesa",descricao:recForm.descricao||"",valor:parseFloat(recForm.valor)||0,categoria:recForm.categoria||catD[0],dia:parseInt(recForm.dia)||1,bancoId:recForm.bancoId||null};setData(d=>({...d,recorrencias:recForm.editId?(d.recorrencias||[]).map(x=>x.id===recForm.editId?r:x):[...(d.recorrencias||[]),r]}));setModalRec(false);setRecForm({});}
   const nfsComNF=data.transacoes.filter(t=>t.nfImg||t.nfManual);
@@ -414,6 +514,46 @@ function LancamentosTab({data,setData,currency,mes}){
 
   return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
     {showNF&&<NFModal currency={currency} onClose={()=>setShowNF(false)} onSave={dados=>{setForm(f=>({...f,...dados,tipo:"despesa"}));setShowNF(false);setModal("tx");}}/>}
+
+    {impItens&&<Modal title="📥 Revisar importação" onClose={()=>setImpItens(null)}>
+      {(()=>{
+        const novos=impItens.filter(i=>!i.dup);
+        const dups=impItens.filter(i=>i.dup);
+        const semCat=novos.filter(i=>i.incluir&&!i.autoCat);
+        return <div>
+          <p style={{fontSize:13,color:D.text2,marginBottom:6}}>Encontrei <b style={{color:D.text}}>{novos.length}</b> lançamento{novos.length!==1?"s":""} novo{novos.length!==1?"s":""}{dups.length>0&&<span style={{color:D.text3}}> ({dups.length} já existe{dups.length!==1?"m":""}, ignorado{dups.length!==1?"s":""})</span>}.</p>
+          {semCat.length>0&&<p style={{fontSize:12,color:D.gold,marginBottom:8}}>⚠️ {semCat.length} sem categoria automática — revise abaixo.</p>}
+          <div style={{marginBottom:10}}>
+            <label style={{fontSize:11,color:D.text3,display:"block",marginBottom:4}}>Banco / conta destes lançamentos:</label>
+            <select value={impBanco} onChange={e=>setImpBanco(e.target.value)} style={{width:"100%",padding:"7px 8px",fontSize:12}}>
+              {data.bancos.map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}
+            </select>
+          </div>
+          <div style={{maxHeight:340,overflowY:"auto",display:"flex",flexDirection:"column",gap:6}}>
+            {novos.map((it,idx)=>{
+              const realIdx=impItens.indexOf(it);
+              return <div key={idx} style={{background:D.bg3,borderRadius:8,padding:"8px 10px",border:`1px solid ${it.incluir?D.border:D.border2}`,opacity:it.incluir?1:0.5}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
+                  <input type="checkbox" checked={it.incluir} onChange={e=>{const v=e.target.checked;setImpItens(arr=>arr.map((x,i)=>i===realIdx?{...x,incluir:v}:x));}} style={{width:16,height:16,cursor:"pointer"}}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <p style={{margin:0,fontSize:12,fontWeight:600,color:D.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{it.descricao}</p>
+                    <p style={{margin:0,fontSize:10,color:D.text3}}>{it.data.split("-").reverse().join("/")}</p>
+                  </div>
+                  <span style={{fontSize:13,fontWeight:700,color:it.tipo==="receita"?D.green:D.red}}>{it.tipo==="receita"?"+":"−"}{fmtM(it.valor,currency)}</span>
+                </div>
+                {it.incluir&&<select value={it.categoria} onChange={e=>{const v=e.target.value;setImpItens(arr=>arr.map((x,i)=>i===realIdx?{...x,categoria:v,autoCat:true}:x));}} style={{width:"100%",padding:"4px 6px",fontSize:11,border:it.autoCat?`1px solid ${D.border}`:`1px solid ${D.gold}`}}>
+                  {(it.tipo==="receita"?catR:catD).map(c=><option key={c} value={c}>{c}</option>)}
+                </select>}
+              </div>;
+            })}
+          </div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:12}}>
+            <Btn outline color={D.text3} onClick={()=>setImpItens(null)}>Cancelar</Btn>
+            <Btn color={D.green} onClick={confirmarImport}>Importar {novos.filter(i=>i.incluir).length}</Btn>
+          </div>
+        </div>;
+      })()}
+    </Modal>}
 
     <Card style={{border:`1px solid ${D.gold}44`}}>
       <p style={{fontSize:13,fontWeight:700,color:D.gold,marginBottom:8}}>⚡ Lançamento rápido — caiu no banco</p>
@@ -444,10 +584,12 @@ function LancamentosTab({data,setData,currency,mes}){
     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
       <Btn onClick={()=>{setModal("tx");setForm({});}}>+ Lançamento completo</Btn>
       <Btn onClick={()=>setShowNF(true)} color={D.blue} outline sm>📷 Nota Fiscal c/ IA</Btn>
+      <Btn onClick={abrirImport} color={D.green} outline sm>📥 Importar extrato</Btn>
       <Btn onClick={()=>{setModalOrc(true);setOrcForm({});}} color={D.gold} outline sm>🎯 Orçamento</Btn>
       <Btn onClick={()=>{setModalRec(true);setRecForm({});}} color={D.purple} outline sm>🔄 Recorrência</Btn>
       {nfsComNF.length>0&&<Btn onClick={()=>setShowExtratoNF(true)} color={D.green} outline sm>🧾 NFs para IR ({nfsComNF.length})</Btn>}
     </div>
+    <input ref={impRef} type="file" accept=".ofx,.csv,.txt" onChange={lerArquivo} style={{display:"none"}}/>
 
     {showExtratoNF&&<Card>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -550,6 +692,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
   const [chartTicker,setChartTicker]=useState(null);const [loadingId,setLoadingId]=useState(null);
   const [modalDiv,setModalDiv]=useState(false);const [divForm,setDivForm]=useState({});
   const [atualizandoTodos,setAtualizandoTodos]=useState(false);
+  const [aporteInput,setAporteInput]=useState(()=>String(data.aporteMensal||""));
 
   const isBR=profileId==="br";
   const totalInvest=data.investimentos.reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0);
@@ -693,6 +836,28 @@ function InvestimentosTab({data,setData,currency,profileId}){
           <Btn sm onClick={()=>{setModalDiv(true);setDivForm({});}} color={D.gold} outline>💰 Dividendo</Btn>
         </div>
       </div>
+    </Card>
+
+    {/* Meta de aporte mensal */}
+    <Card>
+      <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:6}}>🎯 Meta de aporte mensal</p>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+        <input type="number" value={aporteInput} onChange={e=>setAporteInput(e.target.value)} placeholder={`Valor (${currency})`} style={{flex:1,minWidth:120}}/>
+        <Btn sm color={D.green} onClick={()=>setData(d=>({...d,aporteMensal:parseFloat(aporteInput)||0}))}>Salvar meta</Btn>
+      </div>
+      {data.aporteMensal>0&&(()=>{
+        const invMes=data.investimentos.filter(i=>{const dt=new Date(i.data);return dt.getMonth()===MES_ATUAL&&dt.getFullYear()===ANO_ATUAL;}).reduce((a,b)=>a+(b.valorInvestido||b.valor||0),0);
+        const pct=Math.min(100,Math.round(invMes/data.aporteMensal*100));
+        const cor=pct>=100?D.green:pct>=50?D.gold:D.red;
+        return <div style={{marginTop:8}}>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:4}}>
+            <span style={{color:D.text3}}>Aportado este mês</span>
+            <span style={{color:cor,fontWeight:600}}>{fmtM(invMes,currency)} / {fmtM(data.aporteMensal,currency)}</span>
+          </div>
+          <div style={{height:8,background:D.bg3,borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${pct}%`,background:cor,transition:"width .3s"}}/></div>
+          <p style={{margin:"4px 0 0",fontSize:11,color:D.text3}}>{pct>=100?"✅ Meta atingida este mês!":`Faltam ${fmtM(Math.max(0,data.aporteMensal-invMes),currency)} para a meta`}</p>
+        </div>;
+      })()}
     </Card>
 
     <div style={{display:"flex",gap:4,background:D.card,borderRadius:10,padding:4,border:`1px solid ${D.border}`}}>
@@ -1016,6 +1181,7 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
   const [compInput,setCompInput]=useState("");const [compList,setCompList]=useState([]);const [compLoading,setCompLoading]=useState(false);const [compData,setCompData]=useState([]);
   const [fundTicker,setFundTicker]=useState("");const [fundInput,setFundInput]=useState("");const [fundSymbol,setFundSymbol]=useState("BMFBOVESPA:PETR4");
   const [screenerSearch,setScreenerSearch]=useState("");
+  const [dyAlvo,setDyAlvo]=useState(()=>parseFloat(lsGet("dy_alvo"))||6);
   const [calcForm,setCalcForm]=useState({pc:"",pa:"",qt:"",tipo:"acao",indice:"CDI",taxa:"",meses:""});const [calcRes,setCalcRes]=useState(null);
   const [simForm,setSimForm]=useState({ini:"",ap:"",tipo:"fixo",taxa:"",indice:"CDI",pctInd:"100",meses:""});const [simRes,setSimRes]=useState(null);
   const [alocRes,setAlocRes]=useState(null);const [alocLoading,setAlocLoading]=useState(false);
@@ -1657,6 +1823,11 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
     {/* Watchlist */}
     <Card>
       <p style={{fontSize:14,fontWeight:700,color:D.text,marginBottom:4}}>Carteira de acompanhamento</p>
+      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,fontSize:11,color:D.text3}}>
+        <span>Preço teto: DY alvo de</span>
+        <input type="number" value={dyAlvo} onChange={e=>{const v=parseFloat(e.target.value)||6;setDyAlvo(v);lsSet("dy_alvo",v);}} style={{width:54,padding:"3px 6px",fontSize:11}} min="1" max="20" step="0.5"/>
+        <span>% (método Bazin — ajuste à sua estratégia)</span>
+      </div>
       <div style={{display:"flex",gap:8,marginBottom:8,flexWrap:"wrap"}}>
         <input value={wInput} onChange={e=>setWInput(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&addWatch()} placeholder={isBR?"Ticker (ex: PETR4)...":"Ticker (ex: BHP.AX)..."} style={{flex:1,minWidth:100}}/>
         <select value={wCat} onChange={e=>setWCat(e.target.value)} style={{minWidth:130,flex:1}}><option value="">Categoria (auto)</option>{WL_CATS.filter(c=>c!=="Todas").map(c=><option key={c}>{c}</option>)}</select>
@@ -1676,6 +1847,14 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
             {w.pl!=null&&<Badge color={D.blue}>P/L {Number(w.pl).toFixed(1)}</Badge>}
             {w.dy!=null&&<Badge color={D.gold}>DY {Number(w.dy).toFixed(1)}%</Badge>}
           </div>
+          {w.dy!=null&&w.dy>0&&w.preco!=null&&(()=>{
+            const teto=w.preco*(w.dy/dyAlvo);
+            const abaixo=w.preco<=teto;
+            return <div style={{marginTop:5,padding:"4px 6px",borderRadius:6,background:abaixo?D.green+"18":D.red+"18",border:`1px solid ${abaixo?D.green:D.red}44`}}>
+              <p style={{margin:0,fontSize:10,color:D.text3}}>Preço teto ({dyAlvo}% DY)</p>
+              <p style={{margin:0,fontSize:12,fontWeight:700,color:abaixo?D.green:D.red}}>{currency} {teto.toFixed(2)} {abaixo?"✓ abaixo":"✗ acima"}</p>
+            </div>;
+          })()}
           <div style={{display:"flex",gap:4,marginTop:6,flexWrap:"wrap"}}>
             <button onClick={()=>addToComp(w.ticker)} style={{flex:1,border:`1px solid ${D.blue}44`,background:"transparent",color:D.blue,borderRadius:5,padding:"2px 4px",fontSize:9,cursor:"pointer"}}>+ Comp</button>
             <button onClick={()=>gerarRelatorio(w.ticker)} style={{flex:1,border:`1px solid ${D.gold}44`,background:"transparent",color:D.gold,borderRadius:5,padding:"2px 4px",fontSize:9,cursor:"pointer"}}>📄 Rep.</button>
