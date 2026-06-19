@@ -212,7 +212,13 @@ function TVWidget({type,config}){
   return <div ref={ref} style={{minHeight:config.height||400,borderRadius:10,overflow:"hidden",background:D.bg3,display:"flex",alignItems:"center",justifyContent:"center"}}><p style={{color:D.text3,fontSize:13}}>Carregando TradingView...</p></div>;
 }
 function ChartModal({ticker,onClose,currency="A$",market="au",dyAlvo=6}){
-  const sym=/^[A-Z0-9]{1,6}(\.[A-Z]+)?$/.test(ticker)?ticker:"BMFBOVESPA:"+ticker;
+  // Monta o símbolo do TradingView com a bolsa CERTA (senão ele pega bolsa errada, ex: GETTEX alemã)
+  const sym=(()=>{
+    if(ticker.includes(":"))return ticker; // já tem bolsa
+    const base=ticker.replace(/\.(AX|SA)$/i,""); // tira sufixo .AX/.SA
+    if(market==="br")return "BMFBOVESPA:"+base;
+    return "ASX:"+base; // mercado australiano
+  })();
   const [dados,setDados]=useState(null);
   const [loading,setLoading]=useState(true);
   const [erro,setErro]=useState(false);
@@ -230,7 +236,10 @@ function ChartModal({ticker,onClose,currency="A$",market="au",dyAlvo=6}){
   function carregarNews(){
     if(news||newsLoading)return;
     setNewsLoading(true);
-    fetch(`${WORKER}/news?q=${encodeURIComponent(ticker)}`).then(r=>r.json()).then(d=>{setNews(Array.isArray(d)?d.slice(0,6):(d.items||[]).slice(0,6));setNewsLoading(false);}).catch(()=>{setNews([]);setNewsLoading(false);});
+    // Busca melhor: usa o nome da empresa se houver (ex "QBE Insurance"), senão ticker + contexto da bolsa
+    const nome=dados?.nome&&dados.nome!==ticker?dados.nome:null;
+    const q=nome||(market==="br"?`${ticker} ação B3`:`${ticker} ASX shares`);
+    fetch(`${WORKER}/news?q=${encodeURIComponent(q)}`).then(r=>r.json()).then(d=>{setNews(Array.isArray(d)?d.slice(0,6):(d.items||[]).slice(0,6));setNewsLoading(false);}).catch(()=>{setNews([]);setNewsLoading(false);});
   }
   const preco=dados?.preco_atual??dados?.preco??null;
   const teto=(dados?.dy&&dados.dy>0&&preco)?preco*(dados.dy/dyAlvo):null;
