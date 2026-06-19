@@ -24,6 +24,26 @@ const supa={
 const D={bg:"#0a0e1a",bg2:"#0f1629",bg3:"#151d35",card:"#111827",card2:"#1a2235",border:"#1e2d4a",border2:"#253352",green:"#00d084",red:"#ff4757",blue:"#3b82f6",gold:"#f59e0b",purple:"#8b5cf6",text:"#f1f5f9",text2:"#94a3b8",text3:"#64748b"};
 const CORES=[D.green,D.blue,D.purple,D.gold,D.red,"#06b6d4","#ec4899"];
 const PROFILES=[{id:"br",label:"🇧🇷 Brasil",currency:"R$",market:"brazil",locale:"pt-BR"},{id:"au",label:"🇦🇺 Austrália",currency:"A$",market:"australia",locale:"en-AU"},{id:"us",label:"🇺🇸 EUA",currency:"US$",market:"usa",locale:"en-US"}];
+
+// Calcula se a bolsa de um perfil está aberta AGORA (sem API, usa horário local de cada bolsa)
+// B3: 10-17 Brasília | ASX: 10-16 Sydney | NYSE: 9:30-16 Nova York. Seg-sex.
+function mercadoAberto(profileId){
+  const tz={br:"America/Sao_Paulo",au:"Australia/Sydney",us:"America/New_York"}[profileId];
+  if(!tz)return null;
+  try{
+    const agora=new Date();
+    const fmt=new Intl.DateTimeFormat("en-US",{timeZone:tz,weekday:"short",hour:"2-digit",minute:"2-digit",hour12:false});
+    const parts=fmt.formatToParts(agora);
+    const wd=parts.find(p=>p.type==="weekday")?.value;
+    let h=parseInt(parts.find(p=>p.type==="hour")?.value||"0");
+    const m=parseInt(parts.find(p=>p.type==="minute")?.value||"0");
+    if(h===24)h=0;
+    const mins=h*60+m;
+    if(["Sat","Sun"].includes(wd))return false;
+    const janela={br:[600,1020],au:[600,960],us:[570,960]}[profileId]; // em minutos
+    return mins>=janela[0]&&mins<janela[1];
+  }catch{return null;}
+}
 const CAT_D_DEF=["Alimentação","Transporte","Saúde","Lazer","Moradia","Educação","Assinatura","Vestuário","Outros"];
 const CAT_R_DEF=["Salário","Freelance","Investimentos","Aluguel","Dividendos","Bônus","Outros"];
 const TIPOS_INV=["Ações","FII","ETF","Cripto","Renda Fixa","Tesouro Direto","Outros"];
@@ -2454,7 +2474,7 @@ function AppInner(){
           <div><p style={{margin:0,fontSize:15,fontWeight:800,color:D.text}}>Controle Financeiro</p>{syncing&&<p style={{margin:0,fontSize:10,color:D.green}}>● sincronizando...</p>}{!syncing&&syncErro&&<p style={{margin:0,fontSize:10,color:D.gold}}>⚠ sem conexão com a nuvem — alterações não estão sendo salvas online</p>}</div>
         </div>
         <div style={{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
-          {PROFILES.map(p=><button key={p.id} onClick={()=>setProfileId(p.id)} style={{padding:"5px 12px",borderRadius:20,fontSize:12,cursor:"pointer",fontWeight:profileId===p.id?700:400,background:profileId===p.id?D.green:"transparent",color:profileId===p.id?"#000":D.text3,border:`1px solid ${profileId===p.id?D.green:D.border}`}}>{p.label}</button>)}
+          {PROFILES.map(p=>{const aberto=mercadoAberto(p.id);const corBola=aberto===true?D.green:aberto===false?D.text3:"transparent";return <button key={p.id} onClick={()=>setProfileId(p.id)} title={aberto===true?"Mercado aberto":aberto===false?"Mercado fechado":""} style={{padding:"5px 12px",borderRadius:20,fontSize:12,cursor:"pointer",fontWeight:profileId===p.id?700:400,background:profileId===p.id?D.green:"transparent",color:profileId===p.id?"#000":D.text3,border:`1px solid ${profileId===p.id?D.green:D.border}`,display:"inline-flex",alignItems:"center",gap:6}}><span style={{width:7,height:7,borderRadius:"50%",background:corBola,boxShadow:aberto===true?`0 0 5px ${D.green}`:"none",flexShrink:0}}/>{p.label}</button>;})}
           <div style={{width:1,height:20,background:D.border}}/>
           <button onClick={exportar} style={{padding:"5px 10px",borderRadius:16,fontSize:11,cursor:"pointer",background:"transparent",border:`1px solid ${D.border}`,color:D.text3}}>⬇️</button>
           <button onClick={()=>importRef.current.click()} style={{padding:"5px 10px",borderRadius:16,fontSize:11,cursor:"pointer",background:"transparent",border:`1px solid ${D.border}`,color:D.text3}}>⬆️</button>
