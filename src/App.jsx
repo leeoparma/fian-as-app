@@ -23,7 +23,7 @@ const supa={
 
 const D={bg:"#0a0e1a",bg2:"#0f1629",bg3:"#151d35",card:"#111827",card2:"#1a2235",border:"#1e2d4a",border2:"#253352",green:"#00d084",red:"#ff4757",blue:"#3b82f6",gold:"#f59e0b",purple:"#8b5cf6",text:"#f1f5f9",text2:"#94a3b8",text3:"#64748b"};
 const CORES=[D.green,D.blue,D.purple,D.gold,D.red,"#06b6d4","#ec4899"];
-const PROFILES=[{id:"br",label:"🇧🇷 Brasil",currency:"R$",market:"brazil",locale:"pt-BR"},{id:"au",label:"🇦🇺 Austrália",currency:"A$",market:"australia",locale:"en-AU"}];
+const PROFILES=[{id:"br",label:"🇧🇷 Brasil",currency:"R$",market:"brazil",locale:"pt-BR"},{id:"au",label:"🇦🇺 Austrália",currency:"A$",market:"australia",locale:"en-AU"},{id:"us",label:"🇺🇸 EUA",currency:"US$",market:"usa",locale:"en-US"}];
 const CAT_D_DEF=["Alimentação","Transporte","Saúde","Lazer","Moradia","Educação","Assinatura","Vestuário","Outros"];
 const CAT_R_DEF=["Salário","Freelance","Investimentos","Aluguel","Dividendos","Bônus","Outros"];
 const TIPOS_INV=["Ações","FII","ETF","Cripto","Renda Fixa","Tesouro Direto","Outros"];
@@ -217,6 +217,7 @@ function ChartModal({ticker,onClose,currency="A$",market="au",dyAlvo=6}){
     if(ticker.includes(":"))return ticker; // já tem bolsa
     const base=ticker.replace(/\.(AX|SA)$/i,""); // tira sufixo .AX/.SA
     if(market==="br")return "BMFBOVESPA:"+base;
+    if(market==="us")return base; // EUA: TradingView acha NASDAQ/NYSE corretamente sozinho
     return "ASX:"+base; // mercado australiano
   })();
   const [dados,setDados]=useState(null);
@@ -271,15 +272,24 @@ function ChartModal({ticker,onClose,currency="A$",market="au",dyAlvo=6}){
             <div style={{width:46,height:46,borderRadius:12,background:`linear-gradient(135deg,${D.green}33,${D.blue}33)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:800,color:D.green,flexShrink:0}}>{ticker.slice(0,2)}</div>
             <div>
               <p style={{margin:0,fontSize:22,fontWeight:800,color:D.text,lineHeight:1.1}}>{ticker}</p>
-              <p style={{margin:"1px 0 0",fontSize:11,color:D.text3}}>{market==="br"?"BRASIL · B3":"AUSTRÁLIA · ASX"}{nomeEmp?` · ${nomeEmp}`:""}</p>
+              <p style={{margin:"1px 0 0",fontSize:11,color:D.text3}}>{market==="br"?"BRASIL · B3":market==="us"?"EUA · NYSE/Nasdaq":"AUSTRÁLIA · ASX"}{nomeEmp?` · ${nomeEmp}`:""}</p>
             </div>
           </div>
           <button onClick={onClose} style={{border:"none",background:D.bg3,cursor:"pointer",fontSize:18,color:D.text3,width:32,height:32,borderRadius:8,flexShrink:0}}>✕</button>
         </div>
-        {!loading&&!erro&&preco!=null&&<div style={{display:"flex",alignItems:"baseline",gap:10,marginBottom:14}}>
+        {!loading&&!erro&&preco!=null&&<div style={{display:"flex",alignItems:"baseline",gap:10,marginBottom:14,flexWrap:"wrap"}}>
           <span style={{fontSize:30,fontWeight:800,color:D.text}}>{currency} {Number(preco).toFixed(2)}</span>
           {dados?.variacao_dia!=null&&<span style={{fontSize:15,fontWeight:700,color:dados.variacao_dia>=0?D.green:D.red}}>{dados.variacao_dia>=0?"▲":"▼"} {Math.abs(dados.variacao_dia).toFixed(2)}%</span>}
-          <span style={{fontSize:10,color:D.text3}}>hoje</span>
+          {(()=>{
+            const st=dados?.market_state;
+            const aberto=st==="REGULAR";
+            const pre=st==="PRE";const pos=st==="POST";
+            const cor=aberto?D.green:(pre||pos)?D.gold:D.text3;
+            const txt=aberto?"Aberto":pre?"Pré-mercado":pos?"After-market":"Fechado";
+            return <span style={{display:"inline-flex",alignItems:"center",gap:5,fontSize:11,fontWeight:600,color:cor,alignSelf:"center"}}>
+              <span style={{width:8,height:8,borderRadius:"50%",background:cor,boxShadow:aberto?`0 0 6px ${D.green}`:"none",display:"inline-block"}}/>{txt}
+            </span>;
+          })()}
         </div>}
         {/* Abas */}
         <div style={{display:"flex",gap:4,flexWrap:"wrap",borderBottom:`1px solid ${D.border}`,paddingBottom:0}}>
@@ -971,7 +981,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
   }
 
   return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
-    {chartTicker&&<ChartModal ticker={chartTicker} currency={currency} market={profileId==="br"?"br":"au"} onClose={()=>setChartTicker(null)}/>}
+    {chartTicker&&<ChartModal ticker={chartTicker} currency={currency} market={profileId} onClose={()=>setChartTicker(null)}/>}
     <Card glow style={{background:`linear-gradient(135deg,${D.bg3},${D.card2})`,border:`1px solid ${D.blue}33`}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
         <div>
