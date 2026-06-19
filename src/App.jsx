@@ -2189,29 +2189,6 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
       {screenerSearch?<TVWidget type="financials" config={{symbol:isBR&&!/\./.test(screenerSearch)?"BMFBOVESPA:"+screenerSearch:screenerSearch,displayMode:"regular",width:"100%",height:490,locale:"pt_BR"}}/>:<TVWidget type="screener" config={{width:"100%",height:490,defaultColumn:"overview",defaultScreen:"most_capitalized",market,showToolbar:true,locale:"pt_BR"}}/>}
     </Card>
 
-    {/* Calculadora */}
-    <Card>
-      <p style={{fontSize:14,fontWeight:700,color:D.text,marginBottom:10}}>Calcular rentabilidade</p>
-      <label style={{fontSize:12,color:D.text3,display:"block",marginBottom:8}}>Tipo<select value={calcForm.tipo} onChange={e=>setCalcForm(f=>({...f,tipo:e.target.value}))} style={{marginTop:4}}><option value="acao">Ações / FII / ETF</option><option value="rf">Renda Fixa</option></select></label>
-      {calcForm.tipo==="acao"?<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:8,marginBottom:10}}>
-        {[["Preço compra","pc"],["Preço atual","pa"],["Quantidade","qt"],["Meses investido","meses"]].map(([l,k])=><label key={k} style={{fontSize:12,color:D.text3}}>{l}<input type="number" value={calcForm[k]||""} onChange={e=>setCalcForm(f=>({...f,[k]:e.target.value}))} style={{marginTop:4}}/></label>)}
-      </div>:<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:8,marginBottom:10}}>
-        <label style={{fontSize:12,color:D.text3}}>Valor investido<input type="number" value={calcForm.pc||""} onChange={e=>setCalcForm(f=>({...f,pc:e.target.value}))} style={{marginTop:4}}/></label>
-        <label style={{fontSize:12,color:D.text3}}>Índice<select value={calcForm.indice} onChange={e=>setCalcForm(f=>({...f,indice:e.target.value}))} style={{marginTop:4}}>{INDICES_RF.map(i=><option key={i}>{i}</option>)}</select></label>
-        <label style={{fontSize:12,color:D.text3}}>Taxa adicional %<input type="number" value={calcForm.taxa||""} onChange={e=>setCalcForm(f=>({...f,taxa:e.target.value}))} placeholder="Ex: 9" style={{marginTop:4}}/></label>
-        <label style={{fontSize:12,color:D.text3}}>Meses<input type="number" value={calcForm.meses||""} onChange={e=>setCalcForm(f=>({...f,meses:e.target.value}))} style={{marginTop:4}}/></label>
-      </div>}
-      <Btn onClick={calcRent}>Calcular</Btn>
-      {calcRes&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:8,marginTop:12}}>
-        <MetricCard label="Investido" value={fmtM(calcRes.investido,currency)}/>
-        <MetricCard label="Valor bruto" value={fmtM(calcRes.atual,currency)} color={D.blue}/>
-        <MetricCard label="Lucro bruto" value={fmtM(calcRes.lucro,currency)} color={calcRes.lucro>=0?D.green:D.red} sub={calcRes.pct.toFixed(2)+"%"}/>
-        <MetricCard label="Imposto est." value={fmtM(calcRes.imposto,currency)} color={D.red}/>
-        <MetricCard label="Lucro líquido" value={fmtM(calcRes.lucroLiq,currency)} color={D.green}/>
-        {calcRes.taxa&&<MetricCard label="Taxa a.a." value={calcRes.taxa+"%"} color={D.gold}/>}
-      </div>}
-    </Card>
-
     {/* Simulador */}
     <Card>
       <p style={{fontSize:14,fontWeight:700,color:D.text,marginBottom:10}}>Simular juros compostos</p>
