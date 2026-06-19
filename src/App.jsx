@@ -1178,13 +1178,31 @@ function SplitwiseTab({currency,userEmail}){
 
   useEffect(()=>{if(codigo)loadSW();},[codigo]);
 
+  // Garante que swData sempre tenha a estrutura mínima (evita crash se vier corrompido)
+  function normalizaSW(d){
+    if(!d||typeof d!=="object")return null;
+    return {codigo:d.codigo||codigo,membros:Array.isArray(d.membros)?d.membros.filter(m=>m&&m.nome):[],despesas:Array.isArray(d.despesas)?d.despesas:[],pagamentos:Array.isArray(d.pagamentos)?d.pagamentos:[]};
+  }
+
+  // Carrega da NUVEM primeiro (pra ver o que outras pessoas adicionaram); local é fallback
   async function loadSW(){
     setLoading(true);
-    try{const local=lsGet(`sw_${codigo}`);if(local)setSwData(local);}catch{}
+    try{
+      const remoto=await supa.loadShared(codigo);
+      if(remoto){const n=normalizaSW(remoto);setSwData(n);lsSet(`sw_${codigo}`,n);setLoading(false);return;}
+    }catch{}
+    // Sem nuvem ou falhou: usa local
+    try{const local=lsGet(`sw_${codigo}`);if(local)setSwData(normalizaSW(local));}catch{}
     setLoading(false);
   }
 
-  function saveSW(d){setSwData(d);lsSet(`sw_${codigo}`,d);}
+  // Salva no local E na nuvem (pra outras pessoas verem)
+  function saveSW(d){
+    const n=normalizaSW(d);
+    setSwData(n);
+    lsSet(`sw_${codigo}`,n);
+    supa.saveShared(codigo,n).catch(()=>{});
+  }
 
   function criarGrupo(){
     if(!setupNome.trim()||!inputCod.trim())return;
@@ -1194,16 +1212,24 @@ function SplitwiseTab({currency,userEmail}){
     saveSW(d);setInputCod("");setSetupNome("");
   }
 
-  function entrarGrupo(){
+  async function entrarGrupo(){
     if(!inputCod.trim()||!setupNome.trim())return;
     const cod=inputCod.trim().toUpperCase(),nome=setupNome.trim();
-    lsSet("sw_codigo",cod);lsSet("sw_nome",nome);setCodigo(cod);setNomeUser(nome);
-    const existing=lsGet(`sw_${cod}`);
-    if(existing){
-      if(!existing.membros.find(m=>m.nome===nome)){existing.membros.push({nome,email:userEmail||nome});saveSW(existing);}
-      else{setSwData(existing);}
+    lsSet("sw_codigo",cod);lsSet("sw_nome",nome);
+    // Busca o grupo na NUVEM (assim quem entra vê o grupo real que já existe)
+    let grupo=null;
+    try{grupo=await supa.loadShared(cod);}catch{}
+    if(!grupo){grupo=lsGet(`sw_${cod}`);} // fallback local
+    setCodigo(cod);setNomeUser(nome);
+    if(grupo){
+      const g=normalizaSW(grupo);
+      if(!g.membros.find(m=>m.nome===nome)){g.membros.push({nome,email:userEmail||nome});}
+      setSwData(g);lsSet(`sw_${cod}`,g);
+      supa.saveShared(cod,g).catch(()=>{});
     }else{
-      const d={codigo:cod,membros:[{nome,email:userEmail||nome}],despesas:[],pagamentos:[]};saveSW(d);
+      // Grupo não existe em lugar nenhum: cria novo
+      const d={codigo:cod,membros:[{nome,email:userEmail||nome}],despesas:[],pagamentos:[]};
+      setSwData(d);lsSet(`sw_${cod}`,d);supa.saveShared(cod,d).catch(()=>{});
     }
     setInputCod("");setSetupNome("");
   }
@@ -1226,9 +1252,18 @@ function SplitwiseTab({currency,userEmail}){
   function calcSaldos(){
     if(!swData)return {};
     const saldos={};
-    swData.membros.forEach(m=>{saldos[m.nome]=0;});
-    swData.despesas.forEach(d=>{saldos[d.pagoPor]=(saldos[d.pagoPor]||0)+d.valor;d.divisao.forEach(div=>{saldos[div.nome]=(saldos[div.nome]||0)-div.valor;});});
-    swData.pagamentos?.forEach(p=>{saldos[p.de]=(saldos[p.de]||0)-p.valor;saldos[p.para]=(saldos[p.para]||0)+p.valor;});
+    (swData.membros||[]).forEach(m=>{if(m&&m.nome)saldos[m.nome]=0;});
+    (swData.despesas||[]).forEach(d=>{
+      if(!d)return;
+      if(d.pagoPor)saldos[d.pagoPor]=(saldos[d.pagoPor]||0)+(d.valor||0);
+      (d.divisao||[]).forEach(div=>{
+        // divisao pode ser array de strings (nomes) ou de objetos {nome,valor}
+        const nome=typeof div==="string"?div:div?.nome;
+        const qto=typeof div==="string"?((d.valor||0)/((d.divisao||[]).length||1)):(div?.valor||0);
+        if(nome)saldos[nome]=(saldos[nome]||0)-qto;
+      });
+    });
+    (swData.pagamentos||[]).forEach(p=>{if(!p)return;if(p.de)saldos[p.de]=(saldos[p.de]||0)-(p.valor||0);if(p.para)saldos[p.para]=(saldos[p.para]||0)+(p.valor||0);});
     return saldos;
   }
 
@@ -1298,6 +1333,7 @@ function SplitwiseTab({currency,userEmail}){
     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
       <Btn onClick={()=>{setModal("despesa");setForm({pagoPor:nomeUser,divisao:swData.membros.map(m=>m.nome)});}} color={D.green}>+ Nova despesa</Btn>
       <Btn onClick={()=>{setModal("pagamento");setForm({de:nomeUser});}} color={D.blue} outline>✓ Registrar pagamento</Btn>
+      <Btn onClick={loadSW} color={D.purple} outline sm>🔄 Atualizar</Btn>
       <Btn onClick={()=>{setCodigo("");setNomeUser("");lsSet("sw_codigo","");lsSet("sw_nome","");}} color={D.red} outline sm>Sair do grupo</Btn>
     </div>
     <Card>
