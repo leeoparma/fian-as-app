@@ -2258,12 +2258,6 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
       </div>}
     </Card>
 
-    {/* Alocação */}
-    <Card>
-      <p style={{fontSize:14,fontWeight:700,color:D.text,marginBottom:6}}>Sugestão de alocação ideal</p>
-      <Btn onClick={sugerirAloc} disabled={alocLoading} color={D.purple}>{alocLoading?"Analisando...":"Analisar carteira"}</Btn>
-      {alocRes&&<div style={{marginTop:12}}><p style={{fontSize:13,color:D.text2,marginBottom:10,lineHeight:1.6}}>{alocRes.analise}</p>{alocRes.sugestao?.map((s,i)=><div key={i} style={{background:D.bg3,borderRadius:10,padding:"10px 14px",marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:4}}><span style={{fontWeight:600,color:D.text}}>{s.tipo}</span><span style={{color:D.text3}}>{s.pct_atual}% → <strong style={{color:D.green}}>{s.pct_ideal}%</strong></span></div><p style={{margin:0,fontSize:12,color:D.text3}}>{s.acao}</p></div>)}</div>}
-    </Card>
   </div>;
 }
 
