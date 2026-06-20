@@ -1167,77 +1167,141 @@ function MetasTab({data,setData,currency}){
 
 // ── Splitwise Tab ─────────────────────────────────────────────────────────────
 function SplitwiseTab({currency,userEmail}){
-  const [codigo,setCodigo]=useState(()=>lsGet("sw_codigo")||"");
-  const [inputCod,setInputCod]=useState("");
+  // Multi-grupo: lista de códigos que participo + qual está ativo
+  const [grupos,setGrupos]=useState(()=>{try{return JSON.parse(lsGet("sw_grupos")||"[]");}catch{return [];}});
+  const [ativo,setAtivo]=useState(()=>lsGet("sw_ativo")||"");
+  const [nomeUser,setNomeUser]=useState(()=>lsGet("sw_nome")||"");
   const [swData,setSwData]=useState(null);
   const [loading,setLoading]=useState(false);
   const [modal,setModal]=useState(null);
   const [form,setForm]=useState({});
-  const [nomeUser,setNomeUser]=useState(()=>lsGet("sw_nome")||"");
+  const [inputCod,setInputCod]=useState("");
   const [setupNome,setSetupNome]=useState("");
+  const [saldosGrupos,setSaldosGrupos]=useState({});
 
-  useEffect(()=>{if(codigo)loadSW();},[codigo]);
+  // Ícones por categoria (estilo app oficial)
+  const CATS=[
+    {nome:"Casa",icone:"🏠",cor:D.gold},
+    {nome:"Mercado",icone:"🛒",cor:D.green},
+    {nome:"Comida",icone:"🍽️",cor:"#f59e0b"},
+    {nome:"Transporte",icone:"🚗",cor:D.blue},
+    {nome:"Internet",icone:"📶",cor:"#06b6d4"},
+    {nome:"Viagem",icone:"✈️",cor:"#8b5cf6"},
+    {nome:"Lazer",icone:"🎉",cor:"#ec4899"},
+    {nome:"Saúde",icone:"⚕️",cor:"#ef4444"},
+    {nome:"Outros",icone:"🧾",cor:D.text3},
+  ];
+  const iconeCat=(c)=>{const f=CATS.find(x=>x.nome===c);return f?f.icone:"🧾";};
+  const corCat=(c)=>{const f=CATS.find(x=>x.nome===c);return f?f.cor:D.text3;};
 
-  // Garante que swData sempre tenha a estrutura mínima (evita crash se vier corrompido)
+  useEffect(()=>{if(ativo)loadSW(ativo);},[ativo]);
+  // Calcula o saldo de cada grupo pra mostrar na lista
+  useEffect(()=>{if(!ativo&&grupos.length&&nomeUser)calcularSaldosLista();},[grupos,ativo,nomeUser]);
+
   function normalizaSW(d){
     if(!d||typeof d!=="object")return null;
-    return {codigo:d.codigo||codigo,membros:Array.isArray(d.membros)?d.membros.filter(m=>m&&m.nome):[],despesas:Array.isArray(d.despesas)?d.despesas:[],pagamentos:Array.isArray(d.pagamentos)?d.pagamentos:[]};
+    return {codigo:d.codigo||ativo,nome:d.nome||d.codigo||ativo,membros:Array.isArray(d.membros)?d.membros.filter(m=>m&&m.nome):[],despesas:Array.isArray(d.despesas)?d.despesas:[],pagamentos:Array.isArray(d.pagamentos)?d.pagamentos:[]};
   }
 
-  // Carrega da NUVEM primeiro (pra ver o que outras pessoas adicionaram); local é fallback
-  async function loadSW(){
+  async function loadSW(cod){
     setLoading(true);
-    // Mostra o local IMEDIATAMENTE (não espera a nuvem) pra nunca travar em "Carregando"
-    try{const local=lsGet(`sw_${codigo}`);if(local)setSwData(normalizaSW(local));}catch{}
-    try{
-      const remoto=await supa.loadShared(codigo);
-      if(remoto){const n=normalizaSW(remoto);setSwData(n);lsSet(`sw_${codigo}`,n);}
-    }catch{}
+    try{const local=lsGet(`sw_${cod}`);if(local)setSwData(normalizaSW(local));}catch{}
+    try{const remoto=await supa.loadShared(cod);if(remoto){const n=normalizaSW(remoto);setSwData(n);lsSet(`sw_${cod}`,n);}}catch{}
     setLoading(false);
   }
 
-  // Salva no local E na nuvem (pra outras pessoas verem)
   function saveSW(d){
     const n=normalizaSW(d);
     setSwData(n);
-    lsSet(`sw_${codigo}`,n);
-    supa.saveShared(codigo,n).catch(()=>{});
+    lsSet(`sw_${ativo}`,n);
+    supa.saveShared(ativo,n).catch(()=>{});
+  }
+
+  // Saldo de um membro num conjunto de dados
+  function saldoDe(data,nome){
+    if(!data)return 0;
+    let s=0;
+    (data.despesas||[]).forEach(d=>{
+      if(!d)return;
+      if(d.pagoPor===nome)s+=(d.valor||0);
+      (d.divisao||[]).forEach(div=>{
+        const n=typeof div==="string"?div:div?.nome;
+        const q=typeof div==="string"?((d.valor||0)/((d.divisao||[]).length||1)):(div?.valor||0);
+        if(n===nome)s-=q;
+      });
+    });
+    (data.pagamentos||[]).forEach(p=>{if(!p)return;if(p.de===nome)s+=(p.valor||0);if(p.para===nome)s-=(p.valor||0);});
+    return s;
+  }
+
+  async function calcularSaldosLista(){
+    const res={};
+    for(const cod of grupos){
+      try{
+        let d=lsGet(`sw_${cod}`);
+        const remoto=await supa.loadShared(cod);
+        if(remoto){d=remoto;lsSet(`sw_${cod}`,remoto);}
+        if(d)res[cod]={saldo:saldoDe(d,nomeUser),nome:d.nome||cod,membros:(d.membros||[]).length};
+      }catch{}
+    }
+    setSaldosGrupos(res);
   }
 
   function criarGrupo(){
-    if(!setupNome.trim()||!inputCod.trim())return;
-    const cod=inputCod.trim().toUpperCase(),nome=setupNome.trim();
-    lsSet("sw_codigo",cod);lsSet("sw_nome",nome);setCodigo(cod);setNomeUser(nome);
-    const d={codigo:cod,membros:[{nome,email:userEmail||nome}],despesas:[],pagamentos:[]};
-    saveSW(d);setInputCod("");setSetupNome("");
+    if(!setupNome.trim()||!form.nomeGrupo?.trim())return;
+    const nome=setupNome.trim();
+    const cod=(form.nomeGrupo.trim().toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,12)||"GRUPO")+"-"+Math.random().toString(36).slice(2,6).toUpperCase();
+    if(!nomeUser){lsSet("sw_nome",nome);setNomeUser(nome);}
+    const d={codigo:cod,nome:form.nomeGrupo.trim(),membros:[{nome,email:userEmail||nome}],despesas:[],pagamentos:[]};
+    lsSet(`sw_${cod}`,normalizaSW(d));supa.saveShared(cod,normalizaSW(d)).catch(()=>{});
+    const ng=[...new Set([...grupos,cod])];setGrupos(ng);lsSet("sw_grupos",JSON.stringify(ng));
+    lsSet("sw_ativo",cod);setAtivo(cod);
+    setForm({});setSetupNome("");setModal(null);
   }
 
   async function entrarGrupo(){
-    if(!inputCod.trim()||!setupNome.trim())return;
-    const cod=inputCod.trim().toUpperCase(),nome=setupNome.trim();
-    lsSet("sw_codigo",cod);lsSet("sw_nome",nome);
-    // Busca o grupo na NUVEM (assim quem entra vê o grupo real que já existe)
+    if(!inputCod.trim()||!(nomeUser||setupNome.trim()))return;
+    const cod=inputCod.trim().toUpperCase(),nome=(nomeUser||setupNome.trim());
+    if(!nomeUser){lsSet("sw_nome",nome);setNomeUser(nome);}
     let grupo=null;
     try{grupo=await supa.loadShared(cod);}catch{}
-    if(!grupo){grupo=lsGet(`sw_${cod}`);} // fallback local
-    setCodigo(cod);setNomeUser(nome);
+    if(!grupo){grupo=lsGet(`sw_${cod}`);}
     if(grupo){
       const g=normalizaSW(grupo);
       if(!g.membros.find(m=>m.nome===nome)){g.membros.push({nome,email:userEmail||nome});}
-      setSwData(g);lsSet(`sw_${cod}`,g);
-      supa.saveShared(cod,g).catch(()=>{});
+      lsSet(`sw_${cod}`,g);supa.saveShared(cod,g).catch(()=>{});
     }else{
-      // Grupo não existe em lugar nenhum: cria novo
-      const d={codigo:cod,membros:[{nome,email:userEmail||nome}],despesas:[],pagamentos:[]};
-      setSwData(d);lsSet(`sw_${cod}`,d);supa.saveShared(cod,d).catch(()=>{});
+      const d={codigo:cod,nome:cod,membros:[{nome,email:userEmail||nome}],despesas:[],pagamentos:[]};
+      lsSet(`sw_${cod}`,d);supa.saveShared(cod,d).catch(()=>{});
     }
-    setInputCod("");setSetupNome("");
+    const ng=[...new Set([...grupos,cod])];setGrupos(ng);lsSet("sw_grupos",JSON.stringify(ng));
+    lsSet("sw_ativo",cod);setAtivo(cod);
+    setInputCod("");setSetupNome("");setModal(null);
+  }
+
+  function sairDaLista(cod){
+    const ng=grupos.filter(g=>g!==cod);setGrupos(ng);lsSet("sw_grupos",JSON.stringify(ng));
+    if(ativo===cod){setAtivo("");lsSet("sw_ativo","");setSwData(null);}
+  }
+
+  function voltarLista(){setAtivo("");lsSet("sw_ativo","");setSwData(null);}
+
+  function addMembro(){
+    if(!form.novoMembro?.trim())return;
+    const nome=form.novoMembro.trim();
+    if(swData.membros.find(m=>m.nome===nome)){setForm(f=>({...f,novoMembro:""}));return;}
+    saveSW({...swData,membros:[...swData.membros,{nome}]});setForm(f=>({...f,novoMembro:""}));
+  }
+
+  function removerMembro(nome){
+    if(nome===nomeUser)return;
+    saveSW({...swData,membros:swData.membros.filter(m=>m.nome!==nome)});
   }
 
   function addDespesa(){
     if(!form.descricao||!form.valor||!form.pagoPor)return;
     const membros=swData.membros.map(m=>m.nome);
-    const selecionados=form.divisao||membros;
+    const selecionados=(form.divisao&&form.divisao.length)?form.divisao:membros;
     const porPessoa=parseFloat(form.valor)/selecionados.length;
     const d={id:uid(),descricao:form.descricao,valor:parseFloat(form.valor),pagoPor:form.pagoPor,data:form.data||hoje.toISOString().slice(0,10),categoria:form.categoria||"Outros",divisao:selecionados.map(nome=>({nome,valor:porPessoa}))};
     saveSW({...swData,despesas:[...swData.despesas,d]});setModal(null);setForm({});
@@ -1257,20 +1321,19 @@ function SplitwiseTab({currency,userEmail}){
       if(!d)return;
       if(d.pagoPor)saldos[d.pagoPor]=(saldos[d.pagoPor]||0)+(d.valor||0);
       (d.divisao||[]).forEach(div=>{
-        // divisao pode ser array de strings (nomes) ou de objetos {nome,valor}
         const nome=typeof div==="string"?div:div?.nome;
         const qto=typeof div==="string"?((d.valor||0)/((d.divisao||[]).length||1)):(div?.valor||0);
         if(nome)saldos[nome]=(saldos[nome]||0)-qto;
       });
     });
-    (swData.pagamentos||[]).forEach(p=>{if(!p)return;if(p.de)saldos[p.de]=(saldos[p.de]||0)-(p.valor||0);if(p.para)saldos[p.para]=(saldos[p.para]||0)+(p.valor||0);});
+    (swData.pagamentos||[]).forEach(p=>{if(!p)return;if(p.de)saldos[p.de]=(saldos[p.de]||0)+(p.valor||0);if(p.para)saldos[p.para]=(saldos[p.para]||0)-(p.valor||0);});
     return saldos;
   }
 
   function calcDividas(){
     const saldos=calcSaldos();
-    const devedores=Object.entries(saldos).filter(([,v])=>v<0).map(([n,v])=>({nome:n,valor:-v}));
-    const credores=Object.entries(saldos).filter(([,v])=>v>0).map(([n,v])=>({nome:n,valor:v}));
+    const devedores=Object.entries(saldos).filter(([,v])=>v<-0.01).map(([n,v])=>({nome:n,valor:-v}));
+    const credores=Object.entries(saldos).filter(([,v])=>v>0.01).map(([n,v])=>({nome:n,valor:v}));
     const transacoes=[];const dev=[...devedores],cred=[...credores];
     while(dev.length&&cred.length){
       const d=dev[0],c=cred[0],v=Math.min(d.valor,c.valor);
@@ -1281,83 +1344,145 @@ function SplitwiseTab({currency,userEmail}){
     return transacoes;
   }
 
-  if(!codigo||!nomeUser){
+  // ───── TELA: LISTA DE GRUPOS (nenhum grupo aberto) ─────
+  if(!ativo){
     return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
-      <Card>
-        <p style={{fontSize:16,fontWeight:700,color:D.text,marginBottom:4}}>💸 Splitwise</p>
-        <p style={{fontSize:12,color:D.text3,marginBottom:16}}>Divida despesas com família e amigos. Todos veem quem deve o quê.</p>
-        <label style={{fontSize:12,color:D.text3,display:"block",marginBottom:10}}>Seu nome<input value={setupNome} onChange={e=>setSetupNome(e.target.value)} placeholder="Ex: Leonardo" style={{marginTop:4}}/></label>
-        <label style={{fontSize:12,color:D.text3,display:"block",marginBottom:12}}>Código do grupo<input value={inputCod} onChange={e=>setInputCod(e.target.value.toUpperCase())} placeholder="Ex: FAMILIA2024" style={{marginTop:4}}/></label>
-        <div style={{display:"flex",gap:8}}>
-          <Btn onClick={criarGrupo} color={D.green}>Criar novo grupo</Btn>
-          <Btn onClick={entrarGrupo} color={D.blue} outline>Entrar em grupo existente</Btn>
+      <Card style={{border:`1px solid ${D.green}33`}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <p style={{fontSize:16,fontWeight:700,color:D.text,margin:0}}>💸 Splitwise</p>
+            <p style={{fontSize:12,color:D.text3,margin:"4px 0 0"}}>Seus grupos de despesas compartilhadas</p>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <Btn onClick={()=>{setForm({});setModal("novoGrupo");}} color={D.green} sm>+ Novo grupo</Btn>
+            <Btn onClick={()=>{setForm({});setModal("entrarGrupo");}} color={D.blue} outline sm>Entrar com código</Btn>
+          </div>
         </div>
-        <p style={{fontSize:11,color:D.text3,marginTop:10}}>💡 Para compartilhar: informe o mesmo código para outras pessoas entrarem no seu grupo.</p>
       </Card>
+      {grupos.length===0&&<Card><p style={{fontSize:13,color:D.text3,textAlign:"center",padding:"20px 0"}}>Nenhum grupo ainda.<br/>Crie um grupo ou entre com um código.</p></Card>}
+      {grupos.map(cod=>{
+        const info=saldosGrupos[cod]||{saldo:0,nome:cod,membros:0};
+        const s=info.saldo;
+        return <Card key={cod} style={{cursor:"pointer",transition:"border .15s"}} >
+          <div onClick={()=>{lsSet("sw_ativo",cod);setAtivo(cod);}} style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{display:"flex",alignItems:"center",gap:12}}>
+              <div style={{width:44,height:44,borderRadius:12,background:D.bg3,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>👥</div>
+              <div>
+                <p style={{fontSize:15,fontWeight:700,color:D.text,margin:0}}>{info.nome}</p>
+                <p style={{fontSize:11,color:D.text3,margin:"2px 0 0"}}>{info.membros} {info.membros===1?"membro":"membros"} · {cod}</p>
+              </div>
+            </div>
+            <div style={{textAlign:"right"}}>
+              {Math.abs(s)<0.01
+                ?<p style={{fontSize:13,color:D.text3,margin:0,fontWeight:600}}>quitado ✓</p>
+                :<><p style={{fontSize:10,color:D.text3,margin:0}}>{s>0?"te devem":"você deve"}</p>
+                   <p style={{fontSize:17,fontWeight:700,color:s>0?D.green:"#f59e0b",margin:0}}>{fmtM(Math.abs(s),currency)}</p></>}
+            </div>
+          </div>
+          <div style={{display:"flex",justifyContent:"flex-end",marginTop:8}}>
+            <button onClick={()=>sairDaLista(cod)} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:11}}>remover da lista</button>
+          </div>
+        </Card>;
+      })}
+      {modal==="novoGrupo"&&<Modal title="Criar novo grupo" onClose={()=>setModal(null)}>
+        {!nomeUser&&<label style={{fontSize:12,color:D.text3}}>Seu nome<input value={setupNome} onChange={e=>setSetupNome(e.target.value)} placeholder="Ex: Leonardo" style={{marginTop:4}}/></label>}
+        <label style={{fontSize:12,color:D.text3}}>Nome do grupo<input value={form.nomeGrupo||""} onChange={e=>setForm(f=>({...f,nomeGrupo:e.target.value}))} placeholder="Ex: Crazy Family" style={{marginTop:4}}/></label>
+        <p style={{fontSize:11,color:D.text3,marginTop:6}}>Um código único será gerado para compartilhar com o grupo.</p>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn outline color={D.text3} onClick={()=>setModal(null)}>Cancelar</Btn><Btn color={D.green} onClick={criarGrupo}>Criar</Btn></div>
+      </Modal>}
+      {modal==="entrarGrupo"&&<Modal title="Entrar em grupo" onClose={()=>setModal(null)}>
+        {!nomeUser&&<label style={{fontSize:12,color:D.text3}}>Seu nome<input value={setupNome} onChange={e=>setSetupNome(e.target.value)} placeholder="Ex: Leonardo" style={{marginTop:4}}/></label>}
+        <label style={{fontSize:12,color:D.text3}}>Código do grupo<input value={inputCod} onChange={e=>setInputCod(e.target.value.toUpperCase())} placeholder="Ex: CRAZYFAMILY-X7K2" style={{marginTop:4}}/></label>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn outline color={D.text3} onClick={()=>setModal(null)}>Cancelar</Btn><Btn color={D.blue} onClick={entrarGrupo}>Entrar</Btn></div>
+      </Modal>}
     </div>;
   }
 
-  if(loading&&!swData)return <p style={{color:D.text3,fontSize:13}}>Carregando...</p>;
-  if(!swData)return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}><Card><p style={{fontSize:13,color:D.text3}}>Não foi possível carregar o grupo. <button onClick={loadSW} style={{color:D.green,background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>Tentar de novo</button> ou <button onClick={()=>{setCodigo("");setNomeUser("");lsSet("sw_codigo","");lsSet("sw_nome","");}} style={{color:D.blue,background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>sair do grupo</button>.</p></Card></div>;
+  // ───── TELA: DENTRO DE UM GRUPO ─────
+  if(loading&&!swData)return <div><button onClick={voltarLista} style={{border:"none",background:"none",cursor:"pointer",color:D.green,fontSize:13,marginBottom:8}}>← Meus grupos</button><p style={{color:D.text3,fontSize:13}}>Carregando...</p></div>;
+  if(!swData)return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}><Card><p style={{fontSize:13,color:D.text3}}>Não foi possível carregar. <button onClick={()=>loadSW(ativo)} style={{color:D.green,background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>Tentar de novo</button> ou <button onClick={voltarLista} style={{color:D.blue,background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>voltar</button>.</p></Card></div>;
 
   const saldos=calcSaldos();const dividas=calcDividas();const meuSaldo=saldos[nomeUser]||0;
 
   return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
+    <button onClick={voltarLista} style={{border:"none",background:"none",cursor:"pointer",color:D.green,fontSize:13,textAlign:"left",padding:0}}>← Meus grupos</button>
     <Card style={{border:`1px solid ${D.green}33`}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
         <div>
-          <p style={{fontSize:14,fontWeight:700,color:D.text}}>💸 Grupo: {swData.codigo}</p>
-          <p style={{fontSize:11,color:D.text3}}>Olá, {nomeUser} · {swData.membros.length} membro{swData.membros.length!==1?"s":""}</p>
-          <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:6}}>{swData.membros.map(m=><Badge key={m.nome} color={m.nome===nomeUser?D.green:D.text3}>{m.nome}</Badge>)}</div>
+          <p style={{fontSize:16,fontWeight:700,color:D.text,margin:0}}>👥 {swData.nome}</p>
+          <p style={{fontSize:11,color:D.text3,margin:"2px 0 0"}}>{swData.membros.length} membro{swData.membros.length!==1?"s":""} · código {swData.codigo}</p>
+          <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:8,alignItems:"center"}}>
+            {swData.membros.map(m=><Badge key={m.nome} color={m.nome===nomeUser?D.green:D.text3}>{m.nome}</Badge>)}
+            <button onClick={()=>{setForm({});setModal("membros");}} style={{border:`1px dashed ${D.text3}66`,background:"none",cursor:"pointer",color:D.text3,fontSize:10,borderRadius:20,padding:"2px 8px"}}>+ membro</button>
+          </div>
         </div>
         <div style={{textAlign:"right"}}>
-          <p style={{fontSize:11,color:D.text3}}>Seu saldo</p>
-          <p style={{fontSize:20,fontWeight:700,color:meuSaldo>=0?D.green:D.red}}>{meuSaldo>=0?"+":""}{fmtM(meuSaldo,currency)}</p>
-          <p style={{fontSize:10,color:D.text3}}>{meuSaldo>0?"te devem":meuSaldo<0?"você deve":"quitado ✓"}</p>
+          <p style={{fontSize:11,color:D.text3,margin:0}}>Seu saldo total</p>
+          {Math.abs(meuSaldo)<0.01
+            ?<p style={{fontSize:20,fontWeight:700,color:D.text3,margin:0}}>quitado ✓</p>
+            :<><p style={{fontSize:22,fontWeight:700,color:meuSaldo>0?D.green:"#f59e0b",margin:0}}>{fmtM(Math.abs(meuSaldo),currency)}</p>
+               <p style={{fontSize:10,color:meuSaldo>0?D.green:"#f59e0b",margin:0}}>{meuSaldo>0?"no total, te devem":"no total, você deve"}</p></>}
         </div>
       </div>
     </Card>
-    <Card>
-      <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>Saldos do grupo</p>
-      {Object.entries(saldos).map(([nome,val])=><div key={nome} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${D.border}`}}>
-        <span style={{fontSize:13,color:nome===nomeUser?D.green:D.text,fontWeight:nome===nomeUser?600:400}}>{nome}{nome===nomeUser?" (você)":""}</span>
-        <span style={{fontSize:13,fontWeight:700,color:val>=0?D.green:D.red}}>{val>=0?"+":""}{fmtM(val,currency)}</span>
-      </div>)}
-    </Card>
-    {dividas.length>0&&<Card style={{border:`1px solid ${D.gold}33`}}>
-      <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>💰 Quem deve pra quem</p>
-      {dividas.map((d,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",background:D.bg3,borderRadius:8,marginBottom:6,border:`1px solid ${(d.de===nomeUser||d.para===nomeUser)?D.gold+"44":D.border}`}}>
-        <span style={{fontSize:13,color:D.text}}><span style={{color:D.red,fontWeight:600}}>{d.de}</span> deve para <span style={{color:D.green,fontWeight:600}}>{d.para}</span></span>
-        <span style={{fontSize:14,fontWeight:700,color:D.gold}}>{fmtM(d.valor,currency)}</span>
+
+    {dividas.length>0&&<Card>
+      <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>Acerto de contas</p>
+      {dividas.map((d,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",background:D.bg3,borderRadius:10,marginBottom:6}}>
+        <span style={{fontSize:13,color:D.text}}><span style={{color:"#f59e0b",fontWeight:600}}>{d.de===nomeUser?"Você":d.de}</span> {d.de===nomeUser?"deve a":"deve a"} <span style={{color:D.green,fontWeight:600}}>{d.para===nomeUser?"você":d.para}</span></span>
+        <span style={{fontSize:14,fontWeight:700,color:D.text}}>{fmtM(d.valor,currency)}</span>
       </div>)}
     </Card>}
+
     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-      <Btn onClick={()=>{setModal("despesa");setForm({pagoPor:nomeUser,divisao:swData.membros.map(m=>m.nome)});}} color={D.green}>+ Nova despesa</Btn>
-      <Btn onClick={()=>{setModal("pagamento");setForm({de:nomeUser});}} color={D.blue} outline>✓ Registrar pagamento</Btn>
-      <Btn onClick={loadSW} color={D.purple} outline sm>🔄 Atualizar</Btn>
-      <Btn onClick={()=>{setCodigo("");setNomeUser("");lsSet("sw_codigo","");lsSet("sw_nome","");}} color={D.red} outline sm>Sair do grupo</Btn>
+      <Btn onClick={()=>{setModal("despesa");setForm({pagoPor:nomeUser,divisao:swData.membros.map(m=>m.nome),categoria:"Outros"});}} color={D.green}>+ Nova despesa</Btn>
+      <Btn onClick={()=>{setModal("pagamento");setForm({de:nomeUser});}} color={D.blue} outline>✓ Pagamento</Btn>
+      <Btn onClick={()=>loadSW(ativo)} color={D.purple} outline sm>🔄 Atualizar</Btn>
     </div>
+
     <Card>
-      <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>Despesas recentes</p>
-      {swData.despesas.length===0&&<p style={{fontSize:13,color:D.text3}}>Nenhuma despesa ainda.</p>}
-      {[...swData.despesas].reverse().slice(0,20).map(d=><div key={d.id} style={{padding:"10px 0",borderBottom:`1px solid ${D.border}`}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-          <div>
-            <p style={{margin:0,fontSize:13,fontWeight:600,color:D.text}}>{d.descricao}</p>
-            <p style={{margin:"2px 0 0",fontSize:11,color:D.text3}}>{d.data} · Pago por <span style={{color:D.green}}>{d.pagoPor}</span></p>
+      <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>Despesas</p>
+      {swData.despesas.length===0&&<p style={{fontSize:13,color:D.text3}}>Nenhuma despesa ainda. Adicione a primeira!</p>}
+      {[...swData.despesas].reverse().slice(0,30).map(d=>{
+        const minhaParte=(d.divisao||[]).find(x=>(typeof x==="string"?x:x?.nome)===nomeUser);
+        const meuValor=minhaParte?(typeof minhaParte==="string"?(d.valor/d.divisao.length):minhaParte.valor):0;
+        const euPaguei=d.pagoPor===nomeUser;
+        const lent=euPaguei?(d.valor-meuValor):0;
+        const borrowed=!euPaguei?meuValor:0;
+        return <div key={d.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:`1px solid ${D.border}`}}>
+          <div style={{width:40,height:40,borderRadius:10,background:corCat(d.categoria)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>{iconeCat(d.categoria)}</div>
+          <div style={{flex:1,minWidth:0}}>
+            <p style={{margin:0,fontSize:14,fontWeight:600,color:D.text}}>{d.descricao}</p>
+            <p style={{margin:"2px 0 0",fontSize:11,color:D.text3}}>{d.pagoPor===nomeUser?"Você":d.pagoPor} pagou {fmtM(d.valor,currency)}</p>
           </div>
-          <div style={{display:"flex",gap:8,alignItems:"center"}}>
-            <span style={{fontSize:14,fontWeight:700,color:D.text}}>{fmtM(d.valor,currency)}</span>
-            <button onClick={()=>saveSW({...swData,despesas:swData.despesas.filter(x=>x.id!==d.id)})} style={{border:"none",background:"none",cursor:"pointer",color:D.red,fontSize:12}}>🗑</button>
+          <div style={{textAlign:"right",flexShrink:0}}>
+            {lent>0.01&&<><p style={{margin:0,fontSize:10,color:D.green}}>você emprestou</p><p style={{margin:0,fontSize:14,fontWeight:700,color:D.green}}>{fmtM(lent,currency)}</p></>}
+            {borrowed>0.01&&<><p style={{margin:0,fontSize:10,color:"#f59e0b"}}>você pegou</p><p style={{margin:0,fontSize:14,fontWeight:700,color:"#f59e0b"}}>{fmtM(borrowed,currency)}</p></>}
+            {lent<=0.01&&borrowed<=0.01&&<p style={{margin:0,fontSize:12,color:D.text3}}>—</p>}
           </div>
-        </div>
-        <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}>{d.divisao.map(div=><span key={div.nome} style={{fontSize:10,background:D.bg3,color:D.text3,borderRadius:4,padding:"2px 6px"}}>{div.nome}: {fmtM(div.valor,currency)}</span>)}</div>
-      </div>)}
+          <button onClick={()=>saveSW({...swData,despesas:swData.despesas.filter(x=>x.id!==d.id)})} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:13,flexShrink:0}}>🗑</button>
+        </div>;
+      })}
     </Card>
+
+    {modal==="membros"&&<Modal title="Membros do grupo" onClose={()=>setModal(null)}>
+      <p style={{fontSize:11,color:D.text3,marginBottom:8}}>Adicione as pessoas que dividem as despesas (mesmo que não usem o app).</p>
+      {swData.membros.map(m=><div key={m.nome} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:`1px solid ${D.border}`}}>
+        <span style={{fontSize:13,color:m.nome===nomeUser?D.green:D.text}}>{m.nome}{m.nome===nomeUser?" (você)":""}</span>
+        {m.nome!==nomeUser&&<button onClick={()=>removerMembro(m.nome)} style={{border:"none",background:"none",cursor:"pointer",color:D.red,fontSize:11}}>remover</button>}
+      </div>)}
+      <label style={{fontSize:12,color:D.text3,marginTop:10,display:"block"}}>Adicionar pessoa<input value={form.novoMembro||""} onChange={e=>setForm(f=>({...f,novoMembro:e.target.value}))} placeholder="Ex: Tamysa" style={{marginTop:4}} onKeyDown={e=>{if(e.key==="Enter")addMembro();}}/></label>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn color={D.green} onClick={addMembro}>+ Adicionar</Btn><Btn outline color={D.text3} onClick={()=>setModal(null)}>Fechar</Btn></div>
+    </Modal>}
+
     {modal==="despesa"&&<Modal title="Nova despesa" onClose={()=>setModal(null)}>
       <label style={{fontSize:12,color:D.text3}}>Descrição<input value={form.descricao||""} onChange={e=>setForm(f=>({...f,descricao:e.target.value}))} style={{marginTop:4}}/></label>
       <label style={{fontSize:12,color:D.text3}}>Valor ({currency})<input type="number" value={form.valor||""} onChange={e=>setForm(f=>({...f,valor:e.target.value}))} style={{marginTop:4}}/></label>
-      <label style={{fontSize:12,color:D.text3}}>Pago por<select value={form.pagoPor||nomeUser} onChange={e=>setForm(f=>({...f,pagoPor:e.target.value}))} style={{marginTop:4}}>{swData.membros.map(m=><option key={m.nome}>{m.nome}</option>)}</select></label>
+      <div style={{marginTop:4}}>
+        <p style={{fontSize:12,color:D.text3,marginBottom:6}}>Categoria</p>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{CATS.map(c=><button key={c.nome} onClick={()=>setForm(f=>({...f,categoria:c.nome}))} style={{border:`1px solid ${(form.categoria||"Outros")===c.nome?c.cor:D.border}`,background:(form.categoria||"Outros")===c.nome?c.cor+"22":"none",borderRadius:8,padding:"4px 8px",cursor:"pointer",fontSize:12,color:D.text2}}>{c.icone} {c.nome}</button>)}</div>
+      </div>
+      <label style={{fontSize:12,color:D.text3,marginTop:4,display:"block"}}>Pago por<select value={form.pagoPor||nomeUser} onChange={e=>setForm(f=>({...f,pagoPor:e.target.value}))} style={{marginTop:4}}>{swData.membros.map(m=><option key={m.nome}>{m.nome}</option>)}</select></label>
       <label style={{fontSize:12,color:D.text3}}>Data<input type="date" value={form.data||hoje.toISOString().slice(0,10)} onChange={e=>setForm(f=>({...f,data:e.target.value}))} style={{marginTop:4}}/></label>
       <div style={{marginTop:4}}>
         <p style={{fontSize:12,color:D.text3,marginBottom:6}}>Dividir entre:</p>
@@ -1369,6 +1494,7 @@ function SplitwiseTab({currency,userEmail}){
       </div>
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn outline color={D.text3} onClick={()=>setModal(null)}>Cancelar</Btn><Btn color={D.green} onClick={addDespesa}>Adicionar</Btn></div>
     </Modal>}
+
     {modal==="pagamento"&&<Modal title="Registrar pagamento" onClose={()=>setModal(null)}>
       <label style={{fontSize:12,color:D.text3}}>Quem pagou<select value={form.de||nomeUser} onChange={e=>setForm(f=>({...f,de:e.target.value}))} style={{marginTop:4}}>{swData.membros.map(m=><option key={m.nome}>{m.nome}</option>)}</select></label>
       <label style={{fontSize:12,color:D.text3}}>Para quem<select value={form.para||""} onChange={e=>setForm(f=>({...f,para:e.target.value}))} style={{marginTop:4}}><option value="">Selecione...</option>{swData.membros.filter(m=>m.nome!==form.de).map(m=><option key={m.nome}>{m.nome}</option>)}</select></label>
