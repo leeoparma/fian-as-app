@@ -2623,6 +2623,48 @@ function AppInner(){
   // Evita que uma leitura falha (ex: Supabase acordando da pausa) sobrescreva dados bons com vazio.
   const loadOk=useRef(false);
   const [syncErro,setSyncErro]=useState(false);
+  const [cambio,setCambio]=useState(null);          // {brl,usd,aud} valor de cada moeda em BRL
+  const [moedaCons,setMoedaCons]=useState(()=>lsGet("moeda_cons")||"BRL"); // moeda de exibição do consolidado
+  const [cambioErro,setCambioErro]=useState(false);
+
+  // Busca câmbio uma vez ao entrar (e quando pedir)
+  async function carregarCambio(){
+    setCambioErro(false);
+    try{
+      const r=await fetch(`${WORKER}/cambio`);
+      const d=await r.json();
+      if(d&&d.usd&&d.aud){setCambio(d);}else{setCambioErro(true);}
+    }catch{setCambioErro(true);}
+  }
+  useEffect(()=>{if(session)carregarCambio();},[session]);
+
+  // Patrimônio de UM perfil na sua própria moeda
+  function patrimonioPerfil(pid){
+    const d=allData[pid]||{};
+    const bancos=Array.isArray(d.bancos)?d.bancos:[];
+    const txs=Array.isArray(d.transacoes)?d.transacoes:[];
+    const invs=Array.isArray(d.investimentos)?d.investimentos:[];
+    const totB=bancos.reduce((a,b)=>{const t=txs.filter(x=>x.bancoId===b.id);return a+(b.saldoInicial||0)+t.filter(x=>x.tipo==="receita").reduce((s,x)=>s+x.valor,0)-t.filter(x=>x.tipo==="despesa").reduce((s,x)=>s+x.valor,0);},0);
+    const totI=invs.reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0);
+    return totB+totI;
+  }
+
+  // Converte um valor da moeda de origem para a moeda de destino usando o câmbio (base BRL)
+  function converte(valor,de,para){
+    if(!cambio)return null;
+    const emBRL={br:cambio.brl,au:cambio.aud,us:cambio.usd}; // 1 unidade da moeda do perfil em BRL
+    const moedaParaBRL={BRL:cambio.brl,AUD:cambio.aud,USD:cambio.usd};
+    const valorBRL=valor*(emBRL[de]||1);
+    return valorBRL/(moedaParaBRL[para]||1);
+  }
+
+  // Patrimônio consolidado dos 3 perfis na moeda escolhida
+  function patrimonioConsolidado(){
+    if(!cambio)return null;
+    let total=0;
+    for(const p of PROFILES){total+=converte(patrimonioPerfil(p.id),p.id,moedaCons)||0;}
+    return total;
+  }
 
   useEffect(()=>{
     if(!session) return;
@@ -2780,6 +2822,27 @@ function AppInner(){
           <p style={{fontSize:34,fontWeight:800,color:D.green,textShadow:`0 0 20px ${D.green}66`}}>{fmtM(patrimonioLiq,currency)}</p>
           <p style={{fontSize:11,color:D.text3,marginTop:4}}>Bancos + Investimentos</p>
         </Card>
+
+        {(()=>{const cons=patrimonioConsolidado();const simbolo={BRL:"R$",AUD:"A$",USD:"US$"}[moedaCons];return <Card style={{border:`1px solid ${D.blue}33`}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:6}}>
+            <p style={{fontSize:10,color:D.text3,textTransform:"uppercase",letterSpacing:"1px",margin:0}}>🌍 Patrimônio Consolidado (3 países)</p>
+            <div style={{display:"flex",gap:4}}>
+              {["BRL","AUD","USD"].map(m=><button key={m} onClick={()=>{setMoedaCons(m);lsSet("moeda_cons",m);}} style={{padding:"3px 9px",borderRadius:14,fontSize:10,cursor:"pointer",border:`1px solid ${moedaCons===m?D.blue:D.border}`,background:moedaCons===m?D.blue+"22":"transparent",color:moedaCons===m?D.blue:D.text3,fontWeight:moedaCons===m?700:400}}>{({BRL:"R$",AUD:"A$",USD:"US$"})[m]}</button>)}
+            </div>
+          </div>
+          {cambioErro&&!cambio&&<p style={{fontSize:13,color:D.gold}}>⚠ Câmbio indisponível agora. <button onClick={carregarCambio} style={{color:D.blue,background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>Tentar de novo</button></p>}
+          {!cambioErro&&!cambio&&<p style={{fontSize:13,color:D.text3}}>Carregando câmbio...</p>}
+          {cons!=null&&<>
+            <p style={{fontSize:30,fontWeight:800,color:D.blue,textShadow:`0 0 18px ${D.blue}55`}}>{fmtM(cons,simbolo)}</p>
+            <div style={{display:"flex",flexDirection:"column",gap:3,marginTop:8}}>
+              {PROFILES.map(p=>{const v=patrimonioPerfil(p.id);const conv=converte(v,p.id,moedaCons);return <div key={p.id} style={{display:"flex",justifyContent:"space-between",fontSize:11,color:D.text3}}>
+                <span>{p.label} <span style={{color:D.text3}}>({fmtM(v,p.currency)})</span></span>
+                <span style={{color:D.text2}}>{conv!=null?fmtM(conv,simbolo):"—"}</span>
+              </div>;})}
+            </div>
+            <p style={{fontSize:9,color:D.text3,marginTop:8,fontStyle:"italic"}}>Estimativa — converte pelo câmbio atual, que varia ao longo do dia. {cambio?.atualizado?`Câmbio de ${new Date(cambio.atualizado).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}`:""} · <button onClick={carregarCambio} style={{color:D.blue,background:"none",border:"none",cursor:"pointer",textDecoration:"underline",fontSize:9}}>atualizar</button></p>
+          </>}
+        </Card>;})()}
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10}}>
           <MetricCard label="Receitas" value={fmtM(totR,currency)} color={D.green}/>
           <MetricCard label="Despesas" value={fmtM(totD,currency)} color={D.red}/>
