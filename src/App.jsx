@@ -1187,12 +1187,12 @@ function SplitwiseTab({currency,userEmail}){
   // Carrega da NUVEM primeiro (pra ver o que outras pessoas adicionaram); local é fallback
   async function loadSW(){
     setLoading(true);
+    // Mostra o local IMEDIATAMENTE (não espera a nuvem) pra nunca travar em "Carregando"
+    try{const local=lsGet(`sw_${codigo}`);if(local)setSwData(normalizaSW(local));}catch{}
     try{
       const remoto=await supa.loadShared(codigo);
-      if(remoto){const n=normalizaSW(remoto);setSwData(n);lsSet(`sw_${codigo}`,n);setLoading(false);return;}
+      if(remoto){const n=normalizaSW(remoto);setSwData(n);lsSet(`sw_${codigo}`,n);}
     }catch{}
-    // Sem nuvem ou falhou: usa local
-    try{const local=lsGet(`sw_${codigo}`);if(local)setSwData(normalizaSW(local));}catch{}
     setLoading(false);
   }
 
@@ -1297,7 +1297,8 @@ function SplitwiseTab({currency,userEmail}){
     </div>;
   }
 
-  if(loading||!swData)return <p style={{color:D.text3,fontSize:13}}>Carregando...</p>;
+  if(loading&&!swData)return <p style={{color:D.text3,fontSize:13}}>Carregando...</p>;
+  if(!swData)return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}><Card><p style={{fontSize:13,color:D.text3}}>Não foi possível carregar o grupo. <button onClick={loadSW} style={{color:D.green,background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>Tentar de novo</button> ou <button onClick={()=>{setCodigo("");setNomeUser("");lsSet("sw_codigo","");lsSet("sw_nome","");}} style={{color:D.blue,background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>sair do grupo</button>.</p></Card></div>;
 
   const saldos=calcSaldos();const dividas=calcDividas();const meuSaldo=saldos[nomeUser]||0;
 
