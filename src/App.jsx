@@ -27,6 +27,21 @@ const PROFILES=[{id:"br",label:"🇧🇷 Brasil",currency:"R$",market:"brazil",l
 
 // Calcula se a bolsa de um perfil está aberta AGORA (sem API, usa horário local de cada bolsa)
 // B3: 10-17 Brasília | ASX: 10-16 Sydney | NYSE: 9:30-16 Nova York. Seg-sex.
+
+// Nome do mercado por perfil (para textos e prompts de IA) — cobre os 3 países
+function nomeMercado(profileId){
+  return {br:"bolsa brasileira B3",us:"bolsa americana (NYSE/Nasdaq)",au:"bolsa australiana ASX"}[profileId]||"bolsa australiana ASX";
+}
+function nomeMercadoCurto(profileId){
+  return {br:"brasileira B3",us:"americana NYSE/Nasdaq",au:"australiana ASX"}[profileId]||"australiana ASX";
+}
+function nomeIndice(profileId){
+  return {br:"Ibovespa",us:"S&P 500",au:"ASX 200"}[profileId]||"ASX 200";
+}
+function nomePais(profileId){
+  return {br:"brasileiro",us:"americano",au:"australiano"}[profileId]||"australiano";
+}
+
 function mercadoAberto(profileId){
   const tz={br:"America/Sao_Paulo",au:"Australia/Sydney",us:"America/New_York"}[profileId];
   if(!tz)return null;
@@ -916,7 +931,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
       // Só pede ao Claude o que o Yahoo NÃO trouxe (resumo, ou dividendo faltante)
       if(!real.dy||!real.prox_dividendo){
         try{
-          const mercado=isBR?"bolsa brasileira B3":"bolsa australiana ASX";
+          const mercado=nomeMercado(profileId);
           const txt=await askClaude(`Para o ativo ${inv.ticker} na ${mercado} com preço atual de ${real.preco_atual}, retorne APENAS JSON: {${!real.dy?'"dy":number_or_null,':''}${!real.prox_dividendo?'"prox_dividendo":"YYYY-MM-DD or null","valor_dividendo":number_or_null,':''}"resumo":"1 frase sobre perspectiva atual"}. Use a data real do próximo pagamento de dividendo se souber; caso contrário use null.`,300);
           const extra=JSON.parse(txt);
           // Não sobrescreve o que o Yahoo já trouxe
@@ -930,7 +945,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
       }
     }else{
       try{
-        const mercado=isBR?"bolsa brasileira B3":"bolsa australiana ASX";
+        const mercado=nomeMercado(profileId);
         const txt=await askClaude(`Preço de fechamento mais recente do ativo ${inv.ticker} na ${mercado}. JSON apenas: {"preco_atual":number}`,150);
         const obj=JSON.parse(txt);
         if(obj.preco_atual>0){const va=obj.preco_atual*(inv.quantidade||1);setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,preco_atual:obj.preco_atual,valorAtual:va,lucro:va-(inv.precoMedio||0)*(inv.quantidade||1),ultimaAtualizacao:new Date().toLocaleTimeString("pt-BR")}:x)}));}
@@ -1649,7 +1664,7 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
 
   // ── NOVOS ESTADOS ──────────────────────────────────────────────────────────
   // Chat com analista IA
-  const [chatMsgs,setChatMsgs]=useState([{role:"assistant",content:`Olá! Sou seu analista financeiro IA. Posso responder perguntas sobre ações, FIIs, ETFs, análise fundamentalista, comparativos e estratégias de investimento no mercado ${isBR?"brasileiro":"australiano"}. Como posso ajudar?`}]);
+  const [chatMsgs,setChatMsgs]=useState([{role:"assistant",content:`Olá! Sou seu analista financeiro IA. Posso responder perguntas sobre ações, FIIs, ETFs, análise fundamentalista, comparativos e estratégias de investimento no mercado ${nomePais(profileId)}. Como posso ajudar?`}]);
   const [chatInput,setChatInput]=useState("");const [chatLoading,setChatLoading]=useState(false);
   const chatRef=useRef(null);
 
@@ -1708,9 +1723,9 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
       const totInvestido=investimentos.reduce((a,b)=>a+(b.valorInvestido||b.valor||0),0);
       const totAtual=investimentos.reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0);
       const rentCarteira=totInvestido>0?((totAtual-totInvestido)/totInvestido)*100:0;
-      setIndiceData({rentCarteira,varIndice:varIndice!=null?varIndice:null,nomeIndice:isBR?"Ibovespa":"ASX 200"});
+      setIndiceData({rentCarteira,varIndice:varIndice!=null?varIndice:null,nomeIndice:nomeIndice(profileId)});
     }catch(e){
-      setIndiceData({erro:true,nomeIndice:isBR?"Ibovespa":"ASX 200"});
+      setIndiceData({erro:true,nomeIndice:nomeIndice(profileId)});
     }
     setIndiceLoading(false);
   }
@@ -1729,7 +1744,7 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
     let obj={ticker:t,nome:real?.nome||t,categoria:wCat||"Outros",preco:real?.preco_atual||null,variacao_dia:real?.variacao_dia||null,pl:real?.pl??null,dy:real?.dy??null,roe:real?.roe??null,pvp:real?.pvp??null,currency};
     // Claude só para nome curto e categoria (e indicadores que o Yahoo não tiver)
     try{
-      const mercado=isBR?"brasileira B3":"australiana ASX";
+      const mercado=nomeMercadoCurto(profileId);
       const precisaIA=!obj.pl||!obj.dy||!obj.roe;
       const txt=await askClaude(`Para o ativo ${t} na bolsa ${mercado}, retorne APENAS JSON: {"nome":"nome curto","categoria":"Banco|Infraestrutura|Fundo Imobiliário|Energia|Tecnologia|Varejo|Saúde|Agronegócio|Mineração|Petróleo|ETF|Exterior|Outros"${precisaIA?',"pl":number_or_null,"dy":number_or_null,"roe":number_or_null':''}}`,300);
       const parsed=JSON.parse(txt);
@@ -1799,7 +1814,7 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
     const novaMsgs=[...chatMsgs,userMsg];
     setChatMsgs(novaMsgs);setChatInput("");setChatLoading(true);
     try{
-      const mercado=isBR?"brasileira B3":"australiana ASX";
+      const mercado=nomeMercadoCurto(profileId);
       const carteira=investimentos.length>0?`\nCarteira do usuário: ${investimentos.map(i=>`${i.ticker||i.tipo}:${currency}${i.valorAtual||i.valorInvestido||0}`).join(", ")}`:"";
       const watchStr=watchlist.length>0?`\nWatchlist: ${watchlist.map(w=>`${w.ticker}@${currency}${w.preco||"?"}`).join(", ")}`:"";
       const systemPrompt=`Você é um analista financeiro especialista na bolsa ${mercado}. Responda em português de forma clara, objetiva e com dados quando possível.${carteira}${watchStr}`;
@@ -1815,7 +1830,7 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
   // ── NOVO: Sugestões com Extended Thinking (Adaptive) ──────────────────────
   async function buscarSugestoesThinking(){
     setSugestLoading(true);setErro("");setThinkingLog("");setShowThinking(false);
-    const mercado=isBR?"brasileira B3":"australiana ASX";
+    const mercado=nomeMercadoCurto(profileId);
     try{
       // Busca preços reais da watchlist para contexto
       const precoCtx=watchlist.length>0?`\nAtivos em acompanhamento: ${watchlist.map(w=>`${w.ticker}@${currency}${w.preco||"?"} (P/L:${w.pl||"?"}, DY:${w.dy||"?"}%)`).join(", ")}`:"";
@@ -1825,7 +1840,7 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
         model:"claude-sonnet-4-6",
         max_tokens:5000,
         thinking:{type:"adaptive"},
-        messages:[{role:"user",content:`Você é um analista fundamentalista sênior. Analise profundamente o mercado ${mercado} e identifique as 5 melhores oportunidades de compra considerando: P/L justo, DY atrativo, ROE elevado, crescimento de lucros, saúde financeira e momento de mercado.${precoCtx}${carteiraCtx}\n\nRetorne APENAS JSON sem markdown: {"mercado":"${isBR?"Brasil":"Austrália"}","metodologia":"breve descrição da análise","acoes":[{"ticker":"str","nome":"str","setor":"str","preco":number,"pl":number,"pvp":number,"dy":number,"roe":number,"cagr_lucro":number,"score":0-10,"recomendacao":"Compra Forte|Compra|Neutro","justificativa":"3-4 frases detalhadas sobre tese de investimento","riscos":"2 riscos principais","potencial_upside":"XX%","horizonte":"Curto|Médio|Longo prazo"}]}`}]
+        messages:[{role:"user",content:`Você é um analista fundamentalista sênior. Analise profundamente o mercado ${mercado} e identifique as 5 melhores oportunidades de compra considerando: P/L justo, DY atrativo, ROE elevado, crescimento de lucros, saúde financeira e momento de mercado.${precoCtx}${carteiraCtx}\n\nRetorne APENAS JSON sem markdown: {"mercado":"${({br:"Brasil",us:"EUA",au:"Austrália"}[profileId]||"Austrália")}","metodologia":"breve descrição da análise","acoes":[{"ticker":"str","nome":"str","setor":"str","preco":number,"pl":number,"pvp":number,"dy":number,"roe":number,"cagr_lucro":number,"score":0-10,"recomendacao":"Compra Forte|Compra|Neutro","justificativa":"3-4 frases detalhadas sobre tese de investimento","riscos":"2 riscos principais","potencial_upside":"XX%","horizonte":"Curto|Médio|Longo prazo"}]}`}]
       })});
       const d=await res.json();
       if(d.error) throw new Error(d.error.message||"Erro na API");
@@ -1859,9 +1874,9 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
   async function buscarSugestoes(){
     if(thinkingMode){buscarSugestoesThinking();return;}
     setSugestLoading(true);setErro("");
-    const mercado=isBR?"brasileira B3":"australiana ASX";
+    const mercado=nomeMercadoCurto(profileId);
     try{
-      const txt=await askClaude(`Analista fundamentalista. Melhores 5 oportunidades de compra na bolsa ${mercado} hoje. Critérios: P/L baixo, DY alto, ROE alto, crescimento, saúde financeira. JSON: {"mercado":"${isBR?"Brasil":"Austrália"}","acoes":[{"ticker":"str","nome":"str","setor":"str","preco":number,"pl":number,"pvp":number,"dy":number,"roe":number,"cagr_lucro":number,"score":0-10,"recomendacao":"Compra Forte|Compra|Neutro","justificativa":"3-4 frases","riscos":"2 riscos principais","potencial_upside":"XX%","horizonte":"Curto|Médio|Longo prazo"}]}`,1500);
+      const txt=await askClaude(`Analista fundamentalista. Melhores 5 oportunidades de compra na bolsa ${mercado} hoje. Critérios: P/L baixo, DY alto, ROE alto, crescimento, saúde financeira. JSON: {"mercado":"${({br:"Brasil",us:"EUA",au:"Austrália"}[profileId]||"Austrália")}","acoes":[{"ticker":"str","nome":"str","setor":"str","preco":number,"pl":number,"pvp":number,"dy":number,"roe":number,"cagr_lucro":number,"score":0-10,"recomendacao":"Compra Forte|Compra|Neutro","justificativa":"3-4 frases","riscos":"2 riscos principais","potencial_upside":"XX%","horizonte":"Curto|Médio|Longo prazo"}]}`,1500);
       const s=txt.indexOf("{"),e=txt.lastIndexOf("}");
       if(s===-1) throw new Error();
       const result=JSON.parse(txt.slice(s,e+1));
@@ -1880,7 +1895,7 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
   // ── NOVO: Relatório detalhado por ação ─────────────────────────────────────
   async function gerarRelatorio(ticker){
     setRelatorioTicker(ticker);setRelatorioLoading(true);setRelatorio(null);
-    const mercado=isBR?"brasileira B3":"australiana ASX";
+    const mercado=nomeMercadoCurto(profileId);
     try{
       const real=await fetchPrecoReal(ticker,profileId);
       const preco=real?.preco_atual?`${currency} ${real.preco_atual}`:"preço não disponível";
@@ -1918,7 +1933,7 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
   async function analisarCarteira(){
     if(!investimentos.length){setErro("Adicione investimentos primeiro.");return;}
     setCarteiraLoading(true);setErro("");
-    const mercado=isBR?"brasileira B3":"australiana ASX";
+    const mercado=nomeMercadoCurto(profileId);
     try{
       // Busca preços atuais de todos os investimentos
       const invComPrecos=await Promise.all(investimentos.map(async inv=>{
@@ -1952,7 +1967,7 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
   async function compararAtivos(){
     if(compList.length<2){setErro("Adicione pelo menos 2 ativos.");return;}
     setCompLoading(true);setErro("");
-    const mercado=isBR?"brasileira B3":"australiana ASX";
+    const mercado=nomeMercadoCurto(profileId);
     const moeda=isBR?"BRL":"AUD";
     try{
       const precos={};
@@ -2063,7 +2078,7 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
         🧠 <strong>Extended Thinking ativo</strong> — Claude vai raciocinar profundamente antes de responder. Mais lento, mas mais preciso.
       </div>}
 
-      {!sugestoes&&!sugestLoading&&<p style={{fontSize:12,color:D.text3}}>Análise fundamentalista do mercado {isBR?"brasileiro":"australiano"} com preços em tempo real.</p>}
+      {!sugestoes&&!sugestLoading&&<p style={{fontSize:12,color:D.text3}}>Análise fundamentalista do mercado {nomePais(profileId)} com preços em tempo real.</p>}
 
       {sugestoes&&<>
         {sugestoes.metodologia&&<p style={{fontSize:11,color:D.text3,marginBottom:10,padding:"6px 10px",background:D.bg3,borderRadius:6}}>📋 Metodologia: {sugestoes.metodologia}</p>}
@@ -2302,7 +2317,7 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
     {/* Comparação com índice */}
     <Card>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:indiceData?10:0}}>
-        <p style={{fontSize:14,fontWeight:700,color:D.text,margin:0}}>📊 Carteira vs {isBR?"Ibovespa":"ASX 200"}</p>
+        <p style={{fontSize:14,fontWeight:700,color:D.text,margin:0}}>📊 Carteira vs {nomeIndice(profileId)}</p>
         <Btn sm color={D.blue} outline onClick={comparaIndice} disabled={indiceLoading}>{indiceLoading?"Buscando...":"Comparar"}</Btn>
       </div>
       {indiceData&&!indiceData.erro&&<div>
@@ -2322,7 +2337,7 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
         <p style={{margin:"8px 0 0",fontSize:10,color:D.text3,lineHeight:1.5}}>⚠️ Comparação aproximada: rentabilidade total da sua carteira (desde a compra de cada ativo) vs variação do índice nos últimos 12 meses. As janelas de tempo diferem, então use como referência geral, não medida exata.</p>
       </div>}
       {indiceData?.erro&&<p style={{fontSize:12,color:D.red,marginTop:8}}>Não consegui buscar o índice agora. Tente novamente em instantes.</p>}
-      {!indiceData&&<p style={{fontSize:12,color:D.text3,marginTop:8}}>Clique em "Comparar" para ver se sua carteira está rendendo mais que o {isBR?"Ibovespa":"ASX 200"}.</p>}
+      {!indiceData&&<p style={{fontSize:12,color:D.text3,marginTop:8}}>Clique em "Comparar" para ver se sua carteira está rendendo mais que o {nomeIndice(profileId)}.</p>}
     </Card>
 
     {/* Watchlist */}
