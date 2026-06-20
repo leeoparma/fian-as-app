@@ -887,6 +887,30 @@ function InvestimentosTab({data,setData,currency,profileId}){
   const [modalDiv,setModalDiv]=useState(false);const [divForm,setDivForm]=useState({});
   const [atualizandoTodos,setAtualizandoTodos]=useState(false);
   const [aporteInput,setAporteInput]=useState(()=>String(data.aporteMensal||""));
+  const [modalAporte,setModalAporte]=useState(null);const [aporteForm,setAporteForm]=useState({});
+
+  // Aporta mais unidades numa ação existente e RECALCULA o preço médio
+  function aportar(){
+    const inv=data.investimentos.find(x=>x.id===modalAporte);
+    if(!inv)return;
+    const qtdNova=parseFloat(aporteForm.quantidade);
+    const precoNovo=parseFloat(aporteForm.preco);
+    if(!qtdNova||qtdNova<=0||!precoNovo||precoNovo<=0)return;
+    const qtdAntiga=inv.quantidade||0;
+    const custoAntigo=(inv.precoMedio||0)*qtdAntiga;
+    const custoNovo=precoNovo*qtdNova;
+    const qtdTotal=qtdAntiga+qtdNova;
+    const pmNovo=qtdTotal>0?(custoAntigo+custoNovo)/qtdTotal:precoNovo;
+    const viNovo=custoAntigo+custoNovo;
+    // Mantém o preço atual de mercado se existir, recalcula valor atual
+    const precoAtual=inv.preco_atual||pmNovo;
+    const valorAtual=precoAtual*qtdTotal;
+    // Registra o aporte no histórico da posição
+    const histAporte={data:aporteForm.data||hoje.toISOString().slice(0,10),quantidade:qtdNova,preco:precoNovo};
+    const atualizado={...inv,quantidade:qtdTotal,precoMedio:Math.round(pmNovo*100)/100,valorInvestido:Math.round(viNovo*100)/100,valor:Math.round(viNovo*100)/100,valorAtual:Math.round(valorAtual*100)/100,lucro:Math.round((valorAtual-viNovo)*100)/100,aportes:[...(inv.aportes||[]),histAporte]};
+    setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?atualizado:x)}));
+    setModalAporte(null);setAporteForm({});
+  }
 
   const isBR=profileId==="br";
   const totalInvest=data.investimentos.reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0);
@@ -1003,6 +1027,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
                 <p style={{margin:0,fontSize:11,color:lucro>=0?D.green:D.red,fontWeight:600}}>{lucro>=0?"+":""}{fmtM(lucro,currency)} ({lpct>=0?"+":""}{lpct.toFixed(1)}%)</p>
               </div>
               <button onClick={()=>buscarDados(inv)} disabled={loadingId===inv.id} style={{border:"none",background:"none",cursor:"pointer",fontSize:15,opacity:loadingId===inv.id?0.4:1,color:D.green,flexShrink:0}}>{loadingId===inv.id?"⏳":"🔄"}</button>
+              {!isRFItem&&<button onClick={()=>{setModalAporte(inv.id);setAporteForm({});}} title="Aportar mais (recalcula preço médio)" style={{border:"none",background:"none",cursor:"pointer",fontSize:14,color:D.blue}}>➕</button>}
               <button onClick={()=>{setModal(true);setForm({...inv,editId:inv.id});}} style={{border:"none",background:"none",cursor:"pointer",fontSize:12,color:D.text3}}>✏️</button>
               <button onClick={()=>setData(d=>({...d,investimentos:d.investimentos.filter(x=>x.id!==inv.id)}))} style={{border:"none",background:"none",cursor:"pointer",fontSize:12,color:D.red}}>🗑</button>
             </div>
@@ -1132,6 +1157,26 @@ function InvestimentosTab({data,setData,currency,profileId}){
       {data.bancos.length>0&&<label style={{fontSize:12,color:D.text3}}>Vincular ao banco<select value={form.bancoId||""} onChange={e=>setForm(f=>({...f,bancoId:e.target.value}))} style={{marginTop:4}}><option value="">Nenhum</option>{data.bancos.map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}</select></label>}
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn outline color={D.text3} onClick={()=>setModal(false)}>Cancelar</Btn><Btn color={D.blue} onClick={saveInv}>Salvar</Btn></div>
     </Modal>}
+    {modalAporte&&(()=>{const inv=data.investimentos.find(x=>x.id===modalAporte);if(!inv)return null;
+      const qN=parseFloat(aporteForm.quantidade)||0,pN=parseFloat(aporteForm.preco)||0;
+      const qA=inv.quantidade||0,pmA=inv.precoMedio||0;
+      const qT=qA+qN,pmNovo=qT>0?((pmA*qA)+(pN*qN))/qT:0;
+      return <Modal title={`Aportar em ${inv.ticker||inv.descricao}`} onClose={()=>{setModalAporte(null);setAporteForm({});}}>
+        <div style={{background:D.bg3,borderRadius:8,padding:"10px 12px",marginBottom:10}}>
+          <p style={{fontSize:11,color:D.text3,margin:0}}>Posição atual</p>
+          <p style={{fontSize:13,color:D.text,margin:"2px 0 0"}}>{qA} un · PM {fmtM(pmA,currency)}</p>
+        </div>
+        <label style={{fontSize:12,color:D.text3}}>Quantidade comprada agora<input type="number" autoFocus value={aporteForm.quantidade||""} onChange={e=>setAporteForm(f=>({...f,quantidade:e.target.value}))} placeholder="Ex: 5" style={{marginTop:4}}/></label>
+        <label style={{fontSize:12,color:D.text3}}>Preço pago por unidade ({currency})<input type="number" value={aporteForm.preco||""} onChange={e=>setAporteForm(f=>({...f,preco:e.target.value}))} placeholder="Ex: 185.50" style={{marginTop:4}}/></label>
+        <label style={{fontSize:12,color:D.text3}}>Data<input type="date" value={aporteForm.data||hoje.toISOString().slice(0,10)} onChange={e=>setAporteForm(f=>({...f,data:e.target.value}))} style={{marginTop:4}}/></label>
+        {qN>0&&pN>0&&<div style={{background:D.blue+"15",border:`1px solid ${D.blue}44`,borderRadius:8,padding:"10px 12px",marginTop:10}}>
+          <p style={{fontSize:11,color:D.text3,margin:0}}>Depois do aporte</p>
+          <div style={{display:"flex",justifyContent:"space-between",marginTop:4}}><span style={{fontSize:12,color:D.text2}}>Quantidade</span><span style={{fontSize:13,fontWeight:600,color:D.text}}>{qA} → {qT} un</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}><span style={{fontSize:12,color:D.text2}}>Preço médio</span><span style={{fontSize:13,fontWeight:700,color:D.blue}}>{fmtM(pmA,currency)} → {fmtM(pmNovo,currency)}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}><span style={{fontSize:12,color:D.text2}}>Total investido</span><span style={{fontSize:13,fontWeight:600,color:D.text}}>{fmtM(pmA*qA+pN*qN,currency)}</span></div>
+        </div>}
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:10}}><Btn outline color={D.text3} onClick={()=>{setModalAporte(null);setAporteForm({});}}>Cancelar</Btn><Btn color={D.blue} onClick={aportar}>Confirmar aporte</Btn></div>
+      </Modal>;})()}
     {modalDiv&&<Modal title="Registrar provento" onClose={()=>setModalDiv(false)}>
       <label style={{fontSize:12,color:D.text3}}>Ticker<input value={divForm.ticker||""} onChange={e=>setDivForm(f=>({...f,ticker:e.target.value.toUpperCase()}))} style={{marginTop:4}}/></label>
       <label style={{fontSize:12,color:D.text3}}>Valor recebido ({currency})<input type="number" value={divForm.valor||""} onChange={e=>setDivForm(f=>({...f,valor:e.target.value}))} style={{marginTop:4}}/></label>
