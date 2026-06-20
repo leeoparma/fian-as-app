@@ -1328,8 +1328,18 @@ function SplitwiseTab({currency,userEmail}){
 
   function registrarPagamento(){
     if(!form.de||!form.para||!form.valor)return;
-    const p={id:uid(),de:form.de,para:form.para,valor:parseFloat(form.valor),data:form.data||hoje.toISOString().slice(0,10)};
+    const p={id:uid(),de:form.de,para:form.para,valor:parseFloat(form.valor),data:form.data||hoje.toISOString().slice(0,10),quem:nomeUser};
     saveSW({...swData,pagamentos:[...swData.pagamentos,p]});setModal(null);setForm({});
+  }
+
+  // Quita uma dívida do acerto de contas com 1 clique (registra o pagamento exato)
+  function quitarDivida(de,para,valor){
+    const p={id:uid(),de,para,valor:Math.round(valor*100)/100,data:hoje.toISOString().slice(0,10),quem:nomeUser,settle:true};
+    saveSW({...swData,pagamentos:[...swData.pagamentos,p]});
+  }
+
+  function desfazerPagamento(id){
+    saveSW({...swData,pagamentos:swData.pagamentos.filter(p=>p.id!==id)});
   }
 
   function calcSaldos(){
@@ -1368,6 +1378,18 @@ function SplitwiseTab({currency,userEmail}){
     const por={};
     (swData?.despesas||[]).forEach(d=>{if(!d)return;const c=d.categoria||"Outros";por[c]=(por[c]||0)+(d.valor||0);});
     return Object.entries(por).map(([nome,v])=>({label:`${iconeCat(nome)} ${nome}`,v,color:corCat(nome)})).filter(s=>s.v>0).sort((a,b)=>b.v-a.v);
+  }
+
+  // Totais: quanto cada pessoa pagou e quanto consumiu
+  function totaisPorPessoa(){
+    const t={};
+    (swData?.membros||[]).forEach(m=>{if(m&&m.nome)t[m.nome]={pagou:0,consumiu:0};});
+    (swData?.despesas||[]).forEach(d=>{
+      if(!d)return;
+      if(d.pagoPor&&t[d.pagoPor])t[d.pagoPor].pagou+=(d.valor||0);
+      (d.divisao||[]).forEach(div=>{const n=typeof div==="string"?div:div?.nome;const q=typeof div==="string"?((d.valor||0)/((d.divisao||[]).length||1)):(div?.valor||0);if(n&&t[n])t[n].consumiu+=q;});
+    });
+    return t;
   }
 
   // ───── TELA: LISTA DE GRUPOS (nenhum grupo aberto) ─────
@@ -1454,9 +1476,10 @@ function SplitwiseTab({currency,userEmail}){
 
     {dividas.length>0&&<Card>
       <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>Acerto de contas</p>
-      {dividas.map((d,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",background:D.bg3,borderRadius:10,marginBottom:6}}>
-        <span style={{fontSize:13,color:D.text}}><span style={{color:"#f59e0b",fontWeight:600}}>{d.de===nomeUser?"Você":d.de}</span> {d.de===nomeUser?"deve a":"deve a"} <span style={{color:D.green,fontWeight:600}}>{d.para===nomeUser?"você":d.para}</span></span>
+      {dividas.map((d,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",background:D.bg3,borderRadius:10,marginBottom:6,gap:8,flexWrap:"wrap"}}>
+        <span style={{fontSize:13,color:D.text,flex:1,minWidth:140}}><span style={{color:"#f59e0b",fontWeight:600}}>{d.de===nomeUser?"Você":d.de}</span> deve a <span style={{color:D.green,fontWeight:600}}>{d.para===nomeUser?"você":d.para}</span></span>
         <span style={{fontSize:14,fontWeight:700,color:D.text}}>{fmtM(d.valor,currency)}</span>
+        <Btn onClick={()=>quitarDivida(d.de,d.para,d.valor)} color={D.green} sm>Quitar</Btn>
       </div>)}
     </Card>}
 
@@ -1473,6 +1496,30 @@ function SplitwiseTab({currency,userEmail}){
       </div>
       <PieChart slices={cats}/>
     </Card>;})()}
+
+    {swData.despesas.length>0&&(()=>{const tot=totaisPorPessoa();const ent=Object.entries(tot);return <Card>
+      <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>Totais por pessoa</p>
+      <div style={{display:"flex",fontSize:10,color:D.text3,padding:"0 0 6px",borderBottom:`1px solid ${D.border}`}}>
+        <span style={{flex:1}}>Pessoa</span><span style={{width:90,textAlign:"right"}}>Pagou</span><span style={{width:90,textAlign:"right"}}>Consumiu</span>
+      </div>
+      {ent.map(([nome,v])=><div key={nome} style={{display:"flex",fontSize:13,padding:"8px 0",borderBottom:`1px solid ${D.border}`,alignItems:"center"}}>
+        <span style={{flex:1,color:nome===nomeUser?D.green:D.text,fontWeight:nome===nomeUser?600:400}}>{nome}{nome===nomeUser?" (você)":""}</span>
+        <span style={{width:90,textAlign:"right",color:D.text2}}>{fmtM(v.pagou,currency)}</span>
+        <span style={{width:90,textAlign:"right",color:D.text3}}>{fmtM(v.consumiu,currency)}</span>
+      </div>)}
+    </Card>;})()}
+
+    {swData.pagamentos.length>0&&<Card>
+      <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>Histórico de pagamentos</p>
+      {[...swData.pagamentos].reverse().map(p=><div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${D.border}`,gap:8}}>
+        <div style={{flex:1,minWidth:0}}>
+          <p style={{margin:0,fontSize:13,color:D.text}}><span style={{color:"#f59e0b",fontWeight:600}}>{p.de===nomeUser?"Você":p.de}</span> pagou <span style={{color:D.green,fontWeight:600}}>{p.para===nomeUser?"você":p.para}</span>{p.settle?<span style={{fontSize:10,color:D.green,marginLeft:6}}>✓ quitação</span>:null}</p>
+          <p style={{margin:"2px 0 0",fontSize:10,color:D.text3}}>{p.data}{p.quem?` · registrado por ${p.quem}`:""}</p>
+        </div>
+        <span style={{fontSize:14,fontWeight:700,color:D.text}}>{fmtM(p.valor,currency)}</span>
+        <button onClick={()=>desfazerPagamento(p.id)} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:12}}>🗑</button>
+      </div>)}
+    </Card>}
 
     <Card>
       <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>Despesas</p>
