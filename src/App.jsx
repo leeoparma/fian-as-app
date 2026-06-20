@@ -2967,7 +2967,7 @@ function AppInner(){
       {tab===3&&<CartaoTab data={data} setData={setData} currency={currency} mes={mes}/>}
       {tab===4&&<InvestimentosTab data={data} setData={setData} currency={currency} profileId={profileId}/>}
       {tab===5&&<MetasTab data={data} setData={setData} currency={currency}/>}
-      {tab===6&&<AnaliseTab data={data} setData={setData} investimentos={data.investimentos} profileId={profileId} market={profile.market} currency={currency}/>}
+      {tab===6&&<AnaliseTab data={data} setData={setData} investimentos={data.investimentos} profileId={profileId} market={profileId} currency={currency}/>}
       {tab===7&&<SplitwiseTab currency={currency} userEmail={session?.user?.email}/>}
     </div>
   </>;
