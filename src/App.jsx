@@ -272,8 +272,10 @@ function ChartModal({ticker,onClose,currency="A$",market="au",dyAlvo=6}){
   function carregarNews(){
     if(news||newsLoading)return;
     setNewsLoading(true);
-    // O Worker /news espera ticker + market (não q)
-    fetch(`${WORKER}/news?ticker=${encodeURIComponent(ticker)}&market=${market}`).then(r=>r.json()).then(d=>{const arr=Array.isArray(d)?d:(d.items||[]);setNews(arr.slice(0,8));setNewsLoading(false);}).catch(()=>{setNews([]);setNewsLoading(false);});
+    // Passa o nome da empresa quando houver — melhora muito a relevância das notícias
+    const nome=dados?.nome&&dados.nome!==ticker?dados.nome:"";
+    const qNome=nome?`&nome=${encodeURIComponent(nome)}`:"";
+    fetch(`${WORKER}/news?ticker=${encodeURIComponent(ticker)}&market=${market}${qNome}`).then(r=>r.json()).then(d=>{const arr=Array.isArray(d)?d:(d.items||[]);setNews(arr.slice(0,10));setNewsLoading(false);}).catch(()=>{setNews([]);setNewsLoading(false);});
   }
   const preco=dados?.preco_atual??dados?.preco??null;
   const teto=(dados?.dy&&dados.dy>0&&preco)?preco*(dados.dy/dyAlvo):null;
