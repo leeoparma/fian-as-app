@@ -1033,7 +1033,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
             </div>
           </div>
           {isRFItem&&<div style={{marginTop:6,display:"flex",gap:6}}><Badge color={D.gold}>Taxa: {calcRFAnual(inv).toFixed(2)}% a.a.</Badge></div>}
-          {!isRFItem&&inv.dy&&<div style={{marginTop:6,display:"flex",gap:6}}><Badge color={D.gold}>DY {inv.dy}%</Badge>{inv.prox_dividendo&&<Badge color={D.green}>Div: {inv.prox_dividendo}</Badge>}</div>}
+          {!isRFItem&&inv.dy>0&&<div style={{marginTop:6,display:"flex",gap:6}}><Badge color={D.gold}>DY {inv.dy}%</Badge>{inv.prox_dividendo&&<Badge color={D.green}>Div: {inv.prox_dividendo}</Badge>}</div>}
           {inv.resumo&&<p style={{margin:"6px 0 0",fontSize:11,color:D.text3,borderTop:`1px solid ${D.border}`,paddingTop:6}}>{inv.resumo}</p>}
         </div>;
       })}
@@ -1141,7 +1141,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
             <p style={{margin:0,fontSize:14,fontWeight:700,color:D.green}}>{inv.ticker}</p>
             <p style={{margin:"2px 0 0",fontSize:11,color:D.text3}}>Pagamento: {inv.prox_dividendo}{inv.ex_dividendo?` · Ex: ${inv.ex_dividendo}`:""}</p>
           </div>
-          {inv.valor_dividendo&&<p style={{fontSize:15,fontWeight:700,color:D.gold}}>{fmtM(inv.valor_dividendo,currency)}/ação</p>}
+          {inv.valor_dividendo>0&&<p style={{fontSize:15,fontWeight:700,color:D.gold}}>{fmtM(inv.valor_dividendo,currency)}/ação</p>}
         </div>
       </Card>)}</>}
       {divVencidos.length>0&&<Card style={{border:`1px solid ${D.gold}33`,background:D.gold+"08"}}>
@@ -1166,6 +1166,15 @@ function InvestimentosTab({data,setData,currency,profileId}){
           <p style={{fontSize:11,color:D.text3,margin:0}}>Posição atual</p>
           <p style={{fontSize:13,color:D.text,margin:"2px 0 0"}}>{qA} un · PM {fmtM(pmA,currency)}</p>
         </div>
+        {(inv.aportes&&inv.aportes.length>0)&&<div style={{marginBottom:10}}>
+          <p style={{fontSize:11,fontWeight:700,color:D.text3,margin:"0 0 6px"}}>📋 Histórico de aportes</p>
+          <div style={{maxHeight:120,overflowY:"auto"}}>
+            {[...inv.aportes].reverse().map((ap,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:11,color:D.text3,padding:"4px 0",borderBottom:`1px solid ${D.border}`}}>
+              <span>{ap.data}</span>
+              <span style={{color:D.text2}}>{ap.quantidade} un × {fmtM(ap.preco,currency)}</span>
+            </div>)}
+          </div>
+        </div>}
         <label style={{fontSize:12,color:D.text3}}>Quantidade comprada agora<input type="number" autoFocus value={aporteForm.quantidade||""} onChange={e=>setAporteForm(f=>({...f,quantidade:e.target.value}))} placeholder="Ex: 5" style={{marginTop:4}}/></label>
         <label style={{fontSize:12,color:D.text3}}>Preço pago por unidade ({currency})<input type="number" value={aporteForm.preco||""} onChange={e=>setAporteForm(f=>({...f,preco:e.target.value}))} placeholder="Ex: 185.50" style={{marginTop:4}}/></label>
         <label style={{fontSize:12,color:D.text3}}>Data<input type="date" value={aporteForm.data||hoje.toISOString().slice(0,10)} onChange={e=>setAporteForm(f=>({...f,data:e.target.value}))} style={{marginTop:4}}/></label>
