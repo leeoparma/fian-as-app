@@ -1303,8 +1303,27 @@ function SplitwiseTab({currency,userEmail}){
     const membros=swData.membros.map(m=>m.nome);
     const selecionados=(form.divisao&&form.divisao.length)?form.divisao:membros;
     const porPessoa=parseFloat(form.valor)/selecionados.length;
-    const d={id:uid(),descricao:form.descricao,valor:parseFloat(form.valor),pagoPor:form.pagoPor,data:form.data||hoje.toISOString().slice(0,10),categoria:form.categoria||"Outros",divisao:selecionados.map(nome=>({nome,valor:porPessoa}))};
+    const d={id:uid(),descricao:form.descricao,valor:parseFloat(form.valor),pagoPor:form.pagoPor,data:form.data||hoje.toISOString().slice(0,10),categoria:form.categoria||"Outros",divisao:selecionados.map(nome=>({nome,valor:porPessoa})),criadoPor:nomeUser,historico:[]};
     saveSW({...swData,despesas:[...swData.despesas,d]});setModal(null);setForm({});
+  }
+
+  function editarDespesa(){
+    if(!form.descricao||!form.valor||!form.pagoPor||!form.id)return;
+    const original=swData.despesas.find(x=>x.id===form.id);
+    if(!original)return;
+    const membros=swData.membros.map(m=>m.nome);
+    const selecionados=(form.divisao&&form.divisao.length)?form.divisao:membros;
+    const porPessoa=parseFloat(form.valor)/selecionados.length;
+    // Monta o registro do que mudou (antes → depois)
+    const mudancas=[];
+    if(original.descricao!==form.descricao)mudancas.push(`descrição: "${original.descricao}" → "${form.descricao}"`);
+    if((original.valor||0)!==parseFloat(form.valor))mudancas.push(`valor: ${fmtM(original.valor,currency)} → ${fmtM(parseFloat(form.valor),currency)}`);
+    if(original.pagoPor!==form.pagoPor)mudancas.push(`pago por: ${original.pagoPor} → ${form.pagoPor}`);
+    if(original.categoria!==(form.categoria||"Outros"))mudancas.push(`categoria: ${original.categoria||"Outros"} → ${form.categoria||"Outros"}`);
+    const logEntry={quem:nomeUser,quando:new Date().toISOString(),mudancas:mudancas.length?mudancas:["ajustes na divisão"]};
+    const atualizada={...original,descricao:form.descricao,valor:parseFloat(form.valor),pagoPor:form.pagoPor,data:form.data||original.data,categoria:form.categoria||"Outros",divisao:selecionados.map(nome=>({nome,valor:porPessoa})),historico:[...(original.historico||[]),logEntry]};
+    saveSW({...swData,despesas:swData.despesas.map(x=>x.id===form.id?atualizada:x)});
+    setModal(null);setForm({});
   }
 
   function registrarPagamento(){
@@ -1342,6 +1361,13 @@ function SplitwiseTab({currency,userEmail}){
       if(d.valor<0.01)dev.shift();if(c.valor<0.01)cred.shift();
     }
     return transacoes;
+  }
+
+  // Gastos do grupo por categoria (para o gráfico)
+  function gastosPorCategoria(){
+    const por={};
+    (swData?.despesas||[]).forEach(d=>{if(!d)return;const c=d.categoria||"Outros";por[c]=(por[c]||0)+(d.valor||0);});
+    return Object.entries(por).map(([nome,v])=>({label:`${iconeCat(nome)} ${nome}`,v,color:corCat(nome)})).filter(s=>s.v>0).sort((a,b)=>b.v-a.v);
   }
 
   // ───── TELA: LISTA DE GRUPOS (nenhum grupo aberto) ─────
@@ -1440,6 +1466,14 @@ function SplitwiseTab({currency,userEmail}){
       <Btn onClick={()=>loadSW(ativo)} color={D.purple} outline sm>🔄 Atualizar</Btn>
     </div>
 
+    {swData.despesas.length>0&&(()=>{const cats=gastosPorCategoria();const totalGrupo=cats.reduce((a,b)=>a+b.v,0);return <Card>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+        <p style={{fontSize:13,fontWeight:700,color:D.text,margin:0}}>Gastos do grupo por categoria</p>
+        <span style={{fontSize:12,color:D.text3}}>total {fmtM(totalGrupo,currency)}</span>
+      </div>
+      <PieChart slices={cats}/>
+    </Card>;})()}
+
     <Card>
       <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>Despesas</p>
       {swData.despesas.length===0&&<p style={{fontSize:13,color:D.text3}}>Nenhuma despesa ainda. Adicione a primeira!</p>}
@@ -1452,7 +1486,7 @@ function SplitwiseTab({currency,userEmail}){
         return <div key={d.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:`1px solid ${D.border}`}}>
           <div style={{width:40,height:40,borderRadius:10,background:corCat(d.categoria)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>{iconeCat(d.categoria)}</div>
           <div style={{flex:1,minWidth:0}}>
-            <p style={{margin:0,fontSize:14,fontWeight:600,color:D.text}}>{d.descricao}</p>
+            <p style={{margin:0,fontSize:14,fontWeight:600,color:D.text}}>{d.descricao}{(d.historico&&d.historico.length>0)&&<span title="editada" style={{fontSize:10,color:D.text3,marginLeft:6,fontWeight:400}}>✎ editada</span>}</p>
             <p style={{margin:"2px 0 0",fontSize:11,color:D.text3}}>{d.pagoPor===nomeUser?"Você":d.pagoPor} pagou {fmtM(d.valor,currency)}</p>
           </div>
           <div style={{textAlign:"right",flexShrink:0}}>
@@ -1460,7 +1494,10 @@ function SplitwiseTab({currency,userEmail}){
             {borrowed>0.01&&<><p style={{margin:0,fontSize:10,color:"#f59e0b"}}>você pegou</p><p style={{margin:0,fontSize:14,fontWeight:700,color:"#f59e0b"}}>{fmtM(borrowed,currency)}</p></>}
             {lent<=0.01&&borrowed<=0.01&&<p style={{margin:0,fontSize:12,color:D.text3}}>—</p>}
           </div>
-          <button onClick={()=>saveSW({...swData,despesas:swData.despesas.filter(x=>x.id!==d.id)})} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:13,flexShrink:0}}>🗑</button>
+          <div style={{display:"flex",gap:6,flexShrink:0}}>
+            <button onClick={()=>{setForm({id:d.id,descricao:d.descricao,valor:String(d.valor),pagoPor:d.pagoPor,data:d.data,categoria:d.categoria||"Outros",divisao:(d.divisao||[]).map(x=>typeof x==="string"?x:x.nome)});setModal("editar");}} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:13}}>✏️</button>
+            <button onClick={()=>saveSW({...swData,despesas:swData.despesas.filter(x=>x.id!==d.id)})} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:13}}>🗑</button>
+          </div>
         </div>;
       })}
     </Card>
@@ -1494,6 +1531,32 @@ function SplitwiseTab({currency,userEmail}){
       </div>
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn outline color={D.text3} onClick={()=>setModal(null)}>Cancelar</Btn><Btn color={D.green} onClick={addDespesa}>Adicionar</Btn></div>
     </Modal>}
+
+    {modal==="editar"&&(()=>{const orig=swData.despesas.find(x=>x.id===form.id);const hist=orig?.historico||[];return <Modal title="Editar despesa" onClose={()=>setModal(null)}>
+      <label style={{fontSize:12,color:D.text3}}>Descrição<input value={form.descricao||""} onChange={e=>setForm(f=>({...f,descricao:e.target.value}))} style={{marginTop:4}}/></label>
+      <label style={{fontSize:12,color:D.text3}}>Valor ({currency})<input type="number" value={form.valor||""} onChange={e=>setForm(f=>({...f,valor:e.target.value}))} style={{marginTop:4}}/></label>
+      <div style={{marginTop:4}}>
+        <p style={{fontSize:12,color:D.text3,marginBottom:6}}>Categoria</p>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{CATS.map(c=><button key={c.nome} onClick={()=>setForm(f=>({...f,categoria:c.nome}))} style={{border:`1px solid ${(form.categoria||"Outros")===c.nome?c.cor:D.border}`,background:(form.categoria||"Outros")===c.nome?c.cor+"22":"none",borderRadius:8,padding:"4px 8px",cursor:"pointer",fontSize:12,color:D.text2}}>{c.icone} {c.nome}</button>)}</div>
+      </div>
+      <label style={{fontSize:12,color:D.text3,marginTop:4,display:"block"}}>Pago por<select value={form.pagoPor||nomeUser} onChange={e=>setForm(f=>({...f,pagoPor:e.target.value}))} style={{marginTop:4}}>{swData.membros.map(m=><option key={m.nome}>{m.nome}</option>)}</select></label>
+      <label style={{fontSize:12,color:D.text3}}>Data<input type="date" value={form.data||hoje.toISOString().slice(0,10)} onChange={e=>setForm(f=>({...f,data:e.target.value}))} style={{marginTop:4}}/></label>
+      <div style={{marginTop:4}}>
+        <p style={{fontSize:12,color:D.text3,marginBottom:6}}>Dividir entre:</p>
+        {swData.membros.map(m=><label key={m.nome} style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:D.text2,marginBottom:6,cursor:"pointer"}}>
+          <input type="checkbox" checked={(form.divisao||[]).includes(m.nome)} onChange={e=>{const curr=form.divisao||[];setForm(f=>({...f,divisao:e.target.checked?[...curr,m.nome]:curr.filter(n=>n!==m.nome)}));}} style={{width:"auto",marginTop:0}}/>
+          {m.nome}{m.nome===nomeUser?" (você)":""}
+        </label>)}
+      </div>
+      {hist.length>0&&<div style={{marginTop:8,padding:"8px 10px",background:D.bg3,borderRadius:8}}>
+        <p style={{fontSize:11,fontWeight:700,color:D.text3,margin:"0 0 6px"}}>📝 Histórico de edições</p>
+        {[...hist].reverse().map((h,i)=><div key={i} style={{fontSize:10,color:D.text3,marginBottom:6,borderLeft:`2px solid ${D.border}`,paddingLeft:8}}>
+          <span style={{color:D.text2,fontWeight:600}}>{h.quem}</span> · {new Date(h.quando).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
+          {(h.mudancas||[]).map((m,j)=><div key={j} style={{marginTop:2}}>• {m}</div>)}
+        </div>)}
+      </div>}
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}><Btn outline color={D.text3} onClick={()=>setModal(null)}>Cancelar</Btn><Btn color={D.green} onClick={editarDespesa}>Salvar alterações</Btn></div>
+    </Modal>;})()}
 
     {modal==="pagamento"&&<Modal title="Registrar pagamento" onClose={()=>setModal(null)}>
       <label style={{fontSize:12,color:D.text3}}>Quem pagou<select value={form.de||nomeUser} onChange={e=>setForm(f=>({...f,de:e.target.value}))} style={{marginTop:4}}>{swData.membros.map(m=><option key={m.nome}>{m.nome}</option>)}</select></label>
