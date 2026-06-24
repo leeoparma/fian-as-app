@@ -260,7 +260,10 @@ function ChartModal({ticker,onClose,currency="A$",market="au",dyAlvo=6}){
   const [erro,setErro]=useState(false);
   const [aba,setAba]=useState("resumo");
   const [news,setNews]=useState(null);
+  const [fatos,setFatos]=useState(null);
   const [newsLoading,setNewsLoading]=useState(false);
+  const [descIA,setDescIA]=useState(null);
+  const [descIALoading,setDescIALoading]=useState(false);
   useEffect(()=>{
     let vivo=true;
     setLoading(true);setErro(false);
@@ -269,13 +272,31 @@ function ChartModal({ticker,onClose,currency="A$",market="au",dyAlvo=6}){
       .catch(()=>{if(vivo){setErro(true);setLoading(false);}});
     return()=>{vivo=false;};
   },[ticker,market]);
+  // Gera descrição da empresa via IA quando o Yahoo não traz (BR e alguns ETFs) — cacheia no localStorage por ticker
+  useEffect(()=>{
+    if(aba!=="sobre"||!dados||dados.descricao||descIALoading||descIA)return;
+    const cacheKey=`sobre_${market}_${ticker}`;
+    const cached=lsGet(cacheKey);
+    if(cached){setDescIA(cached);return;}
+    setDescIALoading(true);
+    const nome=dados?.nome&&dados.nome!==ticker?dados.nome:ticker;
+    const setorTxt=dados?.setor?` (setor: ${dados.setor})`:"";
+    askClaude(`Descreva em português, em no máximo 3 frases, o que a empresa ${nome}${setorTxt} faz — o negócio principal, como ela ganha dinheiro e em que mercado atua. NÃO inclua números, cotações, indicadores, preços, datas nem recomendações. Apenas o perfil qualitativo do negócio. Se você não conhece esta empresa com segurança, responda exatamente "SEM_DADOS".`,300)
+      .then(txt=>{
+        const limpo=(txt||"").trim();
+        if(!limpo||/SEM_DADOS/i.test(limpo)){setDescIA("__none__");lsSet(cacheKey,"__none__");}
+        else{setDescIA(limpo);lsSet(cacheKey,limpo);}
+        setDescIALoading(false);
+      })
+      .catch(()=>{setDescIA("__none__");setDescIALoading(false);});
+  },[aba,dados,ticker,market]);
   function carregarNews(){
     if(news||newsLoading)return;
     setNewsLoading(true);
     // Passa o nome da empresa quando houver — melhora muito a relevância das notícias
     const nome=dados?.nome&&dados.nome!==ticker?dados.nome:"";
     const qNome=nome?`&nome=${encodeURIComponent(nome)}`:"";
-    fetch(`${WORKER}/news?ticker=${encodeURIComponent(ticker)}&market=${market}${qNome}`).then(r=>r.json()).then(d=>{const arr=Array.isArray(d)?d:(d.items||[]);setNews(arr.slice(0,10));setNewsLoading(false);}).catch(()=>{setNews([]);setNewsLoading(false);});
+    fetch(`${WORKER}/news?ticker=${encodeURIComponent(ticker)}&market=${market}${qNome}`).then(r=>r.json()).then(d=>{const arr=Array.isArray(d)?d:(d.items||[]);setNews(arr.slice(0,10));setFatos(Array.isArray(d?.fatos)?d.fatos:[]);setNewsLoading(false);}).catch(()=>{setNews([]);setFatos([]);setNewsLoading(false);});
   }
   const preco=dados?.preco_atual??dados?.preco??null;
   const teto=(dados?.dy&&dados.dy>0&&preco)?preco*(dados.dy/dyAlvo):null;
@@ -387,12 +408,22 @@ function ChartModal({ticker,onClose,currency="A$",market="au",dyAlvo=6}){
           {(()=>{
             const desc=dados?.descricao;const ceo=dados?.ceo;const site=dados?.website;
             const setor=dados?.setor;const indu=dados?.industria;const func=dados?.funcionarios;const pais=dados?.pais;
-            const temAlgo=desc||ceo||site||setor||func;
-            if(!temAlgo)return <p style={{fontSize:12,color:D.text3,padding:"24px 0",textAlign:"center"}}>Informações da empresa não disponíveis para este ativo.<br/>(comum em ETFs, fundos e ações recém-listadas)</p>;
+            const temIA=descIA&&descIA!=="__none__";
+            const temAlgo=desc||ceo||site||setor||func||temIA;
+            if(!temAlgo&&!descIALoading)return <p style={{fontSize:12,color:D.text3,padding:"24px 0",textAlign:"center"}}>Informações da empresa não disponíveis para este ativo.<br/>(comum em ETFs, fundos e ações recém-listadas)</p>;
             return <div style={{display:"flex",flexDirection:"column",gap:14}}>
               {desc&&<div>
                 <p style={{fontSize:12,fontWeight:700,color:D.text2,margin:"0 0 6px"}}>Sobre a empresa</p>
                 <p style={{fontSize:12,color:D.text3,lineHeight:1.6,margin:0}}>{desc}</p>
+              </div>}
+              {!desc&&descIALoading&&<div>
+                <p style={{fontSize:12,fontWeight:700,color:D.text2,margin:"0 0 6px"}}>Sobre a empresa</p>
+                <p style={{fontSize:12,color:D.text3,padding:"6px 0"}}>🤖 Gerando descrição com IA...</p>
+              </div>}
+              {!desc&&temIA&&<div>
+                <p style={{fontSize:12,fontWeight:700,color:D.text2,margin:"0 0 6px"}}>Sobre a empresa</p>
+                <p style={{fontSize:12,color:D.text3,lineHeight:1.6,margin:0}}>{descIA}</p>
+                <p style={{fontSize:10,color:D.text3,margin:"6px 0 0",fontStyle:"italic"}}>🤖 Gerado por IA — perfil qualitativo, pode conter imprecisões.</p>
               </div>}
               {(setor||indu)&&<div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                 {setor&&<Badge color={D.blue}>{setor}</Badge>}
@@ -410,7 +441,15 @@ function ChartModal({ticker,onClose,currency="A$",market="au",dyAlvo=6}){
         {aba==="grafico"&&<div style={{borderRadius:12,overflow:"hidden"}}><TVWidget type="advanced-chart" config={{symbol:sym,interval:"D",locale:"pt_BR",style:"1",width:"100%",height:440,allow_symbol_change:true}}/></div>}
         {aba==="noticias"&&<div>
           {newsLoading&&<p style={{fontSize:12,color:D.text3,padding:"20px 0",textAlign:"center"}}>⏳ Buscando notícias...</p>}
-          {news&&news.length===0&&<p style={{fontSize:12,color:D.text3,padding:"20px 0",textAlign:"center"}}>Nenhuma notícia recente encontrada.</p>}
+          {fatos&&fatos.length>0&&<div style={{marginBottom:14}}>
+            <p style={{fontSize:12,fontWeight:700,color:D.gold,margin:"0 0 8px"}}>📢 Fatos Relevantes</p>
+            {fatos.map((f,i)=><a key={i} href={f.link} target="_blank" rel="noopener noreferrer" style={{display:"block",padding:"11px 13px",background:D.gold+"11",borderRadius:10,marginBottom:7,textDecoration:"none",border:`1px solid ${D.gold}33`}}>
+              <p style={{margin:0,fontSize:13,color:D.text,fontWeight:600,lineHeight:1.35}}>{f.titulo}</p>
+              {f.data&&<p style={{margin:"4px 0 0",fontSize:10,color:D.text3}}>{f.data}</p>}
+            </a>)}
+          </div>}
+          {fatos&&fatos.length>0&&news&&news.length>0&&<p style={{fontSize:12,fontWeight:700,color:D.text2,margin:"0 0 8px"}}>📰 Notícias</p>}
+          {news&&news.length===0&&(!fatos||fatos.length===0)&&<p style={{fontSize:12,color:D.text3,padding:"20px 0",textAlign:"center"}}>Nenhuma notícia recente encontrada.</p>}
           {news&&news.map((n,i)=><a key={i} href={n.link||n.url} target="_blank" rel="noopener noreferrer" style={{display:"block",padding:"11px 13px",background:D.bg2,borderRadius:10,marginBottom:7,textDecoration:"none",border:`1px solid ${D.border}`}}>
             <p style={{margin:0,fontSize:13,color:D.text,fontWeight:600,lineHeight:1.35}}>{n.title||n.titulo}</p>
             {(n.pubDate||n.data)&&<p style={{margin:"4px 0 0",fontSize:10,color:D.text3}}>{n.pubDate||n.data}</p>}
