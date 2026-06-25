@@ -772,7 +772,7 @@ function LancamentosTab({data,setData,currency,mes}){
     });
     setOrcForm({});
   }
-  function saveRec(){const r={id:recForm.editId||uid(),tipo:recForm.tipo||"despesa",descricao:recForm.descricao||"",valor:parseFloat(recForm.valor)||0,categoria:recForm.categoria||catD[0],dia:parseInt(recForm.dia)||1,bancoId:recForm.bancoId||null};setData(d=>({...d,recorrencias:recForm.editId?(d.recorrencias||[]).map(x=>x.id===recForm.editId?r:x):[...(d.recorrencias||[]),r]}));setModalRec(false);setRecForm({});}
+  function saveRec(){const r={id:recForm.editId||uid(),tipo:recForm.tipo||"despesa",descricao:recForm.descricao||"",valor:parseFloat(recForm.valor)||0,categoria:recForm.categoria||catD[0],frequencia:recForm.frequencia||"mensal",dia:parseInt(recForm.dia)||1,diaSemana:recForm.diaSemana!=null?parseInt(recForm.diaSemana):1,bancoId:recForm.bancoId||null};setData(d=>({...d,recorrencias:recForm.editId?(d.recorrencias||[]).map(x=>x.id===recForm.editId?r:x):[...(d.recorrencias||[]),r]}));setModalRec(false);setRecForm({});}
   const nfsComNF=data.transacoes.filter(t=>t.nfImg||t.nfManual);
 
   const nfFileRef=useRef(null);
@@ -898,8 +898,8 @@ function LancamentosTab({data,setData,currency,mes}){
     {data.recorrencias?.length>0&&<Card>
       <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:8}}>🔄 Recorrentes</p>
       {data.recorrencias.map(r=><div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",background:D.bg3,borderRadius:8,fontSize:12,marginBottom:4}}>
-        <span style={{color:D.text2}}>{r.descricao} <span style={{color:D.text3,fontSize:10}}>dia {r.dia}</span></span>
-        <div style={{display:"flex",gap:8}}><span style={{fontWeight:700,color:r.tipo==="receita"?D.green:D.red}}>{r.tipo==="receita"?"+":"-"}{fmtM(r.valor,currency)}</span><button onClick={()=>setData(d=>({...d,recorrencias:(d.recorrencias||[]).filter(x=>x.id!==r.id)}))} style={{border:"none",background:"none",cursor:"pointer",color:D.red,fontSize:12}}>🗑</button></div>
+        <span style={{color:D.text2}}>{r.descricao} <span style={{color:D.text3,fontSize:10}}>{r.frequencia==="semanal"?`toda ${["dom","seg","ter","qua","qui","sex","sáb"][r.diaSemana!=null?r.diaSemana:1]}`:r.frequencia==="quinzenal"?"a cada 14 dias":`dia ${r.dia}`}</span></span>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}><span style={{fontWeight:700,color:r.tipo==="receita"?D.green:D.red}}>{r.tipo==="receita"?"+":"-"}{fmtM(r.valor,currency)}</span><button onClick={()=>{setRecForm({editId:r.id,tipo:r.tipo,descricao:r.descricao,valor:String(r.valor),categoria:r.categoria,frequencia:r.frequencia||"mensal",dia:r.dia,diaSemana:r.diaSemana,bancoId:r.bancoId});setModalRec(true);}} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:12}}>✏️</button><button onClick={()=>setData(d=>({...d,recorrencias:(d.recorrencias||[]).filter(x=>x.id!==r.id)}))} style={{border:"none",background:"none",cursor:"pointer",color:D.red,fontSize:12}}>🗑</button></div>
       </div>)}
     </Card>}
 
@@ -965,12 +965,15 @@ function LancamentosTab({data,setData,currency,mes}){
         <Btn color={D.gold} onClick={saveOrc}>{orcForm.editId?"Atualizar":"Adicionar"}</Btn>
       </div>
     </Modal>}
-    {modalRec&&<Modal title="Nova recorrência" onClose={()=>setModalRec(false)}>
+    {modalRec&&<Modal title={recForm.editId?"Editar recorrência":"Nova recorrência"} onClose={()=>{setModalRec(false);setRecForm({});}}>
       <label style={{fontSize:12,color:D.text3}}>Tipo<select value={recForm.tipo||"despesa"} onChange={e=>setRecForm(f=>({...f,tipo:e.target.value}))} style={{marginTop:4}}><option value="despesa">Despesa</option><option value="receita">Receita</option></select></label>
       <label style={{fontSize:12,color:D.text3}}>Descrição<input value={recForm.descricao||""} onChange={e=>setRecForm(f=>({...f,descricao:e.target.value}))} style={{marginTop:4}}/></label>
       <label style={{fontSize:12,color:D.text3}}>Valor ({currency})<input type="number" value={recForm.valor||""} onChange={e=>setRecForm(f=>({...f,valor:e.target.value}))} style={{marginTop:4}}/></label>
       <label style={{fontSize:12,color:D.text3}}>Categoria<select value={recForm.categoria||""} onChange={e=>setRecForm(f=>({...f,categoria:e.target.value}))} style={{marginTop:4}}>{(recForm.tipo==="receita"?catR:catD).map(c=><option key={c}>{c}</option>)}</select></label>
-      <label style={{fontSize:12,color:D.text3}}>Dia do mês<input type="number" min="1" max="31" value={recForm.dia||""} onChange={e=>setRecForm(f=>({...f,dia:e.target.value}))} style={{marginTop:4}}/></label>
+      <label style={{fontSize:12,color:D.text3}}>Frequência<select value={recForm.frequencia||"mensal"} onChange={e=>setRecForm(f=>({...f,frequencia:e.target.value}))} style={{marginTop:4}}><option value="mensal">Mensal</option><option value="semanal">Semanal</option><option value="quinzenal">Quinzenal (a cada 14 dias)</option></select></label>
+      {(recForm.frequencia||"mensal")==="mensal"&&<label style={{fontSize:12,color:D.text3}}>Dia do mês<input type="number" min="1" max="31" value={recForm.dia||""} onChange={e=>setRecForm(f=>({...f,dia:e.target.value}))} style={{marginTop:4}}/></label>}
+      {recForm.frequencia==="semanal"&&<label style={{fontSize:12,color:D.text3}}>Dia da semana<select value={recForm.diaSemana!=null?recForm.diaSemana:1} onChange={e=>setRecForm(f=>({...f,diaSemana:e.target.value}))} style={{marginTop:4}}>{["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"].map((d,i)=><option key={i} value={i}>{d}</option>)}</select></label>}
+      {recForm.frequencia==="quinzenal"&&<p style={{fontSize:11,color:D.text3,marginTop:4,marginBottom:0}}>📅 Lançado a cada 14 dias, contando a partir do primeiro lançamento (hoje).</p>}
       {data.bancos.length>0&&<label style={{fontSize:12,color:D.text3}}>Banco<select value={recForm.bancoId||""} onChange={e=>setRecForm(f=>({...f,bancoId:e.target.value}))} style={{marginTop:4}}><option value="">Nenhum</option>{data.bancos.map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}</select></label>}
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn outline color={D.text3} onClick={()=>setModalRec(false)}>Cancelar</Btn><Btn color={D.purple} onClick={saveRec}>Salvar</Btn></div>
     </Modal>}
@@ -2734,6 +2737,44 @@ function CartaoTab({data,setData,currency,mes}){
   </div>;
 }
 
+// ── Motor de recorrência: decide se/quando lançar (testado em isolado) ────────
+// Retorna a data "YYYY-MM-DD" a lançar, ou null. Lança no máx. 1 ocorrência por
+// carga do app (não preenche retroativamente vários períodos perdidos).
+function proximoLancamentoRec(rec, datasLancadas, hojeD){
+  const freq = rec.frequencia || "mensal";
+  const pad = n => String(n).padStart(2,"0");
+  const ymd = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  const parse = s => new Date(s+"T00:00:00");
+  const datas = (datasLancadas||[]).slice().sort();
+  const ultima = datas.length ? datas[datas.length-1] : null;
+
+  if(freq==="semanal"){
+    const alvoWd = (rec.diaSemana!=null ? +rec.diaSemana : 1); // 0=Dom..6=Sáb
+    const inicioSemana = new Date(hojeD); inicioSemana.setHours(0,0,0,0);
+    inicioSemana.setDate(hojeD.getDate()-hojeD.getDay()); // domingo desta semana
+    const jaNestaSemana = datas.some(d=> parse(d) >= inicioSemana);
+    if(jaNestaSemana) return null;
+    const alvo = new Date(inicioSemana); alvo.setDate(inicioSemana.getDate()+alvoWd);
+    const hojeZero = new Date(hojeD); hojeZero.setHours(0,0,0,0);
+    if(hojeZero < alvo) return null;
+    return ymd(alvo);
+  }
+  if(freq==="quinzenal"){
+    if(!ultima) return ymd(new Date(hojeD)); // âncora: primeiro lançamento = hoje
+    const h=new Date(hojeD); h.setHours(0,0,0,0);
+    const diff = Math.floor((h.getTime() - parse(ultima).getTime())/86400000);
+    if(diff>=14) return ymd(new Date(hojeD));
+    return null;
+  }
+  // mensal (padrão e legado)
+  const dia = rec.dia || 1;
+  const mAtual=hojeD.getMonth(), aAtual=hojeD.getFullYear();
+  const jaNesteMes = datas.some(d=>{const x=parse(d);return x.getMonth()===mAtual&&x.getFullYear()===aAtual;});
+  if(jaNesteMes) return null;
+  if(hojeD.getDate() < dia) return null;
+  return `${aAtual}-${pad(mAtual+1)}-${pad(dia)}`;
+}
+
 // ── Relatórios Tab ────────────────────────────────────────────────────────────
 function RelatoriosTab({data,setData,currency}){
   const [periodo,setPeriodo]=useState("mes:"+MES_ATUAL);  // "mes:<0-11>" | "ano" | "tudo"
@@ -3005,10 +3046,11 @@ function AppInner(){
     if(!session)return;
     const prof=allData[profileId];
     if(!prof||!prof.recorrencias?.length)return;
-    const hojeD=new Date();const mAtual=hojeD.getMonth();const aAtual=hojeD.getFullYear();
+    const hojeD=new Date();
     prof.recorrencias.forEach(rec=>{
-      const jaLancou=(prof.transacoes||[]).some(t=>t.recorrenciaId===rec.id&&new Date(t.data).getMonth()===mAtual&&new Date(t.data).getFullYear()===aAtual);
-      if(!jaLancou&&rec.dia<=hojeD.getDate()){setData(d=>({...d,transacoes:[...d.transacoes,{id:uid(),tipo:rec.tipo,descricao:rec.descricao,valor:rec.valor,categoria:rec.categoria,data:`${aAtual}-${String(mAtual+1).padStart(2,"0")}-${String(rec.dia).padStart(2,"0")}`,bancoId:rec.bancoId||null,recorrenciaId:rec.id}]}));}
+      const datasLancadas=(prof.transacoes||[]).filter(t=>t.recorrenciaId===rec.id).map(t=>t.data);
+      const dataLanc=proximoLancamentoRec(rec,datasLancadas,hojeD);
+      if(dataLanc){setData(d=>({...d,transacoes:[...d.transacoes,{id:uid(),tipo:rec.tipo,descricao:rec.descricao,valor:rec.valor,categoria:rec.categoria,data:dataLanc,bancoId:rec.bancoId||null,recorrenciaId:rec.id}]}));}
     });
   },[profileId,session]);
 
