@@ -583,7 +583,7 @@ function LoginScreen({onLogin}){
   return <div style={{minHeight:"100vh",background:`radial-gradient(ellipse at top,${D.bg2} 0%,${D.bg} 70%)`,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
     <div style={{width:"min(100%,400px)"}}>
       <div style={{textAlign:"center",marginBottom:"2rem"}}>
-        <div style={{fontSize:52,marginBottom:12,filter:`drop-shadow(0 0 20px ${D.green})`}}>💰</div>
+        <div style={{marginBottom:12}}><img src="/logo.svg" alt="logo" style={{width:84,height:84,borderRadius:20,filter:`drop-shadow(0 0 20px ${D.green}66)`}}/></div>
         <h1 style={{fontSize:24,fontWeight:800,color:D.text}}>Controle Financeiro</h1>
         <p style={{color:D.text3,fontSize:13,marginTop:4}}>Gerencie suas finanças em qualquer lugar</p>
       </div>
@@ -3116,7 +3116,7 @@ function AppInner(){
     <div style={{maxWidth:780,margin:"0 auto",padding:"0.75rem 1rem 4rem",minHeight:"100vh"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem",flexWrap:"wrap",gap:8,padding:"0.75rem 1rem",background:D.card,borderRadius:14,border:`1px solid ${D.border}`,position:"sticky",top:8,zIndex:50}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <span style={{fontSize:22,filter:`drop-shadow(0 0 8px ${D.green})`}}>💰</span>
+          <img src="/logo.svg" alt="logo" style={{width:34,height:34,borderRadius:9,filter:`drop-shadow(0 0 8px ${D.green}66)`}}/>
           <div><p style={{margin:0,fontSize:15,fontWeight:800,color:D.text}}>Controle Financeiro</p>{syncing&&<p style={{margin:0,fontSize:10,color:D.green}}>● sincronizando...</p>}{!syncing&&syncErro&&<p style={{margin:0,fontSize:10,color:D.gold}}>⚠ sem conexão com a nuvem — alterações não estão sendo salvas online</p>}</div>
         </div>
         <div style={{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
