@@ -65,7 +65,7 @@ const TIPOS_INV=["Ações","FII","ETF","Cripto","Renda Fixa","Tesouro Direto","O
 const INDICES_RF=["CDI","IPCA","Selic","IGPM","Prefixado"];
 const INDICES_RATE={CDI:10.5,Selic:10.5,IPCA:4.62,IGPM:5.1};
 const MESES=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
-const TABS=["Dashboard","Bancos","Lançamentos","Cartão","Investimentos","Metas","Análise","Splitwise"];
+const TABS=["Dashboard","Bancos","Lançamentos","Cartão","Investimentos","Metas","Análise","Splitwise","Relatórios"];
 const WL_CATS=["Todas","Banco","Infraestrutura","Fundo Imobiliário","Energia","Tecnologia","Varejo","Saúde","Agronegócio","Mineração","Petróleo","ETF","Exterior","Outros"];
 const IND_COMP=[
   {key:"preco",label:"Preço",fmt:(v,cur)=>v!=null?`${cur} ${Number(v).toFixed(2)}`:"—",higher:false},
@@ -713,8 +713,10 @@ function LancamentosTab({data,setData,currency,mes}){
 
   function saveT(){
     if(!form.bancoId&&data.bancos.length>0){alert("Selecione um banco!");return;}
+    const valorNum=parseFloat(form.valor)||0;
+    if(valorNum<=0){alert("⚠️ O valor precisa ser maior que zero.\n\nDica: confira se você digitou o número no campo VALOR (e não no campo Descrição).");return;}
     const t={id:form.editId||uid(),tipo:form.tipo||"despesa",descricao:form.descricao||"Sem descrição",
-      valor:parseFloat(form.valor)||0,categoria:form.categoria||(form.tipo==="receita"?catR[0]:catD[0]),
+      valor:valorNum,categoria:form.categoria||(form.tipo==="receita"?catR[0]:catD[0]),
       data:form.data||hoje.toISOString().slice(0,10),bancoId:form.bancoId||null,
       nfImg:form.nfImg||null,nfManual:form.nfManual||false};
     setData(d=>({...d,transacoes:form.editId?d.transacoes.map(x=>x.id===form.editId?t:x):[...d.transacoes,t]}));
@@ -755,7 +757,21 @@ function LancamentosTab({data,setData,currency,mes}){
     setImpItens(null);
     alert(`✅ ${novos.length} lançamento${novos.length!==1?"s":""} importado${novos.length!==1?"s":""}!`);
   }
-  function saveOrc(){const o={id:orcForm.editId||uid(),categoria:orcForm.categoria||catD[0],valor:parseFloat(orcForm.valor)||0};setData(d=>({...d,orcamentos:orcForm.editId?(d.orcamentos||[]).map(x=>x.id===orcForm.editId?o:x):[...(d.orcamentos||[]),o]}));setModalOrc(false);setOrcForm({});}
+  function saveOrc(){
+    const cat=orcForm.categoria||catD[0];
+    const val=parseFloat(orcForm.valor)||0;
+    if(val<=0){alert("Defina um limite maior que zero.");return;}
+    setData(d=>{
+      const lista=d.orcamentos||[];
+      // edição direta de um item existente (clicou no ✏️)
+      if(orcForm.editId) return {...d,orcamentos:lista.map(x=>x.id===orcForm.editId?{...x,categoria:cat,valor:val}:x)};
+      // sem editId: se já existe orçamento dessa categoria, ATUALIZA (não duplica)
+      const existe=lista.find(x=>x.categoria===cat);
+      if(existe) return {...d,orcamentos:lista.map(x=>x.categoria===cat?{...x,valor:val}:x)};
+      return {...d,orcamentos:[...lista,{id:uid(),categoria:cat,valor:val}]};
+    });
+    setOrcForm({});
+  }
   function saveRec(){const r={id:recForm.editId||uid(),tipo:recForm.tipo||"despesa",descricao:recForm.descricao||"",valor:parseFloat(recForm.valor)||0,categoria:recForm.categoria||catD[0],dia:parseInt(recForm.dia)||1,bancoId:recForm.bancoId||null};setData(d=>({...d,recorrencias:recForm.editId?(d.recorrencias||[]).map(x=>x.id===recForm.editId?r:x):[...(d.recorrencias||[]),r]}));setModalRec(false);setRecForm({});}
   const nfsComNF=data.transacoes.filter(t=>t.nfImg||t.nfManual);
 
@@ -925,10 +941,29 @@ function LancamentosTab({data,setData,currency,mes}){
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn outline color={D.text3} onClick={()=>setModal(null)}>Cancelar</Btn><Btn onClick={saveT}>Salvar</Btn></div>
     </Modal>}
 
-    {modalOrc&&<Modal title="Orçamento mensal" onClose={()=>setModalOrc(false)}>
-      <label style={{fontSize:12,color:D.text3}}>Categoria<select value={orcForm.categoria||""} onChange={e=>setOrcForm(f=>({...f,categoria:e.target.value}))} style={{marginTop:4}}>{catD.map(c=><option key={c}>{c}</option>)}</select></label>
+    {modalOrc&&<Modal title="🎯 Orçamentos mensais" onClose={()=>{setModalOrc(false);setOrcForm({});}}>
+      {(data.orcamentos||[]).length>0&&<div style={{marginBottom:12}}>
+        <p style={{fontSize:11,color:D.text3,marginBottom:6}}>Orçamentos atuais — ✏️ edita, 🗑 remove:</p>
+        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+          {(data.orcamentos||[]).map(o=><div key={o.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,background:D.bg3,borderRadius:8,padding:"7px 10px",border:orcForm.editId===o.id?`1px solid ${D.gold}`:`1px solid ${D.border}`}}>
+            <span style={{fontSize:12,color:D.text2}}>{o.categoria}</span>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:12,fontWeight:600,color:D.gold}}>{fmtM(o.valor,currency)}</span>
+              <button onClick={()=>setOrcForm({editId:o.id,categoria:o.categoria,valor:String(o.valor)})} style={{border:"none",background:"none",cursor:"pointer",fontSize:13,color:D.text3}}>✏️</button>
+              <button onClick={()=>setData(d=>({...d,orcamentos:(d.orcamentos||[]).filter(x=>x.id!==o.id)}))} style={{border:"none",background:"none",cursor:"pointer",fontSize:13,color:D.red}}>🗑</button>
+            </div>
+          </div>)}
+        </div>
+        <div style={{borderTop:`1px solid ${D.border}`,margin:"12px 0 0"}}/>
+      </div>}
+      <p style={{fontSize:12,color:D.text2,fontWeight:600,margin:"0 0 6px"}}>{orcForm.editId?"Editar orçamento":"Novo orçamento"}</p>
+      <label style={{fontSize:12,color:D.text3}}>Categoria<select value={orcForm.categoria||""} onChange={e=>setOrcForm(f=>({...f,categoria:e.target.value}))} style={{marginTop:4}}><option value="">Selecione...</option>{catD.map(c=><option key={c}>{c}</option>)}</select></label>
       <label style={{fontSize:12,color:D.text3,marginTop:8,display:"block"}}>Limite ({currency})<input type="number" value={orcForm.valor||""} onChange={e=>setOrcForm(f=>({...f,valor:e.target.value}))} style={{marginTop:4}}/></label>
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn outline color={D.text3} onClick={()=>setModalOrc(false)}>Cancelar</Btn><Btn color={D.gold} onClick={saveOrc}>Salvar</Btn></div>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:10}}>
+        {orcForm.editId&&<Btn outline color={D.text3} onClick={()=>setOrcForm({})}>Cancelar edição</Btn>}
+        <Btn outline color={D.text3} onClick={()=>{setModalOrc(false);setOrcForm({});}}>Fechar</Btn>
+        <Btn color={D.gold} onClick={saveOrc}>{orcForm.editId?"Atualizar":"Adicionar"}</Btn>
+      </div>
     </Modal>}
     {modalRec&&<Modal title="Nova recorrência" onClose={()=>setModalRec(false)}>
       <label style={{fontSize:12,color:D.text3}}>Tipo<select value={recForm.tipo||"despesa"} onChange={e=>setRecForm(f=>({...f,tipo:e.target.value}))} style={{marginTop:4}}><option value="despesa">Despesa</option><option value="receita">Receita</option></select></label>
@@ -2699,6 +2734,134 @@ function CartaoTab({data,setData,currency,mes}){
   </div>;
 }
 
+// ── Relatórios Tab ────────────────────────────────────────────────────────────
+function RelatoriosTab({data,setData,currency}){
+  const [periodo,setPeriodo]=useState("mes:"+MES_ATUAL);  // "mes:<0-11>" | "ano" | "tudo"
+  const [bancoFiltro,setBancoFiltro]=useState("");         // "" = todos
+  const [tipoFiltro,setTipoFiltro]=useState("");           // "" = ambos
+
+  const nomeBanco=id=>data.bancos.find(b=>b.id===id)?.nome||"—";
+
+  const txs=(data.transacoes||[]).filter(t=>{
+    const d=new Date(t.data);
+    if(periodo.startsWith("mes:")){const m=+periodo.split(":")[1];if(d.getMonth()!==m||d.getFullYear()!==ANO_ATUAL)return false;}
+    else if(periodo==="ano"){if(d.getFullYear()!==ANO_ATUAL)return false;}
+    if(bancoFiltro&&t.bancoId!==bancoFiltro)return false;
+    if(tipoFiltro&&t.tipo!==tipoFiltro)return false;
+    return true;
+  }).sort((a,b)=>b.data.localeCompare(a.data));
+
+  const totR=txs.filter(t=>t.tipo==="receita").reduce((a,b)=>a+(b.valor||0),0);
+  const totD=txs.filter(t=>t.tipo==="despesa").reduce((a,b)=>a+(b.valor||0),0);
+
+  const porCat={};
+  txs.filter(t=>t.tipo==="despesa").forEach(t=>{porCat[t.categoria]=(porCat[t.categoria]||0)+(t.valor||0);});
+  const catList=Object.entries(porCat).map(([cat,v])=>({cat,v})).sort((a,b)=>b.v-a.v);
+
+  const porBanco={};
+  txs.forEach(t=>{const k=t.bancoId||"sem";if(!porBanco[k])porBanco[k]={r:0,d:0};porBanco[k][t.tipo==="receita"?"r":"d"]+=(t.valor||0);});
+  const bancoList=Object.entries(porBanco).map(([id,o])=>({nome:id==="sem"?"Sem banco":nomeBanco(id),...o}));
+
+  const labelPeriodo=periodo.startsWith("mes:")?`${MESES[+periodo.split(":")[1]]} ${ANO_ATUAL}`:periodo==="ano"?`Ano ${ANO_ATUAL}`:"Todo o histórico";
+
+  function baixarCSV(){
+    const sep=";";
+    const esc=s=>`"${String(s==null?"":s).replace(/"/g,'""')}"`;
+    const numBR=n=>(n||0).toFixed(2).replace(".",",");
+    const linhas=[["Data","Tipo","Descrição","Categoria","Banco","Valor"].join(sep)];
+    txs.forEach(t=>{linhas.push([t.data,t.tipo==="receita"?"Receita":"Despesa",esc(t.descricao),esc(t.categoria),esc(nomeBanco(t.bancoId)),numBR(t.valor)].join(sep));});
+    linhas.push("");
+    linhas.push([esc("TOTAL RECEITAS"),"","","","",numBR(totR)].join(sep));
+    linhas.push([esc("TOTAL DESPESAS"),"","","","",numBR(totD)].join(sep));
+    linhas.push([esc("SALDO"),"","","","",numBR(totR-totD)].join(sep));
+    const conteudo="\ufeff"+linhas.join("\r\n"); // BOM p/ Excel ler acentos
+    const blob=new Blob([conteudo],{type:"text/csv;charset=utf-8;"});
+    const u=URL.createObjectURL(blob);const a=document.createElement("a");a.href=u;a.download=`relatorio_${labelPeriodo.replace(/\s/g,"_")}.csv`;a.click();URL.revokeObjectURL(u);
+  }
+
+  function imprimir(){
+    const escH=s=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    const linhasTx=txs.map(t=>`<tr><td>${t.data}</td><td>${t.tipo==="receita"?"Receita":"Despesa"}</td><td>${escH(t.descricao)}</td><td>${escH(t.categoria)}</td><td>${escH(nomeBanco(t.bancoId))}</td><td style="text-align:right;color:${t.tipo==="receita"?"#0a7":"#c33"}">${t.tipo==="receita"?"+":"-"}${fmtM(t.valor,currency)}</td></tr>`).join("");
+    const linhasCat=catList.map(c=>`<tr><td>${escH(c.cat)}</td><td style="text-align:right">${fmtM(c.v,currency)}</td></tr>`).join("");
+    const html=`<!doctype html><html><head><meta charset="utf-8"><title>Relatório ${labelPeriodo}</title>
+<style>body{font-family:system-ui,Arial,sans-serif;color:#111;padding:24px;max-width:820px;margin:0 auto}h1{font-size:18px;margin:0 0 4px}h2{font-size:14px;margin:24px 0 6px;border-bottom:1px solid #ccc;padding-bottom:4px}table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:5px 8px;border-bottom:1px solid #eee;text-align:left}th{background:#f4f4f4}.tot{display:flex;gap:24px;margin:12px 0;font-size:13px}</style>
+</head><body>
+<h1>📄 Relatório financeiro — ${labelPeriodo}</h1>
+<p style="font-size:12px;color:#666">Gerado em ${new Date().toLocaleString("pt-BR")}${bancoFiltro?` · Banco: ${escH(nomeBanco(bancoFiltro))}`:""}${tipoFiltro?` · ${tipoFiltro==="receita"?"Só receitas":"Só despesas"}`:""}</p>
+<div class="tot"><div><b>Receitas:</b> ${fmtM(totR,currency)}</div><div><b>Despesas:</b> ${fmtM(totD,currency)}</div><div><b>Saldo:</b> ${fmtM(totR-totD,currency)}</div></div>
+<h2>Despesas por categoria</h2><table><thead><tr><th>Categoria</th><th style="text-align:right">Total</th></tr></thead><tbody>${linhasCat||'<tr><td colspan="2">Sem despesas no período</td></tr>'}</tbody></table>
+<h2>Lançamentos (${txs.length})</h2><table><thead><tr><th>Data</th><th>Tipo</th><th>Descrição</th><th>Categoria</th><th>Banco</th><th style="text-align:right">Valor</th></tr></thead><tbody>${linhasTx||'<tr><td colspan="6">Nenhum lançamento</td></tr>'}</tbody></table>
+<script>window.onload=function(){window.print();}</script>
+</body></html>`;
+    const w=window.open("","_blank");
+    if(!w){alert("Permita pop-ups neste site para gerar o relatório em PDF.");return;}
+    w.document.write(html);w.document.close();
+  }
+
+  return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
+    <Card>
+      <p style={{fontSize:14,fontWeight:700,color:D.text,marginBottom:10}}>📄 Relatórios</p>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8}}>
+        <label style={{fontSize:11,color:D.text3}}>Período
+          <select value={periodo} onChange={e=>setPeriodo(e.target.value)} style={{marginTop:4}}>
+            {MESES.map((m,i)=><option key={i} value={"mes:"+i}>{m} {ANO_ATUAL}</option>)}
+            <option value="ano">Ano {ANO_ATUAL} (todos os meses)</option>
+            <option value="tudo">Todo o histórico</option>
+          </select>
+        </label>
+        <label style={{fontSize:11,color:D.text3}}>Banco
+          <select value={bancoFiltro} onChange={e=>setBancoFiltro(e.target.value)} style={{marginTop:4}}>
+            <option value="">Todos</option>
+            {data.bancos.map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}
+          </select>
+        </label>
+        <label style={{fontSize:11,color:D.text3}}>Tipo
+          <select value={tipoFiltro} onChange={e=>setTipoFiltro(e.target.value)} style={{marginTop:4}}>
+            <option value="">Receitas + Despesas</option>
+            <option value="receita">Só receitas</option>
+            <option value="despesa">Só despesas</option>
+          </select>
+        </label>
+      </div>
+      <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
+        <Btn color={D.green} onClick={baixarCSV} sm>⬇️ Baixar CSV (Excel)</Btn>
+        <Btn color={D.blue} outline sm onClick={imprimir}>🖨 Imprimir / PDF</Btn>
+      </div>
+    </Card>
+
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10}}>
+      <MetricCard label="Receitas" value={fmtM(totR,currency)} color={D.green}/>
+      <MetricCard label="Despesas" value={fmtM(totD,currency)} color={D.red}/>
+      <MetricCard label="Saldo" value={fmtM(totR-totD,currency)} color={totR-totD>=0?D.green:D.red}/>
+    </div>
+
+    {catList.length>0&&<Card>
+      <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:8}}>Despesas por categoria</p>
+      {catList.map(c=>{const pct=totD>0?(c.v/totD*100):0;return <div key={c.cat} style={{marginBottom:8}}>
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}><span style={{color:D.text2}}>{c.cat}</span><span style={{fontWeight:600,color:D.text}}>{fmtM(c.v,currency)} <span style={{color:D.text3,fontWeight:400}}>({pct.toFixed(0)}%)</span></span></div>
+        <div style={{background:D.bg3,borderRadius:4,height:5,overflow:"hidden"}}><div style={{width:pct+"%",background:D.red,height:5,borderRadius:4}}/></div>
+      </div>;})}
+    </Card>}
+
+    {bancoList.length>0&&<Card>
+      <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:8}}>Movimentação por banco</p>
+      {bancoList.map((b,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:i<bancoList.length-1?`1px solid ${D.border}`:"none",fontSize:12}}>
+        <span style={{color:D.text2}}>🏦 {b.nome}</span>
+        <div style={{display:"flex",gap:12}}><span style={{color:D.green}}>+{fmtM(b.r,currency)}</span><span style={{color:D.red}}>-{fmtM(b.d,currency)}</span></div>
+      </div>)}
+    </Card>}
+
+    <Card>
+      <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:8}}>Lançamentos do período ({txs.length})</p>
+      {txs.length===0&&<p style={{fontSize:12,color:D.text3}}>Nenhum lançamento com esses filtros.</p>}
+      {txs.map(t=><div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:`1px solid ${D.border}`,fontSize:12}}>
+        <div style={{minWidth:0,flex:1}}><p style={{margin:0,color:D.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</p><p style={{margin:0,fontSize:10,color:D.text3}}>{t.categoria} · {t.data} · {nomeBanco(t.bancoId)}</p></div>
+        <span style={{fontWeight:700,color:t.tipo==="receita"?D.green:D.red,flexShrink:0,marginLeft:8}}>{t.tipo==="receita"?"+":"-"}{fmtM(t.valor,currency)}</span>
+      </div>)}
+    </Card>
+  </div>;
+}
+
 // ── Error Boundary: mostra o erro na tela em vez de tela branca ───────────────
 class ErrorBoundary extends Component{
   constructor(props){super(props);this.state={erro:null,info:null};}
@@ -3008,6 +3171,7 @@ function AppInner(){
       {tab===5&&<MetasTab data={data} setData={setData} currency={currency}/>}
       {tab===6&&<AnaliseTab data={data} setData={setData} investimentos={data.investimentos} profileId={profileId} market={profileId} currency={currency}/>}
       {tab===7&&<SplitwiseTab currency={currency} userEmail={session?.user?.email}/>}
+      {tab===8&&<RelatoriosTab data={data} setData={setData} currency={currency}/>}
     </div>
   </>;
 }
