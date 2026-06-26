@@ -898,7 +898,7 @@ function LancamentosTab({data,setData,currency,mes}){
     {data.recorrencias?.length>0&&<Card>
       <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:8}}>🔄 Recorrentes</p>
       {data.recorrencias.map(r=><div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",background:D.bg3,borderRadius:8,fontSize:12,marginBottom:4}}>
-        <span style={{color:D.text2}}>{r.descricao} <span style={{color:D.text3,fontSize:10}}>{r.frequencia==="semanal"?`toda ${["dom","seg","ter","qua","qui","sex","sáb"][r.diaSemana!=null?r.diaSemana:1]}`:r.frequencia==="quinzenal"?"a cada 14 dias":`dia ${r.dia}`}</span></span>
+        <span style={{color:D.text2}}>{r.descricao} <span style={{color:D.text3,fontSize:10}}>{r.frequencia==="semanal"?`toda ${["dom","seg","ter","qua","qui","sex","sáb"][r.diaSemana!=null?r.diaSemana:1]}`:r.frequencia==="quinzenal"?`a cada 2 sem · ${["dom","seg","ter","qua","qui","sex","sáb"][r.diaSemana!=null?r.diaSemana:1]}`:`dia ${r.dia}`}</span></span>
         <div style={{display:"flex",gap:8,alignItems:"center"}}><span style={{fontWeight:700,color:r.tipo==="receita"?D.green:D.red}}>{r.tipo==="receita"?"+":"-"}{fmtM(r.valor,currency)}</span><button onClick={()=>{setRecForm({editId:r.id,tipo:r.tipo,descricao:r.descricao,valor:String(r.valor),categoria:r.categoria,frequencia:r.frequencia||"mensal",dia:r.dia,diaSemana:r.diaSemana,bancoId:r.bancoId});setModalRec(true);}} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:12}}>✏️</button><button onClick={()=>setData(d=>({...d,recorrencias:(d.recorrencias||[]).filter(x=>x.id!==r.id)}))} style={{border:"none",background:"none",cursor:"pointer",color:D.red,fontSize:12}}>🗑</button></div>
       </div>)}
     </Card>}
@@ -970,10 +970,10 @@ function LancamentosTab({data,setData,currency,mes}){
       <label style={{fontSize:12,color:D.text3}}>Descrição<input value={recForm.descricao||""} onChange={e=>setRecForm(f=>({...f,descricao:e.target.value}))} style={{marginTop:4}}/></label>
       <label style={{fontSize:12,color:D.text3}}>Valor ({currency})<input type="number" value={recForm.valor||""} onChange={e=>setRecForm(f=>({...f,valor:e.target.value}))} style={{marginTop:4}}/></label>
       <label style={{fontSize:12,color:D.text3}}>Categoria<select value={recForm.categoria||""} onChange={e=>setRecForm(f=>({...f,categoria:e.target.value}))} style={{marginTop:4}}>{(recForm.tipo==="receita"?catR:catD).map(c=><option key={c}>{c}</option>)}</select></label>
-      <label style={{fontSize:12,color:D.text3}}>Frequência<select value={recForm.frequencia||"mensal"} onChange={e=>setRecForm(f=>({...f,frequencia:e.target.value}))} style={{marginTop:4}}><option value="mensal">Mensal</option><option value="semanal">Semanal</option><option value="quinzenal">Quinzenal (a cada 14 dias)</option></select></label>
+      <label style={{fontSize:12,color:D.text3}}>Frequência<select value={recForm.frequencia||"mensal"} onChange={e=>setRecForm(f=>({...f,frequencia:e.target.value}))} style={{marginTop:4}}><option value="mensal">Mensal</option><option value="semanal">Semanal</option><option value="quinzenal">Quinzenal (a cada 2 semanas)</option></select></label>
       {(recForm.frequencia||"mensal")==="mensal"&&<label style={{fontSize:12,color:D.text3}}>Dia do mês<input type="number" min="1" max="31" value={recForm.dia||""} onChange={e=>setRecForm(f=>({...f,dia:e.target.value}))} style={{marginTop:4}}/></label>}
-      {recForm.frequencia==="semanal"&&<label style={{fontSize:12,color:D.text3}}>Dia da semana<select value={recForm.diaSemana!=null?recForm.diaSemana:1} onChange={e=>setRecForm(f=>({...f,diaSemana:e.target.value}))} style={{marginTop:4}}>{["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"].map((d,i)=><option key={i} value={i}>{d}</option>)}</select></label>}
-      {recForm.frequencia==="quinzenal"&&<p style={{fontSize:11,color:D.text3,marginTop:4,marginBottom:0}}>📅 Lançado a cada 14 dias, contando a partir do primeiro lançamento (hoje).</p>}
+      {(recForm.frequencia==="semanal"||recForm.frequencia==="quinzenal")&&<label style={{fontSize:12,color:D.text3}}>Dia da semana<select value={recForm.diaSemana!=null?recForm.diaSemana:1} onChange={e=>setRecForm(f=>({...f,diaSemana:e.target.value}))} style={{marginTop:4}}>{["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"].map((d,i)=><option key={i} value={i}>{d}</option>)}</select></label>}
+      {recForm.frequencia==="quinzenal"&&<p style={{fontSize:11,color:D.text3,marginTop:4,marginBottom:0}}>📅 A cada 2 semanas (uma sim, outra não), no dia escolhido. A 1ª ocorrência define o ritmo.</p>}
       {data.bancos.length>0&&<label style={{fontSize:12,color:D.text3}}>Banco<select value={recForm.bancoId||""} onChange={e=>setRecForm(f=>({...f,bancoId:e.target.value}))} style={{marginTop:4}}><option value="">Nenhum</option>{data.bancos.map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}</select></label>}
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn outline color={D.text3} onClick={()=>setModalRec(false)}>Cancelar</Btn><Btn color={D.purple} onClick={saveRec}>Salvar</Btn></div>
     </Modal>}
@@ -2760,10 +2760,16 @@ function proximoLancamentoRec(rec, datasLancadas, hojeD){
     return ymd(alvo);
   }
   if(freq==="quinzenal"){
-    if(!ultima) return ymd(new Date(hojeD)); // âncora: primeiro lançamento = hoje
-    const h=new Date(hojeD); h.setHours(0,0,0,0);
-    const diff = Math.floor((h.getTime() - parse(ultima).getTime())/86400000);
-    if(diff>=14) return ymd(new Date(hojeD));
+    // a cada 2 semanas, ancorado num dia da semana (ex: financiamento toda 2ª segunda)
+    const alvoWd = (rec.diaSemana!=null ? +rec.diaSemana : 1);
+    const inicioSemana = new Date(hojeD); inicioSemana.setHours(0,0,0,0);
+    inicioSemana.setDate(hojeD.getDate()-hojeD.getDay());
+    const alvo = new Date(inicioSemana); alvo.setDate(inicioSemana.getDate()+alvoWd);
+    const hojeZero = new Date(hojeD); hojeZero.setHours(0,0,0,0);
+    if(hojeZero < alvo) return null;              // ainda não chegou o dia-alvo desta semana
+    if(!ultima) return ymd(alvo);                 // 1ª vez: ancora nesta semana
+    const diff = Math.round((alvo.getTime() - parse(ultima).getTime())/86400000);
+    if(diff>0 && diff%14===0) return ymd(alvo);   // só nas semanas alternadas (14, 28, ...)
     return null;
   }
   // mensal (padrão e legado)
