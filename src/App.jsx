@@ -17,9 +17,8 @@ const supa={
     return r?.[0]?.data||null; // array vazio = conta realmente nova
   },
   async save(t,id,d){await fetch(`${SUPA_URL}/rest/v1/profiles`,{method:"POST",headers:{...supa.ah(t),"Prefer":"resolution=merge-duplicates"},body:JSON.stringify({id,data:d,updated_at:new Date().toISOString()})});},
-  async loadShared(codigo){const r=await(await fetch(`${SUPA_URL}/rest/v1/splitwise?codigo=eq.${codigo}&select=data`,{headers:supa.h})).json();return r?.[0]?.data||null;},
-  async saveShared(codigo,d){await fetch(`${SUPA_URL}/rest/v1/splitwise`,{method:"POST",headers:{...supa.h,"Prefer":"resolution=merge-duplicates"},body:JSON.stringify({codigo,data:d,updated_at:new Date().toISOString()})});},
-};
+ async loadShared(codigo){const r=await fetch(`${SUPA_URL}/rest/v1/rpc/load_shared`,{method:"POST",headers:supa.h,body:JSON.stringify({p_codigo:codigo})});if(!r.ok)return null;const d=await r.json();return d||null;},
+  async saveShared(codigo,d){await fetch(`${SUPA_URL}/rest/v1/rpc/save_shared`,{method:"POST",headers:supa.h,body:JSON.stringify({p_codigo:codigo,p_data:d})});},};
 
 const D={bg:"#0a0e1a",bg2:"#0f1629",bg3:"#151d35",card:"#111827",card2:"#1a2235",border:"#1e2d4a",border2:"#253352",green:"#00d084",red:"#ff4757",blue:"#3b82f6",gold:"#f59e0b",purple:"#8b5cf6",text:"#f1f5f9",text2:"#94a3b8",text3:"#64748b"};
 const CORES=[D.green,D.blue,D.purple,D.gold,D.red,"#06b6d4","#ec4899"];
