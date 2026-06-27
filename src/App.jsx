@@ -17,8 +17,9 @@ const supa={
     return r?.[0]?.data||null; // array vazio = conta realmente nova
   },
   async save(t,id,d){await fetch(`${SUPA_URL}/rest/v1/profiles`,{method:"POST",headers:{...supa.ah(t),"Prefer":"resolution=merge-duplicates"},body:JSON.stringify({id,data:d,updated_at:new Date().toISOString()})});},
- async loadShared(codigo){const r=await fetch(`${SUPA_URL}/rest/v1/rpc/load_shared`,{method:"POST",headers:supa.h,body:JSON.stringify({p_codigo:codigo})});if(!r.ok)return null;const d=await r.json();return d||null;},
-  async saveShared(codigo,d){await fetch(`${SUPA_URL}/rest/v1/rpc/save_shared`,{method:"POST",headers:supa.h,body:JSON.stringify({p_codigo:codigo,p_data:d})});},};
+  async loadShared(codigo){const r=await fetch(`${SUPA_URL}/rest/v1/rpc/load_shared`,{method:"POST",headers:supa.h,body:JSON.stringify({p_codigo:codigo})});if(!r.ok)return null;const d=await r.json();return d||null;},
+  async saveShared(codigo,d){await fetch(`${SUPA_URL}/rest/v1/rpc/save_shared`,{method:"POST",headers:supa.h,body:JSON.stringify({p_codigo:codigo,p_data:d})});},
+};
 
 const D={bg:"#0a0e1a",bg2:"#0f1629",bg3:"#151d35",card:"#111827",card2:"#1a2235",border:"#1e2d4a",border2:"#253352",green:"#00d084",red:"#ff4757",blue:"#3b82f6",gold:"#f59e0b",purple:"#8b5cf6",text:"#f1f5f9",text2:"#94a3b8",text3:"#64748b"};
 const CORES=[D.green,D.blue,D.purple,D.gold,D.red,"#06b6d4","#ec4899"];
@@ -2785,6 +2786,9 @@ function RelatoriosTab({data,setData,currency}){
   const [periodo,setPeriodo]=useState("mes:"+MES_ATUAL);  // "mes:<0-11>" | "ano" | "tudo"
   const [bancoFiltro,setBancoFiltro]=useState("");         // "" = todos
   const [tipoFiltro,setTipoFiltro]=useState("");           // "" = ambos
+  const [aiResult,setAiResult]=useState(null);
+  const [aiLoading,setAiLoading]=useState(false);
+  const [aiErro,setAiErro]=useState("");
 
   const nomeBanco=id=>data.bancos.find(b=>b.id===id)?.nome||"—";
 
@@ -2809,6 +2813,29 @@ function RelatoriosTab({data,setData,currency}){
   const bancoList=Object.entries(porBanco).map(([id,o])=>({nome:id==="sem"?"Sem banco":nomeBanco(id),...o}));
 
   const labelPeriodo=periodo.startsWith("mes:")?`${MESES[+periodo.split(":")[1]]} ${ANO_ATUAL}`:periodo==="ano"?`Ano ${ANO_ATUAL}`:"Todo o histórico";
+
+  // ── IA: "Como uso meu dinheiro" — números calculados aqui no JS, IA só interpreta ──
+  const ESSENCIAIS_PADRAO=["Moradia","Saúde","Alimentação","Educação"];
+  const catFlags=data.catFlags||{};
+  const flagDe=cat=>catFlags[cat]||(ESSENCIAIS_PADRAO.includes(cat)?"essencial":"cortar");
+  function setFlag(cat,flag){setData(d=>({...d,catFlags:{...(d.catFlags||{}),[cat]:flag}}));}
+  const mesesSet=new Set(txs.map(t=>(t.data||"").slice(0,7)).filter(Boolean));
+  const nMeses=Math.max(1,mesesSet.size);
+  const rendaMensal=totR/nMeses, despMensal=totD/nMeses;
+  const catAnalise=catList.map(c=>{const mensal=c.v/nMeses;return {cat:c.cat,mensal,anual:mensal*12,pctRenda:rendaMensal>0?mensal/rendaMensal*100:null,flag:flagDe(c.cat)};});
+
+  async function analisarIA(){
+    if(aiLoading)return;
+    setAiLoading(true);setAiErro("");setAiResult(null);
+    try{
+      const linhasCat=catAnalise.map(c=>`- ${c.cat}: ${fmtM(c.mensal,currency)}/mês (≈ ${fmtM(c.anual,currency)}/ano)${c.pctRenda!=null?` = ${c.pctRenda.toFixed(0)}% da renda`:""} [${c.flag==="essencial"?"ESSENCIAL — nao sugerir corte":"pode cortar"}]`).join("\n");
+      const metasTxt=(data.metas||[]).length?data.metas.map(m=>`- ${m.nome}: objetivo ${fmtM(m.objetivo||0,currency)}, ja guardado ${fmtM(m.atual||0,currency)}`).join("\n"):"Nenhuma meta cadastrada.";
+      const prompt=`Voce e um consultor financeiro pessoal falando em portugues do Brasil, tom acolhedor e honesto, linguagem simples.\n\nREGRAS:\n- Os numeros abaixo JA ESTAO CALCULADOS. Use EXATAMENTE esses valores. NUNCA recalcule, some ou invente numeros.\n- NUNCA sugira cortar categorias marcadas como ESSENCIAL.\n- "Desperdicio" sao SUGESTOES a confirmar, nao acusacoes.\n\nDados (media mensal do periodo "${labelPeriodo}", base de ${nMeses} ${nMeses>1?"meses":"mes"}):\nRenda mensal: ${fmtM(rendaMensal,currency)}\nDespesas mensais: ${fmtM(despMensal,currency)}\nSobra por mes: ${fmtM(rendaMensal-despMensal,currency)}\n\nGastos por categoria:\n${linhasCat}\n\nMetas de poupanca:\n${metasTxt}\n\nEscreva EXATAMENTE 4 secoes com estes titulos, nada antes nem depois:\n\n💬 Como voce usa seu dinheiro\n(2-4 frases sobre o peso das categorias na renda, em linguagem simples.)\n\n🔍 Candidatos a desperdicio\n(2-4 categorias 'pode cortar' que parecem altas, citando o valor por mes e por ano que eu ja te dei. Deixe claro que e sugestao a confirmar, nao acusacao.)\n\n💡 Ajustes sem perder qualidade de vida\n(Sugestoes concretas so nas categorias 'pode cortar'. Respeite as essenciais.)\n\n🎯 Plano de quanto guardar\n(Um valor realista por mes pra guardar e como dividir entre as metas acima. Sem metas, sugira comecar uma reserva de emergencia.)\n\nMaximo ~320 palavras. Sem tabelas.`;
+      const txt=await askClaude(prompt,1100);
+      setAiResult(txt||"Não veio resposta. Tente de novo.");
+    }catch(e){setAiErro("Não consegui gerar a análise agora. Tente de novo em instantes.");}
+    setAiLoading(false);
+  }
 
   function baixarCSV(){
     const sep=";";
@@ -2888,6 +2915,30 @@ function RelatoriosTab({data,setData,currency}){
         <div style={{background:D.bg3,borderRadius:4,height:5,overflow:"hidden"}}><div style={{width:pct+"%",background:D.red,height:5,borderRadius:4}}/></div>
       </div>;})}
     </Card>}
+
+    <Card>
+      <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:4}}>🤖 Como uso meu dinheiro</p>
+      <p style={{fontSize:11,color:D.text3,marginBottom:10,lineHeight:1.5}}>A IA explica seus gastos e sugere onde dá pra economizar. Os números são calculados pelo app — a IA só interpreta. Marque o que é <b style={{color:D.green}}>essencial</b> pra ela não sugerir cortar.</p>
+      {catAnalise.length===0
+        ? <p style={{fontSize:12,color:D.text3}}>Sem despesas neste período. Escolha um mês com lançamentos lá em cima.</p>
+        : <>
+          <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
+            {catAnalise.map(c=><div key={c.cat} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+              <span style={{fontSize:12,color:D.text2,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.cat} <span style={{color:D.text3}}>· {fmtM(c.mensal,currency)}/mês</span></span>
+              <div style={{display:"flex",gap:4,flexShrink:0}}>
+                <button onClick={()=>setFlag(c.cat,"essencial")} style={{fontSize:10,padding:"3px 8px",borderRadius:6,border:`1px solid ${c.flag==="essencial"?D.green:D.border}`,background:c.flag==="essencial"?D.green:"transparent",color:c.flag==="essencial"?"#06281d":D.text3,cursor:"pointer",fontWeight:600}}>Essencial</button>
+                <button onClick={()=>setFlag(c.cat,"cortar")} style={{fontSize:10,padding:"3px 8px",borderRadius:6,border:`1px solid ${c.flag==="cortar"?D.gold:D.border}`,background:c.flag==="cortar"?D.gold:"transparent",color:c.flag==="cortar"?"#2a1d00":D.text3,cursor:"pointer",fontWeight:600}}>Pode cortar</button>
+              </div>
+            </div>)}
+          </div>
+          <Btn color={D.purple} sm onClick={analisarIA} disabled={aiLoading}>{aiLoading?"Analisando…":"🤖 Analisar com IA"}</Btn>
+          {aiErro&&<p style={{fontSize:12,color:D.red,marginTop:10}}>{aiErro}</p>}
+          {aiResult&&<div style={{marginTop:12,padding:12,background:D.bg3,borderRadius:8,border:`1px solid ${D.border}`}}>
+            <p style={{whiteSpace:"pre-wrap",fontSize:12.5,lineHeight:1.6,color:D.text,margin:0}}>{aiResult}</p>
+            <p style={{fontSize:10,color:D.text3,marginTop:10,marginBottom:0}}>⚠️ Sugestões geradas por IA a partir dos seus números. Confira antes de decidir.</p>
+          </div>}
+        </>}
+    </Card>
 
     {bancoList.length>0&&<Card>
       <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:8}}>Movimentação por banco</p>
