@@ -751,6 +751,26 @@ ${paginas}
     if(!form.bancoId&&data.bancos.length>0){alert("Selecione um banco!");return;}
     const valorNum=parseFloat(form.valor)||0;
     if(valorNum<=0){alert("⚠️ O valor precisa ser maior que zero.\n\nDica: confira se você digitou o número no campo VALOR (e não no campo Descrição).");return;}
+    const np=(profileId==="br"&&!form.editId&&(form.tipo||"despesa")!=="receita")?Math.max(1,parseInt(form.parcelas)||1):1;
+    if(np>1){
+      const base=Math.round(valorNum/np*100)/100;
+      const grupo=uid();
+      const desc=form.descricao||"Compra parcelada";
+      const cat=form.categoria||catD[0];
+      const inicio=form.data||hoje.toISOString().slice(0,10);
+      const [iy,im,id]=inicio.split("-").map(Number);
+      const novas=[];
+      for(let k=0;k<np;k++){
+        const tm=im-1+k, ty=iy+Math.floor(tm/12), tmo=((tm%12)+12)%12;
+        const lastDay=new Date(ty,tmo+1,0).getDate(), dd=Math.min(id,lastDay);
+        const dstr=`${ty}-${String(tmo+1).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
+        const val=k===np-1?Math.round((valorNum-base*(np-1))*100)/100:base;
+        novas.push({id:uid(),tipo:"despesa",descricao:`${desc} (${k+1}/${np})`,valor:val,categoria:cat,data:dstr,bancoId:form.bancoId||null,nfImg:k===0?(form.nfImg||null):null,nfManual:false,parceladoId:grupo});
+      }
+      setData(d=>({...d,transacoes:[...d.transacoes,...novas]}));
+      setModal(null);setForm({});
+      return;
+    }
     const t={id:form.editId||uid(),tipo:form.tipo||"despesa",descricao:form.descricao||"Sem descrição",
       valor:valorNum,categoria:form.categoria||(form.tipo==="receita"?catR[0]:catD[0]),
       data:form.data||hoje.toISOString().slice(0,10),bancoId:form.bancoId||null,
@@ -970,6 +990,12 @@ ${paginas}
       <label style={{fontSize:12,color:D.text3}}>Categoria<select value={form.categoria||""} onChange={e=>setForm(f=>({...f,categoria:e.target.value}))} style={{marginTop:4}}>{(form.tipo==="receita"?catR:catD).map(c=><option key={c}>{c}</option>)}</select></label>
       <div style={{display:"flex",gap:6}}><input placeholder="Nova categoria..." value={form.tipo==="receita"?newCatR:newCatD} onChange={e=>form.tipo==="receita"?setNewCatR(e.target.value):setNewCatD(e.target.value)} style={{flex:1}}/><Btn sm onClick={()=>{addCat(form.tipo==="receita"?"R":"D",form.tipo==="receita"?newCatR:newCatD);form.tipo==="receita"?setNewCatR(""):setNewCatD("");}}>+ Add</Btn></div>
       <label style={{fontSize:12,color:D.text3}}>Data<input type="date" value={form.data||hoje.toISOString().slice(0,10)} onChange={e=>setForm(f=>({...f,data:e.target.value}))} style={{marginTop:4}}/></label>
+      {profileId==="br"&&(form.tipo||"despesa")!=="receita"&&!form.editId&&<label style={{fontSize:12,color:D.text3}}>Parcelas (cartão BR)
+        <select value={form.parcelas||1} onChange={e=>setForm(f=>({...f,parcelas:+e.target.value}))} style={{marginTop:4}}>
+          {Array.from({length:24},(_,i)=>i+1).map(n=><option key={n} value={n}>{n===1?"À vista (1×)":`${n}×`}</option>)}
+        </select>
+        {(+form.parcelas>1)&&(()=>{const v=parseFloat(form.valor)||0;return v>0?<span style={{display:"block",fontSize:11,color:D.purple,marginTop:4}}>{form.parcelas}× de ~{fmtM(Math.round(v/(+form.parcelas)*100)/100,currency)} · cria {form.parcelas} lançamentos, 1 por mês, marcados (1/{form.parcelas})…</span>:<span style={{display:"block",fontSize:11,color:D.text3,marginTop:4}}>Digite o valor total da compra acima.</span>;})()}
+      </label>}
       <label style={{fontSize:12,color:D.text3}}>Banco <span style={{color:D.red}}>*</span><select value={form.bancoId||""} onChange={e=>setForm(f=>({...f,bancoId:e.target.value}))} style={{marginTop:4}}><option value="">Selecione...</option>{data.bancos.map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}</select></label>
       <div style={{borderTop:`1px solid ${D.border}`,paddingTop:10}}>
         <p style={{fontSize:12,color:D.text3,marginBottom:6}}>📎 Nota Fiscal (opcional)</p>
