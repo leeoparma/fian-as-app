@@ -2780,7 +2780,7 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
 function CartaoTab({data,setData,currency,mes}){
   const hojeStr=new Date().toISOString().slice(0,10);
   const sBanco=b=>{const txs=data.transacoes.filter(t=>t.bancoId===b.id);return(b.saldoInicial||0)+txs.filter(t=>t.tipo==="receita").reduce((a,x)=>a+x.valor,0)-txs.filter(t=>t.tipo==="despesa").reduce((a,x)=>a+x.valor,0);};
-  const cartoes=data.bancos.filter(b=>(b.limite||0)>0||b.tipo==="cartão").map(b=>{
+  const cartoes=data.bancos.filter(b=>b.tipo==="cartão").map(b=>{
     const saldo=sBanco(b), limite=b.limite||0, usado=Math.max(0,-saldo);
     const disp=limite>0?limite-usado:null, pct=limite>0?Math.min(100,usado/limite*100):0;
     const txs=data.transacoes.filter(t=>t.bancoId===b.id);
@@ -2796,11 +2796,11 @@ function CartaoTab({data,setData,currency,mes}){
   return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
     <Card>
       <p style={{fontSize:14,fontWeight:700,color:D.text,marginBottom:4}}>💳 Cartões</p>
-      <p style={{fontSize:11,color:D.text3,lineHeight:1.5}}>Calculado dos seus lançamentos. Um banco aparece aqui como cartão quando você o marca como <b>Cartão de crédito</b> ou dá um <b>limite</b> a ele (na aba Bancos). Você lança compra por compra — sem fatura fechada.</p>
+      <p style={{fontSize:11,color:D.text3,lineHeight:1.5}}>Calculado dos seus lançamentos. Um banco aparece aqui quando você o marca como <b>Cartão de crédito</b> (na aba Bancos → editar → Tipo). Você lança compra por compra — sem fatura fechada.</p>
     </Card>
 
     {cartoes.length===0
-      ? <Card><p style={{fontSize:13,color:D.text3}}>Nenhum cartão ainda. Na aba <b>Bancos</b>, cadastre ou edite um banco como <b>Cartão de crédito</b> (ou dê um limite a ele) para vê-lo aqui.</p></Card>
+      ? <Card><p style={{fontSize:13,color:D.text3}}>Nenhum cartão marcado ainda. Na aba <b>Bancos</b>, edite o banco que é cartão de crédito e mude o <b>Tipo</b> para <b>Cartão de crédito</b>. Contas com cheque especial não são cartão — deixe como Conta Corrente.</p></Card>
       : <>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10}}>
           <MetricCard label="Limite total" value={fmtM(totLimite,currency)} color={D.blue}/>
