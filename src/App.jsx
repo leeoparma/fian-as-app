@@ -541,7 +541,7 @@ function NFModal({onClose,onSave,currency}){
     {!img&&<p style={{fontSize:11,color:D.text3,padding:"6px 10px",background:D.bg3,borderRadius:6}}>📋 Lançamento manual — aparecerá no extrato de NFs para IR</p>}
     <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
       <Btn outline color={D.text3} onClick={onClose}>Cancelar</Btn>
-      <Btn color={D.green} onClick={()=>onSave({...result,nfImg:img||null,nfManual:!img,nfB64:b64})}>Salvar NF</Btn>
+      <Btn color={D.green} onClick={()=>{const du=b64?`data:${mt};base64,${b64}`:null;onSave({...result,nfImg:du,nfManual:!du});}}>Salvar NF</Btn>
     </div>
   </Modal>;
 }
