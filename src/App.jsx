@@ -785,8 +785,9 @@ function LancamentosTab({data,setData,currency,mes}){
   }
 
   return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
-    {nfView&&<div onClick={()=>setNfView(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.9)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:16,cursor:"zoom-out"}}>
-      <img src={nfView} style={{maxWidth:"100%",maxHeight:"90vh",objectFit:"contain",borderRadius:8}}/>
+    {nfView&&<div onClick={()=>setNfView(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.9)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:14,zIndex:300,padding:16,cursor:"zoom-out"}}>
+      <img src={nfView} onClick={e=>e.stopPropagation()} style={{maxWidth:"100%",maxHeight:"80vh",objectFit:"contain",borderRadius:8,cursor:"default"}}/>
+      <button onClick={e=>{e.stopPropagation();fetch(nfView).then(r=>r.blob()).then(b=>{const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download="nota-fiscal-"+Date.now()+(b.type==="image/png"?".png":".jpg");a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);}).catch(()=>{});}} style={{padding:"9px 18px",borderRadius:8,border:"none",background:D.green,color:"#000",fontSize:13,fontWeight:600,cursor:"pointer"}}>⬇️ Baixar imagem</button>
       <button onClick={()=>setNfView(null)} style={{position:"absolute",top:16,right:16,width:40,height:40,borderRadius:20,border:"none",background:"rgba(255,255,255,0.15)",color:"#fff",fontSize:20,cursor:"pointer"}}>✕</button>
     </div>}
     {showNF&&<NFModal currency={currency} onClose={()=>setShowNF(false)} onSave={dados=>{setForm(f=>({...f,...dados,tipo:"despesa"}));setShowNF(false);setModal("tx");}}/>}
