@@ -692,6 +692,7 @@ function LancamentosTab({data,setData,currency,mes}){
   const [quickTipo,setQuickTipo]=useState("despesa");
   const [impItens,setImpItens]=useState(null);
   const [impBanco,setImpBanco]=useState("");
+  const [nfView,setNfView]=useState(null);
   const impRef=useRef(null);
   const ORIGENS=["Conta Corrente","Pix","TED","DOC","Cartão Débito","Dinheiro"];
   const catD=data.catD||CAT_D_DEF,catR=data.catR||CAT_R_DEF;
@@ -784,6 +785,10 @@ function LancamentosTab({data,setData,currency,mes}){
   }
 
   return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
+    {nfView&&<div onClick={()=>setNfView(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.9)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:16,cursor:"zoom-out"}}>
+      <img src={nfView} style={{maxWidth:"100%",maxHeight:"90vh",objectFit:"contain",borderRadius:8}}/>
+      <button onClick={()=>setNfView(null)} style={{position:"absolute",top:16,right:16,width:40,height:40,borderRadius:20,border:"none",background:"rgba(255,255,255,0.15)",color:"#fff",fontSize:20,cursor:"pointer"}}>✕</button>
+    </div>}
     {showNF&&<NFModal currency={currency} onClose={()=>setShowNF(false)} onSave={dados=>{setForm(f=>({...f,...dados,tipo:"despesa"}));setShowNF(false);setModal("tx");}}/>}
 
     {impItens&&<Modal title="📥 Revisar importação" onClose={()=>setImpItens(null)}>
@@ -887,7 +892,7 @@ function LancamentosTab({data,setData,currency,mes}){
           <td style={{padding:"8px",textAlign:"right",color:D.red,fontWeight:600}}>{fmtM(t.valor,currency)}</td>
           <td style={{padding:"8px",textAlign:"center"}}>
             {t.nfImg
-              ?<img src={t.nfImg} style={{width:32,height:32,objectFit:"cover",borderRadius:4,cursor:"pointer",border:`1px solid ${D.green}`}} onClick={()=>window.open(t.nfImg)}/>
+              ?<img src={t.nfImg} style={{width:32,height:32,objectFit:"cover",borderRadius:4,cursor:"pointer",border:`1px solid ${D.green}`}} onClick={()=>setNfView(t.nfImg)}/>
               :<span style={{fontSize:10,color:D.text3}}>Manual</span>}
           </td>
         </tr>)}</tbody>
@@ -908,7 +913,7 @@ function LancamentosTab({data,setData,currency,mes}){
     {txMes.sort((a,b)=>b.data.localeCompare(a.data)).map(t=><Card key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"0.75rem 1rem"}}>
       <div style={{width:36,height:36,borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center",background:t.tipo==="receita"?D.green+"22":D.red+"22",fontSize:16,flexShrink:0}}>{t.tipo==="receita"?"↑":"↓"}</div>
       <div style={{flex:1,minWidth:0}}>
-        <div style={{display:"flex",alignItems:"center",gap:6}}><p style={{margin:0,fontSize:13,fontWeight:600,color:D.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</p>{t.nfImg&&<img src={t.nfImg} style={{width:22,height:22,objectFit:"cover",borderRadius:3,cursor:"pointer",flexShrink:0}} onClick={()=>window.open(t.nfImg)} title="Ver NF"/>}{!t.nfImg&&t.nfManual&&<span title="NF Manual" style={{fontSize:11}}>📋</span>}</div>
+        <div style={{display:"flex",alignItems:"center",gap:6}}><p style={{margin:0,fontSize:13,fontWeight:600,color:D.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</p>{t.nfImg&&<img src={t.nfImg} style={{width:22,height:22,objectFit:"cover",borderRadius:3,cursor:"pointer",flexShrink:0}} onClick={()=>setNfView(t.nfImg)} title="Ver NF"/>}{!t.nfImg&&t.nfManual&&<span title="NF Manual" style={{fontSize:11}}>📋</span>}</div>
         <p style={{margin:0,fontSize:11,color:D.text3}}>{t.categoria} · {t.data}{t.bancoId?` · 🏦 ${data.bancos.find(b=>b.id===t.bancoId)?.nome||""}`:""}</p>
       </div>
       <span style={{fontWeight:700,color:t.tipo==="receita"?D.green:D.red,fontSize:14,flexShrink:0}}>{t.tipo==="receita"?"+":"-"}{fmtM(t.valor,currency)}</span>
