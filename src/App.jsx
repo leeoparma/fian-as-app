@@ -680,7 +680,7 @@ function BancosTab({data,setData,currency}){
 }
 
 // ── Lançamentos Tab ───────────────────────────────────────────────────────────
-function LancamentosTab({data,setData,currency,mes}){
+function LancamentosTab({data,setData,currency,mes,profileId}){
   const [modal,setModal]=useState(null);const [form,setForm]=useState({});
   const [showNF,setShowNF]=useState(false);const [showExtratoNF,setShowExtratoNF]=useState(false);
   const [newCatD,setNewCatD]=useState("");const [newCatR,setNewCatR]=useState("");
@@ -693,7 +693,8 @@ function LancamentosTab({data,setData,currency,mes}){
   const [impItens,setImpItens]=useState(null);
   const [impBanco,setImpBanco]=useState("");
   const [nfView,setNfView]=useState(null);
-  const FY_ATUAL=MES_ATUAL>=6?ANO_ATUAL:ANO_ATUAL-1;  // ano fiscal AU: 1 jul–30 jun
+  const isAU=profileId==="au";  // AU: ano fiscal 1 jul–30 jun · BR/US: ano-calendário 1 jan–31 dez
+  const FY_ATUAL=isAU?(MES_ATUAL>=6?ANO_ATUAL:ANO_ATUAL-1):ANO_ATUAL;
   const [fyPdf,setFyPdf]=useState(FY_ATUAL);
   const impRef=useRef(null);
   const ORIGENS=["Conta Corrente","Pix","TED","DOC","Cartão Débito","Dinheiro"];
@@ -702,12 +703,14 @@ function LancamentosTab({data,setData,currency,mes}){
   function addCat(tipo,nome){if(!nome.trim())return;setData(d=>({...d,[tipo==="D"?"catD":"catR"]:[...(tipo==="D"?d.catD||CAT_D_DEF:d.catR||CAT_R_DEF),nome.trim()]}));}
 
   function exportarNFsPDF(){
-    const ini=new Date(fyPdf,6,1,0,0,0);            // 1 jul fyPdf
-    const fim=new Date(fyPdf+1,5,30,23,59,59);      // 30 jun fyPdf+1
+    const ini=isAU?new Date(fyPdf,6,1,0,0,0):new Date(fyPdf,0,1,0,0,0);
+    const fim=isAU?new Date(fyPdf+1,5,30,23,59,59):new Date(fyPdf,11,31,23,59,59);
     const itens=nfsComNF.filter(t=>{const d=new Date(t.data);return d>=ini&&d<=fim;}).sort((a,b)=>a.data.localeCompare(b.data));
-    if(!itens.length){alert(`Nenhuma nota fiscal entre 1 jul ${fyPdf} e 30 jun ${fyPdf+1}.`);return;}
+    if(!itens.length){alert(isAU?`Nenhuma nota fiscal entre 1 jul ${fyPdf} e 30 jun ${fyPdf+1}.`:`Nenhuma nota fiscal no ano ${fyPdf}.`);return;}
     const total=itens.reduce((a,t)=>a+(t.valor||0),0);
-    const fyLabel=`${fyPdf}–${String(fyPdf+1).slice(2)}`;
+    const fyLabel=isAU?`${fyPdf}–${String(fyPdf+1).slice(2)}`:`${fyPdf}`;
+    const tituloPeriodo=isAU?`Ano fiscal ${fyLabel}`:`Ano-calendário ${fyLabel}`;
+    const subPeriodo=isAU?`Período 1 jul ${fyPdf} – 30 jun ${fyPdf+1}`:`Período 1 jan ${fyPdf} – 31 dez ${fyPdf}`;
     const escH=s=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
     const lista=itens.map(t=>`<tr><td>${escH(t.data)}</td><td>${escH(t.descricao)}</td><td>${escH(t.categoria)}</td><td style="text-align:right">${fmtM(t.valor,currency)}</td><td style="text-align:center">${t.nfImg?"✓":"—"}</td></tr>`).join("");
     const paginas=itens.map(t=>`<div class="nf">
@@ -715,12 +718,12 @@ function LancamentosTab({data,setData,currency,mes}){
       <table class="meta"><tr><td>Data</td><td>${escH(t.data)}</td></tr><tr><td>Categoria</td><td>${escH(t.categoria)}</td></tr><tr><td>Valor</td><td>${fmtM(t.valor,currency)}</td></tr></table>
       ${t.nfImg?`<img src="${t.nfImg}"/>`:'<p class="sem">Sem foto — lançamento manual</p>'}
     </div>`).join("");
-    const html=`<!doctype html><html><head><meta charset="utf-8"><title>NFs ano fiscal ${fyLabel}</title>
+    const html=`<!doctype html><html><head><meta charset="utf-8"><title>NFs ${tituloPeriodo}</title>
 <style>body{font-family:system-ui,Arial,sans-serif;color:#111;margin:0;padding:24px}h1{font-size:18px;margin:0 0 4px}h2{font-size:15px;margin:0 0 8px}.cover{margin-bottom:8px}.nf{page-break-before:always;padding-top:8px}.nf img{max-width:100%;max-height:760px;object-fit:contain;border:1px solid #ccc;border-radius:6px;margin-top:8px}table.meta{border-collapse:collapse;font-size:13px;margin-bottom:6px}table.meta td{border:1px solid #ddd;padding:4px 10px}table.meta td:first-child{color:#666;font-weight:600}.sem{color:#999;font-style:italic}table.lista{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}table.lista th,table.lista td{border-bottom:1px solid #eee;padding:5px 8px;text-align:left}table.lista th{background:#f4f4f4}</style>
 </head><body>
 <div class="cover">
-<h1>🧾 Notas Fiscais — Ano fiscal ${fyLabel}</h1>
-<p style="font-size:12px;color:#666">Período 1 jul ${fyPdf} – 30 jun ${fyPdf+1} · Gerado em ${new Date().toLocaleString("pt-BR")} · ${itens.length} nota(s) · Total ${fmtM(total,currency)}</p>
+<h1>🧾 Notas Fiscais — ${tituloPeriodo}</h1>
+<p style="font-size:12px;color:#666">${subPeriodo} · Gerado em ${new Date().toLocaleString("pt-BR")} · ${itens.length} nota(s) · Total ${fmtM(total,currency)}</p>
 <table class="lista"><thead><tr><th>Data</th><th>Estabelecimento</th><th>Categoria</th><th style="text-align:right">Valor</th><th style="text-align:center">Foto</th></tr></thead><tbody>${lista}</tbody></table>
 </div>
 ${paginas}
@@ -907,9 +910,9 @@ ${paginas}
         <p style={{fontSize:14,fontWeight:700,color:D.text}}>🧾 Notas Fiscais para IR</p>
         <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
           <select value={fyPdf} onChange={e=>setFyPdf(+e.target.value)} style={{fontSize:11,padding:"4px 6px"}}>
-            {[FY_ATUAL,FY_ATUAL-1,FY_ATUAL-2].map(y=><option key={y} value={y}>Ano fiscal {y}–{String(y+1).slice(2)}</option>)}
+            {[FY_ATUAL,FY_ATUAL-1,FY_ATUAL-2].map(y=><option key={y} value={y}>{isAU?`Ano fiscal ${y}–${String(y+1).slice(2)}`:`Ano ${y}`}</option>)}
           </select>
-          <Btn sm color={D.blue} onClick={exportarNFsPDF}>📄 PDF ano fiscal</Btn>
+          <Btn sm color={D.blue} onClick={exportarNFsPDF}>{isAU?"📄 PDF ano fiscal":"📄 PDF do ano"}</Btn>
           <Btn sm color={D.green} onClick={()=>{const csv=["Data,Descrição,Categoria,Valor,Tipo",...nfsComNF.map(t=>`${t.data},"${t.descricao}",${t.categoria},${t.valor},${t.nfImg?"Foto":"Manual"}`)].join("\n");const b=new Blob([csv],{type:"text/csv"});const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download="NFs_IR.csv";a.click();}}>⬇️ CSV</Btn>
           <button onClick={()=>setShowExtratoNF(false)} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:18}}>✕</button>
         </div>
@@ -3305,7 +3308,7 @@ function AppInner(){
       </div>}
 
       {tab===1&&<BancosTab data={data} setData={setData} currency={currency}/>}
-      {tab===2&&<LancamentosTab data={data} setData={setData} currency={currency} mes={mes}/>}
+      {tab===2&&<LancamentosTab data={data} setData={setData} currency={currency} mes={mes} profileId={profileId}/>}
       {tab===3&&<CartaoTab data={data} setData={setData} currency={currency} mes={mes}/>}
       {tab===4&&<InvestimentosTab data={data} setData={setData} currency={currency} profileId={profileId}/>}
       {tab===5&&<MetasTab data={data} setData={setData} currency={currency}/>}
