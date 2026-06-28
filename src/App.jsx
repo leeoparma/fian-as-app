@@ -671,7 +671,7 @@ function BancosTab({data,setData,currency}){
     </Card>}
     {modal&&<Modal title={form.editId?"Editar banco":"Novo banco"} onClose={()=>setModal(false)}>
       <label style={{fontSize:12,color:D.text3}}>Nome<input value={form.nome||""} onChange={e=>setForm(f=>({...f,nome:e.target.value}))} placeholder="Ex: Nubank, ANZ..." style={{marginTop:4}}/></label>
-      <label style={{fontSize:12,color:D.text3}}>Tipo<select value={form.tipo||"corrente"} onChange={e=>setForm(f=>({...f,tipo:e.target.value}))} style={{marginTop:4}}><option value="corrente">Conta Corrente</option><option value="poupança">Poupança</option><option value="investimento">Conta Investimento</option><option value="digital">Conta Digital</option></select></label>
+      <label style={{fontSize:12,color:D.text3}}>Tipo<select value={form.tipo||"corrente"} onChange={e=>setForm(f=>({...f,tipo:e.target.value}))} style={{marginTop:4}}><option value="corrente">Conta Corrente</option><option value="poupança">Poupança</option><option value="investimento">Conta Investimento</option><option value="digital">Conta Digital</option><option value="cartão">Cartão de crédito</option></select></label>
       <label style={{fontSize:12,color:D.text3}}>Saldo inicial ({currency})<input type="number" value={form.saldoInicial||""} onChange={e=>setForm(f=>({...f,saldoInicial:e.target.value}))} style={{marginTop:4}}/></label>
       <label style={{fontSize:12,color:D.text3}}>Limite crédito ({currency})<input type="number" value={form.limite||""} onChange={e=>setForm(f=>({...f,limite:e.target.value}))} style={{marginTop:4}}/></label>
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn outline color={D.text3} onClick={()=>setModal(false)}>Cancelar</Btn><Btn onClick={saveBanco}>Salvar</Btn></div>
@@ -2778,33 +2778,60 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
 
 // ── Cartão Tab ────────────────────────────────────────────────────────────────
 function CartaoTab({data,setData,currency,mes}){
-  const [modal,setModal]=useState(false);const [form,setForm]=useState({});
-  const fatMes=data.faturas.filter(f=>f.mes===mes);const totF=fatMes.reduce((a,b)=>a+b.valor,0);
-  function saveFatura(){const f={id:form.editId||uid(),cartao:form.cartao||"",valor:parseFloat(form.valor)||0,vencimento:form.vencimento||"",mes,bancoId:form.bancoId||null};setData(d=>{let fat=form.editId?d.faturas.map(x=>x.id===form.editId?f:x):[...d.faturas,f];let txs=[...d.transacoes];if(f.bancoId&&f.vencimento&&!form.editId)txs.push({id:uid(),tipo:"despesa",descricao:`Fatura ${f.cartao}`,valor:f.valor,categoria:"Cartão de Crédito",data:f.vencimento,bancoId:f.bancoId});return{...d,faturas:fat,transacoes:txs};});setModal(false);setForm({});}
+  const hojeStr=new Date().toISOString().slice(0,10);
+  const sBanco=b=>{const txs=data.transacoes.filter(t=>t.bancoId===b.id);return(b.saldoInicial||0)+txs.filter(t=>t.tipo==="receita").reduce((a,x)=>a+x.valor,0)-txs.filter(t=>t.tipo==="despesa").reduce((a,x)=>a+x.valor,0);};
+  const cartoes=data.bancos.filter(b=>(b.limite||0)>0||b.tipo==="cartão").map(b=>{
+    const saldo=sBanco(b), limite=b.limite||0, usado=Math.max(0,-saldo);
+    const disp=limite>0?limite-usado:null, pct=limite>0?Math.min(100,usado/limite*100):0;
+    const txs=data.transacoes.filter(t=>t.bancoId===b.id);
+    const gastoMes=txs.filter(t=>{if(t.tipo!=="despesa")return false;const d=new Date(t.data);return d.getMonth()===mes&&d.getFullYear()===ANO_ATUAL;}).reduce((a,x)=>a+x.valor,0);
+    const futuras=txs.filter(t=>t.tipo==="despesa"&&t.parceladoId&&t.data>hojeStr).reduce((a,x)=>a+x.valor,0);
+    return {b,saldo,limite,usado,disp,pct,gastoMes,futuras};
+  });
+  const totLimite=cartoes.reduce((a,c)=>a+c.limite,0);
+  const totUsado=cartoes.reduce((a,c)=>a+c.usado,0);
+  const totFuturas=cartoes.reduce((a,c)=>a+c.futuras,0);
+  const faturasAntigas=data.faturas||[];
+
   return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
-    <Btn onClick={()=>{setModal(true);setForm({});}} color={D.purple} style={{alignSelf:"flex-start"}}>+ Nova fatura</Btn>
-    {fatMes.length===0&&<p style={{fontSize:13,color:D.text3}}>Nenhuma fatura neste mês.</p>}
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:10}}>
-      {fatMes.map(f=><Card key={f.id} style={{border:`1px solid ${D.purple}33`}}>
-        <p style={{margin:"0 0 4px",fontSize:13,fontWeight:700,color:D.purple}}>{f.cartao||"Cartão"}</p>
-        <p style={{margin:"0 0 2px",fontSize:22,fontWeight:700,color:D.text}}>{fmtM(f.valor,currency)}</p>
-        {f.vencimento&&<p style={{margin:0,fontSize:11,color:D.text3}}>📅 Vence: {f.vencimento}</p>}
-        {f.bancoId&&<p style={{margin:"2px 0 0",fontSize:11,color:D.blue}}>🏦 {data.bancos.find(b=>b.id===f.bancoId)?.nome} — débito auto</p>}
-        <div style={{display:"flex",gap:4,marginTop:10}}>
-          <button onClick={()=>{setModal(true);setForm({...f,editId:f.id});}} style={{border:"none",background:"none",cursor:"pointer",fontSize:13,color:D.text3}}>✏️</button>
-          <button onClick={()=>setData(d=>({...d,faturas:d.faturas.filter(x=>x.id!==f.id)}))} style={{border:"none",background:"none",cursor:"pointer",fontSize:13,color:D.red}}>🗑</button>
+    <Card>
+      <p style={{fontSize:14,fontWeight:700,color:D.text,marginBottom:4}}>💳 Cartões</p>
+      <p style={{fontSize:11,color:D.text3,lineHeight:1.5}}>Calculado dos seus lançamentos. Um banco aparece aqui como cartão quando você o marca como <b>Cartão de crédito</b> ou dá um <b>limite</b> a ele (na aba Bancos). Você lança compra por compra — sem fatura fechada.</p>
+    </Card>
+
+    {cartoes.length===0
+      ? <Card><p style={{fontSize:13,color:D.text3}}>Nenhum cartão ainda. Na aba <b>Bancos</b>, cadastre ou edite um banco como <b>Cartão de crédito</b> (ou dê um limite a ele) para vê-lo aqui.</p></Card>
+      : <>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10}}>
+          <MetricCard label="Limite total" value={fmtM(totLimite,currency)} color={D.blue}/>
+          <MetricCard label="Usado" value={fmtM(totUsado,currency)} color={D.red}/>
+          <MetricCard label="Disponível" value={fmtM(totLimite-totUsado,currency)} color={totLimite-totUsado>=0?D.green:D.red}/>
+          {totFuturas>0&&<MetricCard label="Parcelas futuras" value={fmtM(totFuturas,currency)} color={D.gold}/>}
         </div>
-      </Card>)}
-    </div>
-    {fatMes.length>0&&<Card><p style={{fontSize:13,color:D.text2}}>Total: <strong style={{color:D.purple,fontSize:16}}>{fmtM(totF,currency)}</strong></p></Card>}
-    {modal&&<Modal title={form.editId?"Editar fatura":"Nova fatura"} onClose={()=>setModal(false)}>
-      <label style={{fontSize:12,color:D.text3}}>Cartão<input value={form.cartao||""} onChange={e=>setForm(f=>({...f,cartao:e.target.value}))} placeholder="Ex: Nubank, Santander..." style={{marginTop:4}}/></label>
-      <label style={{fontSize:12,color:D.text3}}>Valor ({currency})<input type="number" value={form.valor||""} onChange={e=>setForm(f=>({...f,valor:e.target.value}))} style={{marginTop:4}}/></label>
-      <label style={{fontSize:12,color:D.text3}}>Vencimento<input type="date" value={form.vencimento||""} onChange={e=>setForm(f=>({...f,vencimento:e.target.value}))} style={{marginTop:4}}/></label>
-      <label style={{fontSize:12,color:D.text3}}>Banco para débito<select value={form.bancoId||""} onChange={e=>setForm(f=>({...f,bancoId:e.target.value}))} style={{marginTop:4}}><option value="">Nenhum</option>{data.bancos.map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}</select></label>
-      {form.bancoId&&<div style={{background:D.green+"22",border:`1px solid ${D.green}44`,borderRadius:8,padding:"8px 12px",fontSize:11,color:D.green}}>✓ Débito automático em {data.bancos.find(b=>b.id===form.bancoId)?.nome}</div>}
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn outline color={D.text3} onClick={()=>setModal(false)}>Cancelar</Btn><Btn color={D.purple} onClick={saveFatura}>Salvar</Btn></div>
-    </Modal>}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:10}}>
+          {cartoes.map(c=><Card key={c.b.id} style={{border:`1px solid ${D.purple}33`}}>
+            <p style={{margin:"0 0 8px",fontSize:14,fontWeight:700,color:D.purple}}>💳 {c.b.nome}</p>
+            {c.limite>0?<>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:4}}><span style={{color:D.text3}}>Usado</span><span style={{color:D.text,fontWeight:600}}>{fmtM(c.usado,currency)} / {fmtM(c.limite,currency)}</span></div>
+              <div style={{background:D.bg3,borderRadius:5,height:8,overflow:"hidden",marginBottom:6}}><div style={{width:c.pct+"%",height:8,borderRadius:5,background:c.pct>90?D.red:c.pct>70?D.gold:D.green}}/></div>
+              <p style={{margin:0,fontSize:13}}><span style={{color:D.text3}}>Disponível: </span><span style={{fontWeight:700,color:c.disp>=0?D.green:D.red}}>{fmtM(c.disp,currency)}</span></p>
+            </>:<p style={{margin:0,fontSize:12,color:D.text3}}>Sem limite definido — saldo {fmtM(c.saldo,currency)}</p>}
+            <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:8,fontSize:11,color:D.text3,marginTop:10,paddingTop:8,borderTop:`1px solid ${D.border}`}}>
+              <span>Gasto no mês: <b style={{color:D.text2}}>{fmtM(c.gastoMes,currency)}</b></span>
+              {c.futuras>0&&<span>Parcelas a vir: <b style={{color:D.gold}}>{fmtM(c.futuras,currency)}</b></span>}
+            </div>
+          </Card>)}
+        </div>
+      </>}
+
+    {faturasAntigas.length>0&&<Card>
+      <p style={{fontSize:12,fontWeight:600,color:D.text3,marginBottom:4}}>📁 Faturas antigas (recurso aposentado)</p>
+      <p style={{fontSize:11,color:D.text3,marginBottom:8,lineHeight:1.5}}>Agora você lança item por item. Estes são registros do modelo antigo de fatura fechada — pode apagar se não precisar mais.</p>
+      {faturasAntigas.map(f=><div key={f.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"5px 0",borderBottom:`1px solid ${D.border}`}}>
+        <span style={{color:D.text2}}>{f.cartao||"Cartão"} · {fmtM(f.valor,currency)}{f.vencimento?` · ${f.vencimento}`:""}</span>
+        <button onClick={()=>setData(d=>({...d,faturas:d.faturas.filter(x=>x.id!==f.id)}))} style={{border:"none",background:"none",cursor:"pointer",fontSize:12,color:D.red}}>🗑</button>
+      </div>)}
+    </Card>}
   </div>;
 }
 
