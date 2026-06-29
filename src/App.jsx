@@ -1456,6 +1456,7 @@ function SplitwiseTab({currency,userEmail}){
   const [inputCod,setInputCod]=useState("");
   const [setupNome,setSetupNome]=useState("");
   const [saldosGrupos,setSaldosGrupos]=useState({});
+  const [mesSel,setMesSel]=useState(()=>new Date().toISOString().slice(0,7)); // "AAAA-MM" recorte do mês
 
   // Ícones por categoria (estilo app oficial)
   const CATS=[
@@ -1606,13 +1607,13 @@ function SplitwiseTab({currency,userEmail}){
 
   function registrarPagamento(){
     if(!form.de||!form.para||!form.valor)return;
-    const p={id:uid(),de:form.de,para:form.para,valor:parseFloat(form.valor),data:form.data||hoje.toISOString().slice(0,10),quem:nomeUser};
+    const p={id:uid(),de:form.de,para:form.para,valor:parseFloat(form.valor),data:form.data||hoje.toISOString().slice(0,10),mesRef:form.mesRef||mesSel,quem:nomeUser};
     saveSW({...swData,pagamentos:[...swData.pagamentos,p]});setModal(null);setForm({});
   }
 
   // Quita uma dívida do acerto de contas com 1 clique (registra o pagamento exato)
   function quitarDivida(de,para,valor){
-    const p={id:uid(),de,para,valor:Math.round(valor*100)/100,data:hoje.toISOString().slice(0,10),quem:nomeUser,settle:true};
+    const p={id:uid(),de,para,valor:Math.round(valor*100)/100,data:hoje.toISOString().slice(0,10),mesRef:mesSel,quem:nomeUser,settle:true};
     saveSW({...swData,pagamentos:[...swData.pagamentos,p]});
   }
 
@@ -1620,11 +1621,11 @@ function SplitwiseTab({currency,userEmail}){
     saveSW({...swData,pagamentos:swData.pagamentos.filter(p=>p.id!==id)});
   }
 
-  function calcSaldos(){
-    if(!swData)return {};
+  function calcSaldos(src=swData){
+    if(!src)return {};
     const saldos={};
-    (swData.membros||[]).forEach(m=>{if(m&&m.nome)saldos[m.nome]=0;});
-    (swData.despesas||[]).forEach(d=>{
+    (src.membros||[]).forEach(m=>{if(m&&m.nome)saldos[m.nome]=0;});
+    (src.despesas||[]).forEach(d=>{
       if(!d)return;
       if(d.pagoPor)saldos[d.pagoPor]=(saldos[d.pagoPor]||0)+(d.valor||0);
       (d.divisao||[]).forEach(div=>{
@@ -1633,12 +1634,12 @@ function SplitwiseTab({currency,userEmail}){
         if(nome)saldos[nome]=(saldos[nome]||0)-qto;
       });
     });
-    (swData.pagamentos||[]).forEach(p=>{if(!p)return;if(p.de)saldos[p.de]=(saldos[p.de]||0)+(p.valor||0);if(p.para)saldos[p.para]=(saldos[p.para]||0)-(p.valor||0);});
+    (src.pagamentos||[]).forEach(p=>{if(!p)return;if(p.de)saldos[p.de]=(saldos[p.de]||0)+(p.valor||0);if(p.para)saldos[p.para]=(saldos[p.para]||0)-(p.valor||0);});
     return saldos;
   }
 
-  function calcDividas(){
-    const saldos=calcSaldos();
+  function calcDividas(src=swData){
+    const saldos=calcSaldos(src);
     const devedores=Object.entries(saldos).filter(([,v])=>v<-0.01).map(([n,v])=>({nome:n,valor:-v}));
     const credores=Object.entries(saldos).filter(([,v])=>v>0.01).map(([n,v])=>({nome:n,valor:v}));
     const transacoes=[];const dev=[...devedores],cred=[...credores];
@@ -1652,17 +1653,17 @@ function SplitwiseTab({currency,userEmail}){
   }
 
   // Gastos do grupo por categoria (para o gráfico)
-  function gastosPorCategoria(){
+  function gastosPorCategoria(src=swData){
     const por={};
-    (swData?.despesas||[]).forEach(d=>{if(!d)return;const c=d.categoria||"Outros";por[c]=(por[c]||0)+(d.valor||0);});
+    (src?.despesas||[]).forEach(d=>{if(!d)return;const c=d.categoria||"Outros";por[c]=(por[c]||0)+(d.valor||0);});
     return Object.entries(por).map(([nome,v])=>({label:`${iconeCat(nome)} ${nome}`,v,color:corCat(nome)})).filter(s=>s.v>0).sort((a,b)=>b.v-a.v);
   }
 
   // Totais: quanto cada pessoa pagou e quanto consumiu
-  function totaisPorPessoa(){
+  function totaisPorPessoa(src=swData){
     const t={};
-    (swData?.membros||[]).forEach(m=>{if(m&&m.nome)t[m.nome]={pagou:0,consumiu:0};});
-    (swData?.despesas||[]).forEach(d=>{
+    (src?.membros||[]).forEach(m=>{if(m&&m.nome)t[m.nome]={pagou:0,consumiu:0};});
+    (src?.despesas||[]).forEach(d=>{
       if(!d)return;
       if(d.pagoPor&&t[d.pagoPor])t[d.pagoPor].pagou+=(d.valor||0);
       (d.divisao||[]).forEach(div=>{const n=typeof div==="string"?div:div?.nome;const q=typeof div==="string"?((d.valor||0)/((d.divisao||[]).length||1)):(div?.valor||0);if(n&&t[n])t[n].consumiu+=q;});
@@ -1728,10 +1729,21 @@ function SplitwiseTab({currency,userEmail}){
   if(loading&&!swData)return <div><button onClick={voltarLista} style={{border:"none",background:"none",cursor:"pointer",color:D.green,fontSize:13,marginBottom:8}}>← Meus grupos</button><p style={{color:D.text3,fontSize:13}}>Carregando...</p></div>;
   if(!swData)return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}><Card><p style={{fontSize:13,color:D.text3}}>Não foi possível carregar. <button onClick={()=>loadSW(ativo)} style={{color:D.green,background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>Tentar de novo</button> ou <button onClick={voltarLista} style={{color:D.blue,background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>voltar</button>.</p></Card></div>;
 
-  const saldos=calcSaldos();const dividas=calcDividas();const meuSaldo=saldos[nomeUser]||0;
+  const ehPagDoMes=x=>((x?.mesRef||(x?.data||"").slice(0,7))===mesSel);
+  const dadosMes={...swData,despesas:(swData.despesas||[]).filter(d=>(d?.data||"").slice(0,7)===mesSel),pagamentos:(swData.pagamentos||[]).filter(ehPagDoMes)};
+  const saldos=calcSaldos(dadosMes);const dividas=calcDividas(dadosMes);const meuSaldo=saldos[nomeUser]||0;
+  const meuSaldoGeral=calcSaldos()[nomeUser]||0;
+  const [ay,am]=mesSel.split("-");const labelMes=`${MESES[(+am)-1]} ${ay}`;
+  const passoMes=delta=>{const dt=new Date(+ay,(+am)-1+delta,1);setMesSel(dt.toISOString().slice(0,7));};
+  const temDespesasMes=dadosMes.despesas.length>0;
 
   return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
     <button onClick={voltarLista} style={{border:"none",background:"none",cursor:"pointer",color:D.green,fontSize:13,textAlign:"left",padding:0}}>← Meus grupos</button>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16}}>
+      <button onClick={()=>passoMes(-1)} style={{border:`1px solid ${D.border}`,background:D.bg3,color:D.text,cursor:"pointer",borderRadius:8,padding:"4px 12px",fontSize:14}}>◀</button>
+      <span style={{fontSize:15,fontWeight:700,color:D.text,minWidth:120,textAlign:"center"}}>{labelMes}</span>
+      <button onClick={()=>passoMes(1)} style={{border:`1px solid ${D.border}`,background:D.bg3,color:D.text,cursor:"pointer",borderRadius:8,padding:"4px 12px",fontSize:14}}>▶</button>
+    </div>
     <Card style={{border:`1px solid ${D.green}33`}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
         <div>
@@ -1743,23 +1755,24 @@ function SplitwiseTab({currency,userEmail}){
           </div>
         </div>
         <div style={{textAlign:"right"}}>
-          <p style={{fontSize:11,color:D.text3,margin:0}}>Seu saldo total</p>
+          <p style={{fontSize:11,color:D.text3,margin:0}}>Seu saldo em {MESES[(+am)-1]}</p>
           {Math.abs(meuSaldo)<0.01
             ?<p style={{fontSize:20,fontWeight:700,color:D.text3,margin:0}}>quitado ✓</p>
             :<><p style={{fontSize:22,fontWeight:700,color:meuSaldo>0?D.green:"#f59e0b",margin:0}}>{fmtM(Math.abs(meuSaldo),currency)}</p>
-               <p style={{fontSize:10,color:meuSaldo>0?D.green:"#f59e0b",margin:0}}>{meuSaldo>0?"no total, te devem":"no total, você deve"}</p></>}
+               <p style={{fontSize:10,color:meuSaldo>0?D.green:"#f59e0b",margin:0}}>{meuSaldo>0?"te devem neste mês":"você deve neste mês"}</p></>}
+          {Math.abs(meuSaldoGeral)>=0.01&&<p style={{fontSize:10,color:D.text3,margin:"4px 0 0"}}>geral (todos os meses): {fmtM(Math.abs(meuSaldoGeral),currency)} {meuSaldoGeral>0?"a receber":"a pagar"}</p>}
         </div>
       </div>
     </Card>
 
-    {dividas.length>0&&<Card>
-      <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>Acerto de contas</p>
+    {dividas.length>0?<Card>
+      <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>Acerto de {labelMes}</p>
       {dividas.map((d,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",background:D.bg3,borderRadius:10,marginBottom:6,gap:8,flexWrap:"wrap"}}>
         <span style={{fontSize:13,color:D.text,flex:1,minWidth:140}}><span style={{color:"#f59e0b",fontWeight:600}}>{d.de===nomeUser?"Você":d.de}</span> deve a <span style={{color:D.green,fontWeight:600}}>{d.para===nomeUser?"você":d.para}</span></span>
         <span style={{fontSize:14,fontWeight:700,color:D.text}}>{fmtM(d.valor,currency)}</span>
         <Btn onClick={()=>quitarDivida(d.de,d.para,d.valor)} color={D.green} sm>Quitar</Btn>
       </div>)}
-    </Card>}
+    </Card>:temDespesasMes?<Card><p style={{fontSize:13,fontWeight:700,color:D.green,margin:0}}>✓ Tudo quitado em {labelMes}</p></Card>:null}
 
     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
       <Btn onClick={()=>{setModal("despesa");setForm({pagoPor:nomeUser,divisao:swData.membros.map(m=>m.nome),categoria:"Outros"});}} color={D.green}>+ Nova despesa</Btn>
@@ -1767,16 +1780,16 @@ function SplitwiseTab({currency,userEmail}){
       <Btn onClick={()=>loadSW(ativo)} color={D.purple} outline sm>🔄 Atualizar</Btn>
     </div>
 
-    {swData.despesas.length>0&&(()=>{const cats=gastosPorCategoria();const totalGrupo=cats.reduce((a,b)=>a+b.v,0);return <Card>
+    {dadosMes.despesas.length>0&&(()=>{const cats=gastosPorCategoria(dadosMes);const totalGrupo=cats.reduce((a,b)=>a+b.v,0);return <Card>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-        <p style={{fontSize:13,fontWeight:700,color:D.text,margin:0}}>Gastos do grupo por categoria</p>
+        <p style={{fontSize:13,fontWeight:700,color:D.text,margin:0}}>Gastos de {labelMes} por categoria</p>
         <span style={{fontSize:12,color:D.text3}}>total {fmtM(totalGrupo,currency)}</span>
       </div>
       <PieChart slices={cats}/>
     </Card>;})()}
 
-    {swData.despesas.length>0&&(()=>{const tot=totaisPorPessoa();const ent=Object.entries(tot);return <Card>
-      <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>Totais por pessoa</p>
+    {dadosMes.despesas.length>0&&(()=>{const tot=totaisPorPessoa(dadosMes);const ent=Object.entries(tot);return <Card>
+      <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>Totais por pessoa · {labelMes}</p>
       <div style={{display:"flex",fontSize:10,color:D.text3,padding:"0 0 6px",borderBottom:`1px solid ${D.border}`}}>
         <span style={{flex:1}}>Pessoa</span><span style={{width:90,textAlign:"right"}}>Pagou</span><span style={{width:90,textAlign:"right"}}>Consumiu</span>
       </div>
@@ -1787,9 +1800,9 @@ function SplitwiseTab({currency,userEmail}){
       </div>)}
     </Card>;})()}
 
-    {swData.pagamentos.length>0&&<Card>
-      <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>Histórico de pagamentos</p>
-      {[...swData.pagamentos].reverse().map(p=><div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${D.border}`,gap:8}}>
+    {dadosMes.pagamentos.length>0&&<Card>
+      <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>Pagamentos de {labelMes}</p>
+      {[...dadosMes.pagamentos].reverse().map(p=><div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${D.border}`,gap:8}}>
         <div style={{flex:1,minWidth:0}}>
           <p style={{margin:0,fontSize:13,color:D.text}}><span style={{color:"#f59e0b",fontWeight:600}}>{p.de===nomeUser?"Você":p.de}</span> pagou <span style={{color:D.green,fontWeight:600}}>{p.para===nomeUser?"você":p.para}</span>{p.settle?<span style={{fontSize:10,color:D.green,marginLeft:6}}>✓ quitação</span>:null}</p>
           <p style={{margin:"2px 0 0",fontSize:10,color:D.text3}}>{p.data}{p.quem?` · registrado por ${p.quem}`:""}</p>
@@ -1800,9 +1813,9 @@ function SplitwiseTab({currency,userEmail}){
     </Card>}
 
     <Card>
-      <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>Despesas</p>
-      {swData.despesas.length===0&&<p style={{fontSize:13,color:D.text3}}>Nenhuma despesa ainda. Adicione a primeira!</p>}
-      {[...swData.despesas].reverse().slice(0,30).map(d=>{
+      <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>Despesas de {labelMes}</p>
+      {dadosMes.despesas.length===0&&<p style={{fontSize:13,color:D.text3}}>Nenhuma despesa em {labelMes}. Use ◀ ▶ para trocar de mês ou adicione uma nova.</p>}
+      {[...dadosMes.despesas].reverse().slice(0,30).map(d=>{
         const minhaParte=(d.divisao||[]).find(x=>(typeof x==="string"?x:x?.nome)===nomeUser);
         const meuValor=minhaParte?(typeof minhaParte==="string"?(d.valor/d.divisao.length):minhaParte.valor):0;
         const euPaguei=d.pagoPor===nomeUser;
@@ -1888,6 +1901,8 @@ function SplitwiseTab({currency,userEmail}){
       <label style={{fontSize:12,color:D.text3}}>Para quem<select value={form.para||""} onChange={e=>setForm(f=>({...f,para:e.target.value}))} style={{marginTop:4}}><option value="">Selecione...</option>{swData.membros.filter(m=>m.nome!==form.de).map(m=><option key={m.nome}>{m.nome}</option>)}</select></label>
       <label style={{fontSize:12,color:D.text3}}>Valor ({currency})<input type="number" value={form.valor||""} onChange={e=>setForm(f=>({...f,valor:e.target.value}))} style={{marginTop:4}}/></label>
       <label style={{fontSize:12,color:D.text3}}>Data<input type="date" value={form.data||hoje.toISOString().slice(0,10)} onChange={e=>setForm(f=>({...f,data:e.target.value}))} style={{marginTop:4}}/></label>
+      <label style={{fontSize:12,color:D.text3}}>Referente ao mês<input type="month" value={form.mesRef||mesSel} onChange={e=>setForm(f=>({...f,mesRef:e.target.value}))} style={{marginTop:4}}/></label>
+      <p style={{fontSize:10,color:D.text3,margin:"4px 0 0",lineHeight:1.4}}>O mês que este pagamento quita — ex: a Carol pagou em julho o fechamento de junho → escolha junho.</p>
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn outline color={D.text3} onClick={()=>setModal(null)}>Cancelar</Btn><Btn color={D.blue} onClick={registrarPagamento}>Registrar</Btn></div>
     </Modal>}
   </div>;
