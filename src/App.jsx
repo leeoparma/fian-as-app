@@ -1890,6 +1890,7 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
     });
   };
   const [wInput,setWInput]=useState("");const [wCat,setWCat]=useState("");const [wFiltro,setWFiltro]=useState("Todas");const [wLoading,setWLoading]=useState(false);
+  const [wlUpd,setWlUpd]=useState(null);
   const [chartTicker,setChartTicker]=useState(null);
   const [news,setNews]=useState({});const [newsLoading,setNewsLoading]=useState(false);
   const [compInput,setCompInput]=useState("");const [compList,setCompList]=useState([]);const [compLoading,setCompLoading]=useState(false);const [compData,setCompData]=useState([]);
@@ -1949,13 +1950,15 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
       const updated=await Promise.all(atual.map(async w=>{
         const real=await fetchPrecoReal(w.ticker,profileId,true);
         if(!real) return w;
-        return{...w,preco:real.preco_atual,variacao_dia:real.variacao_dia,pl:real.pl??w.pl,dy:real.dy??w.dy,roe:real.roe??w.roe};
+        return{...w,preco:real.preco_atual,variacao_dia:real.variacao_dia,variacao_dia_abs:real.variacao_dia_abs,pl:real.pl??w.pl,dy:real.dy??w.dy,roe:real.roe??w.roe};
       }));
       setWatchlist(updated);
+      setWlUpd(new Date());
     }
+    refreshAll();
     wlRefreshRef.current=setInterval(refreshAll,60000);
     return()=>clearInterval(wlRefreshRef.current);
-  },[profileId]);
+  },[profileId,watchlist.length]);
 
   // Scroll automático do chat
   useEffect(()=>{if(chatRef.current)chatRef.current.scrollTop=chatRef.current.scrollHeight;},[chatMsgs]);
@@ -2590,6 +2593,14 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
     {/* Watchlist */}
     <Card>
       <p style={{fontSize:14,fontWeight:700,color:D.text,marginBottom:4}}>Carteira de acompanhamento</p>
+      {watchlist.length>0&&(()=>{
+        const vs=watchlist.map(w=>w.variacao_dia).filter(v=>typeof v==="number");
+        const media=vs.length?vs.reduce((a,b)=>a+b,0)/vs.length:null;
+        return <p style={{margin:"0 0 8px",fontSize:11,color:D.text3}}>
+          {wlUpd?`Atualizado ${wlUpd.toLocaleTimeString("pt-BR")} · auto a cada 60s`:"Atualizando…"}
+          {media!=null&&<> · média do dia <b style={{color:media>=0?D.green:D.red}}>{media>=0?"▲":"▼"} {Math.abs(media).toFixed(2)}%</b> <span style={{color:D.text3}}>(peso igual)</span></>}
+        </p>;
+      })()}
       <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,fontSize:11,color:D.text3}}>
         <span>Preço teto: DY alvo de</span>
         <input type="number" value={dyAlvo} onChange={e=>{const v=parseFloat(e.target.value)||6;setDyAlvo(v);lsSet("dy_alvo",v);}} style={{width:54,padding:"3px 6px",fontSize:11}} min="1" max="20" step="0.5"/>
@@ -2609,7 +2620,7 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
           <p style={{margin:"0 0 3px",fontSize:11,color:D.text3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{w.nome||"—"}</p>
           {w.categoria&&<div style={{marginBottom:4}}><Badge color={D.blue}>{w.categoria}</Badge></div>}
           <p style={{margin:"2px 0 2px",fontSize:15,fontWeight:700,color:D.text}}>{w.preco!=null?`${currency} ${Number(w.preco).toFixed(2)}`:"—"}</p>
-          {w.variacao_dia!=null&&<p style={{margin:"0 0 4px",fontSize:11,fontWeight:600,color:w.variacao_dia>=0?D.green:D.red}}>{w.variacao_dia>=0?"▲":"▼"} {Math.abs(w.variacao_dia).toFixed(2)}% hoje</p>}
+          {w.variacao_dia!=null&&<p style={{margin:"0 0 4px",fontSize:11,fontWeight:600,color:w.variacao_dia>=0?D.green:D.red}}>{w.variacao_dia>=0?"▲":"▼"} {Math.abs(w.variacao_dia).toFixed(2)}%{typeof w.variacao_dia_abs==="number"?` (${w.variacao_dia_abs>=0?"+":"−"}${currency} ${Math.abs(w.variacao_dia_abs).toFixed(2)})`:""} hoje</p>}
           <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
             {w.pl!=null&&<Badge color={D.blue}>P/L {Number(w.pl).toFixed(1)}</Badge>}
             {w.dy!=null&&<Badge color={D.gold}>DY {Number(w.dy).toFixed(1)}%</Badge>}
