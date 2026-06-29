@@ -634,7 +634,7 @@ function BancoCard({b,data,setData,currency,extratoBanco,setExtratoBanco,onEdit}
 function BancosTab({data,setData,currency}){
   const [modal,setModal]=useState(false);const [form,setForm]=useState({});
   const [transf,setTransf]=useState({de:"",para:"",valor:""});const [extratoBanco,setExtratoBanco]=useState(null);
-  function saveBanco(){const b={id:form.editId||uid(),nome:form.nome||"Banco",saldoInicial:parseFloat(form.saldoInicial)||0,limite:parseFloat(form.limite)||0,tipo:form.tipo||"corrente"};setData(d=>({...d,bancos:form.editId?d.bancos.map(x=>x.id===form.editId?b:x):[...d.bancos,b]}));setModal(false);setForm({});}
+  function saveBanco(){const clampDia=v=>{const n=parseInt(v,10);return n>=1&&n<=31?n:null;};const b={id:form.editId||uid(),nome:form.nome||"Banco",saldoInicial:parseFloat(form.saldoInicial)||0,limite:parseFloat(form.limite)||0,tipo:form.tipo||"corrente",diaFecha:clampDia(form.diaFecha),diaVence:clampDia(form.diaVence)};setData(d=>({...d,bancos:form.editId?d.bancos.map(x=>x.id===form.editId?b:x):[...d.bancos,b]}));setModal(false);setForm({});}
   function doTransf(){const v=parseFloat(transf.valor);if(!v||!transf.de||!transf.para||transf.de===transf.para)return;const dt=hoje.toISOString().slice(0,10);setData(d=>({...d,transacoes:[...d.transacoes,{id:uid(),tipo:"despesa",descricao:`Transf. → ${d.bancos.find(b=>b.id===transf.para)?.nome}`,valor:v,categoria:"Transferência",data:dt,bancoId:transf.de},{id:uid(),tipo:"receita",descricao:`Transf. ← ${d.bancos.find(b=>b.id===transf.de)?.nome}`,valor:v,categoria:"Transferência",data:dt,bancoId:transf.para}]}));setTransf({de:"",para:"",valor:""});}
   function sc(b){const txs=data.transacoes.filter(t=>t.bancoId===b.id);return(b.saldoInicial||0)+txs.filter(t=>t.tipo==="receita").reduce((a,x)=>a+x.valor,0)-txs.filter(t=>t.tipo==="despesa").reduce((a,x)=>a+x.valor,0);}
   const totalC=data.bancos.reduce((a,b)=>a+sc(b),0);
@@ -674,6 +674,10 @@ function BancosTab({data,setData,currency}){
       <label style={{fontSize:12,color:D.text3}}>Tipo<select value={form.tipo||"corrente"} onChange={e=>setForm(f=>({...f,tipo:e.target.value}))} style={{marginTop:4}}><option value="corrente">Conta Corrente</option><option value="poupança">Poupança</option><option value="investimento">Conta Investimento</option><option value="digital">Conta Digital</option><option value="cartão">Cartão de crédito</option></select></label>
       <label style={{fontSize:12,color:D.text3}}>Saldo inicial ({currency})<input type="number" value={form.saldoInicial||""} onChange={e=>setForm(f=>({...f,saldoInicial:e.target.value}))} style={{marginTop:4}}/></label>
       <label style={{fontSize:12,color:D.text3}}>Limite crédito ({currency})<input type="number" value={form.limite||""} onChange={e=>setForm(f=>({...f,limite:e.target.value}))} style={{marginTop:4}}/></label>
+      {(form.tipo||"corrente")==="cartão"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <label style={{fontSize:12,color:D.text3}}>Fecha dia<input type="number" min="1" max="31" value={form.diaFecha||""} onChange={e=>setForm(f=>({...f,diaFecha:e.target.value}))} placeholder="ex: 7" style={{marginTop:4}}/></label>
+        <label style={{fontSize:12,color:D.text3}}>Vence dia<input type="number" min="1" max="31" value={form.diaVence||""} onChange={e=>setForm(f=>({...f,diaVence:e.target.value}))} placeholder="ex: 20" style={{marginTop:4}}/></label>
+      </div>}
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn outline color={D.text3} onClick={()=>setModal(false)}>Cancelar</Btn><Btn onClick={saveBanco}>Salvar</Btn></div>
     </Modal>}
   </div>;
@@ -2777,8 +2781,17 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
 
 
 // ── Cartão Tab ────────────────────────────────────────────────────────────────
+// ── Ciclo de fatura de cartão (datas testadas isolado, 14/14) ────────────────
+function _clampDia(year,month,dia){const last=new Date(year,month+1,0).getDate();return new Date(year,month,Math.min(dia,last));}
+function _ymdC(d){const p=n=>String(n).padStart(2,"0");return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;}
+function _ddmm(d){return d?`${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}`:"—";}
+function faturaDeCompra(diaFecha,dataStr){const d=new Date(dataStr+"T00:00:00");let c=_clampDia(d.getFullYear(),d.getMonth(),diaFecha);if(d>c)c=_clampDia(d.getFullYear(),d.getMonth()+1,diaFecha);return c;}
+function vencimentoDe(fechaDate,diaFecha,diaVence){if(diaVence>=diaFecha)return _clampDia(fechaDate.getFullYear(),fechaDate.getMonth(),diaVence);return _clampDia(fechaDate.getFullYear(),fechaDate.getMonth()+1,diaVence);}
+function faturaAbertaHoje(diaFecha,hojeD){const h=new Date(hojeD);h.setHours(0,0,0,0);let fecha=_clampDia(h.getFullYear(),h.getMonth(),diaFecha);if(h>fecha)fecha=_clampDia(h.getFullYear(),h.getMonth()+1,diaFecha);return fecha;}
+
 function CartaoTab({data,setData,currency,mes}){
   const hojeStr=new Date().toISOString().slice(0,10);
+  const [histAberto,setHistAberto]=useState({});
   const sBanco=b=>{const txs=data.transacoes.filter(t=>t.bancoId===b.id);return(b.saldoInicial||0)+txs.filter(t=>t.tipo==="receita").reduce((a,x)=>a+x.valor,0)-txs.filter(t=>t.tipo==="despesa").reduce((a,x)=>a+x.valor,0);};
   const cartoes=data.bancos.filter(b=>b.tipo==="cartão").map(b=>{
     const saldo=sBanco(b), limite=b.limite||0, usado=Math.max(0,-saldo);
@@ -2786,7 +2799,22 @@ function CartaoTab({data,setData,currency,mes}){
     const txs=data.transacoes.filter(t=>t.bancoId===b.id);
     const gastoMes=txs.filter(t=>{if(t.tipo!=="despesa")return false;const d=new Date(t.data);return d.getMonth()===mes&&d.getFullYear()===ANO_ATUAL;}).reduce((a,x)=>a+x.valor,0);
     const futuras=txs.filter(t=>t.tipo==="despesa"&&t.parceladoId&&t.data>hojeStr).reduce((a,x)=>a+x.valor,0);
-    return {b,saldo,limite,usado,disp,pct,gastoMes,futuras};
+    const diaFecha=b.diaFecha||null, diaVence=b.diaVence||null;
+    let faturas=null;
+    if(diaFecha){
+      const grupos={};
+      txs.filter(t=>t.tipo==="despesa").forEach(t=>{const k=_ymdC(faturaDeCompra(diaFecha,t.data));(grupos[k]=grupos[k]||[]).push(t);});
+      const abertaK=_ymdC(faturaAbertaHoje(diaFecha,new Date()));
+      if(!grupos[abertaK]) grupos[abertaK]=[];
+      faturas=Object.keys(grupos).sort().map(k=>{
+        const fechaDate=new Date(k+"T00:00:00");
+        const venceDate=diaVence?vencimentoDe(fechaDate,diaFecha,diaVence):null;
+        const total=grupos[k].reduce((a,x)=>a+x.valor,0);
+        const status=k<abertaK?"anterior":k===abertaK?"aberta":"futura";
+        return {k,fechaDate,venceDate,total,itens:grupos[k].slice().sort((a,b)=>a.data.localeCompare(b.data)),status};
+      });
+    }
+    return {b,saldo,limite,usado,disp,pct,gastoMes,futuras,diaFecha,diaVence,faturas};
   });
   const totLimite=cartoes.reduce((a,c)=>a+c.limite,0);
   const totUsado=cartoes.reduce((a,c)=>a+c.usado,0);
@@ -2816,6 +2844,39 @@ function CartaoTab({data,setData,currency,mes}){
               <div style={{background:D.bg3,borderRadius:5,height:8,overflow:"hidden",marginBottom:6}}><div style={{width:c.pct+"%",height:8,borderRadius:5,background:c.pct>90?D.red:c.pct>70?D.gold:D.green}}/></div>
               <p style={{margin:0,fontSize:13}}><span style={{color:D.text3}}>Disponível: </span><span style={{fontWeight:700,color:c.disp>=0?D.green:D.red}}>{fmtM(c.disp,currency)}</span></p>
             </>:<p style={{margin:0,fontSize:12,color:D.text3}}>Sem limite definido — saldo {fmtM(c.saldo,currency)}</p>}
+            {c.faturas&&(()=>{
+              const aberta=c.faturas.find(f=>f.status==="aberta");
+              const futuras=c.faturas.filter(f=>f.status==="futura");
+              const anteriores=c.faturas.filter(f=>f.status==="anterior").reverse();
+              const exp=histAberto[c.b.id];
+              return <div style={{marginTop:10,paddingTop:8,borderTop:`1px solid ${D.border}`}}>
+                {aberta&&<div style={{background:D.bg3,borderRadius:8,padding:"8px 10px",marginBottom:8}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+                    <span style={{fontSize:11,color:D.text3,fontWeight:600}}>FATURA ABERTA</span>
+                    <span style={{fontSize:18,fontWeight:800,color:D.gold}}>{fmtM(aberta.total,currency)}</span>
+                  </div>
+                  <p style={{margin:"2px 0 0",fontSize:11,color:D.text3}}>fecha {_ddmm(aberta.fechaDate)}{aberta.venceDate?` · vence ${_ddmm(aberta.venceDate)}`:""}</p>
+                </div>}
+                {futuras.length>0&&<div style={{marginBottom:6}}>
+                  <p style={{margin:"0 0 4px",fontSize:11,color:D.text3,fontWeight:600}}>Próximas faturas</p>
+                  {futuras.map(f=><div key={f.k} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"2px 0"}}>
+                    <span style={{color:D.text3}}>{MESES[f.fechaDate.getMonth()]}/{f.fechaDate.getFullYear()}{f.venceDate?` · vence ${_ddmm(f.venceDate)}`:""}</span>
+                    <span style={{color:D.text2,fontWeight:600}}>{fmtM(f.total,currency)}</span>
+                  </div>)}
+                </div>}
+                {anteriores.length>0&&<>
+                  <button onClick={()=>setHistAberto(h=>({...h,[c.b.id]:!h[c.b.id]}))} style={{border:"none",background:"none",cursor:"pointer",fontSize:11,color:D.blue,padding:0}}>{exp?"▼":"▶"} Faturas anteriores ({anteriores.length})</button>
+                  {exp&&<div style={{marginTop:4}}>
+                    {anteriores.map(f=><div key={f.k} style={{fontSize:12,padding:"3px 0",borderBottom:`1px solid ${D.border}`,display:"flex",justifyContent:"space-between"}}>
+                      <span style={{color:D.text3}}>{MESES[f.fechaDate.getMonth()]}/{f.fechaDate.getFullYear()}{f.venceDate?` · venceu ${_ddmm(f.venceDate)}`:""}</span>
+                      <span style={{color:D.text2,fontWeight:600}}>{fmtM(f.total,currency)}</span>
+                    </div>)}
+                    <p style={{margin:"6px 0 0",fontSize:10,color:D.text3,lineHeight:1.4}}>Agrupamento das mesmas compras que já contam no "Usado" — não é dívida extra. O app não marca fatura como paga.</p>
+                  </div>}
+                </>}
+              </div>;
+            })()}
+            {!c.diaFecha&&<p style={{margin:"8px 0 0",fontSize:11,color:D.text3,lineHeight:1.4}}>💡 Configure <b>fecha dia</b> e <b>vence dia</b> na aba Bancos (editar este cartão) para ver as faturas por ciclo.</p>}
             <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:8,fontSize:11,color:D.text3,marginTop:10,paddingTop:8,borderTop:`1px solid ${D.border}`}}>
               <span>Gasto no mês: <b style={{color:D.text2}}>{fmtM(c.gastoMes,currency)}</b></span>
               {c.futuras>0&&<span>Parcelas a vir: <b style={{color:D.gold}}>{fmtM(c.futuras,currency)}</b></span>}
