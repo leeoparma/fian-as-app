@@ -475,17 +475,18 @@ function BarChart({data,currency}){
   </div>
   <div style={{display:"flex",gap:16,justifyContent:"center",marginTop:8}}><span style={{fontSize:11,color:D.green}}>● Receitas</span><span style={{fontSize:11,color:D.red}}>● Despesas</span></div></div>;
 }
-function PieChart({slices,currency}){
+function PieChart({slices,currency,onSlice}){
   const [sel,setSel]=useState(null);
   let cum=0;const total=slices.reduce((a,b)=>a+b.v,0);
   if(!total)return <p style={{fontSize:13,color:D.text3}}>Sem dados.</p>;
   const fmtV=v=>currency?fmtM(v,currency):String(Math.round(v));
-  const paths=slices.filter(s=>s.v>0).map(s=>{const pct=s.v/total,start=cum,end=cum+pct;cum=end;const x1=Math.cos(2*Math.PI*start-Math.PI/2),y1=Math.sin(2*Math.PI*start-Math.PI/2),x2=Math.cos(2*Math.PI*end-Math.PI/2),y2=Math.sin(2*Math.PI*end-Math.PI/2);return{d:`M0,0 L${x1},${y1} A1,1,0,${pct>0.5?1:0},1,${x2},${y2}Z`,color:s.color,label:s.label,pct:Math.round(pct*100),v:s.v};});
+  const paths=slices.filter(s=>s.v>0).map(s=>{const pct=s.v/total,start=cum,end=cum+pct;cum=end;const x1=Math.cos(2*Math.PI*start-Math.PI/2),y1=Math.sin(2*Math.PI*start-Math.PI/2),x2=Math.cos(2*Math.PI*end-Math.PI/2),y2=Math.sin(2*Math.PI*end-Math.PI/2);return{d:`M0,0 L${x1},${y1} A1,1,0,${pct>0.5?1:0},1,${x2},${y2}Z`,color:s.color,label:s.label,pct:Math.round(pct*100),v:s.v,cat:s.cat};});
   const ativo=sel!=null&&paths[sel]?paths[sel]:null;
+  const clica=(i,p)=>{setSel(sel===i?null:i);if(onSlice)onSlice(p);};
   return <div style={{display:"flex",gap:16,alignItems:"center",flexWrap:"wrap"}}>
-    <svg viewBox="-1.15 -1.15 2.3 2.3" style={{width:110,height:110,flexShrink:0}}>{paths.map((p,i)=><path key={i} d={p.d} fill={p.color} stroke={D.bg2} strokeWidth="0.04" style={{cursor:"pointer",opacity:sel==null||sel===i?1:0.4,transition:"opacity .15s"}} onClick={()=>setSel(sel===i?null:i)} onMouseEnter={()=>setSel(i)} onMouseLeave={()=>setSel(null)}><title>{p.label}: {fmtV(p.v)} ({p.pct}%)</title></path>)}</svg>
+    <svg viewBox="-1.15 -1.15 2.3 2.3" style={{width:110,height:110,flexShrink:0}}>{paths.map((p,i)=><path key={i} d={p.d} fill={p.color} stroke={D.bg2} strokeWidth="0.04" style={{cursor:"pointer",opacity:sel==null||sel===i?1:0.4,transition:"opacity .15s"}} onClick={()=>clica(i,p)} onMouseEnter={()=>setSel(i)} onMouseLeave={()=>setSel(null)}><title>{p.label}: {fmtV(p.v)} ({p.pct}%)</title></path>)}</svg>
     <div style={{display:"flex",flexDirection:"column",gap:5,flex:1,minWidth:140}}>
-      {paths.map((p,i)=><div key={i} onClick={()=>setSel(sel===i?null:i)} onMouseEnter={()=>setSel(i)} onMouseLeave={()=>setSel(null)} style={{display:"flex",alignItems:"center",gap:8,fontSize:11,cursor:"pointer",opacity:sel==null||sel===i?1:0.5}}><div style={{width:8,height:8,borderRadius:2,background:p.color,flexShrink:0}}/><span style={{color:D.text2,flex:1}}>{p.label}</span><span style={{color:p.color,fontWeight:600,fontVariantNumeric:"tabular-nums"}}>{sel===i?fmtV(p.v):`${p.pct}%`}</span></div>)}
+      {paths.map((p,i)=><div key={i} onClick={()=>clica(i,p)} onMouseEnter={()=>setSel(i)} onMouseLeave={()=>setSel(null)} style={{display:"flex",alignItems:"center",gap:8,fontSize:11,cursor:"pointer",opacity:sel==null||sel===i?1:0.5}}><div style={{width:8,height:8,borderRadius:2,background:p.color,flexShrink:0}}/><span style={{color:D.text2,flex:1}}>{p.label}</span><span style={{color:p.color,fontWeight:600,fontVariantNumeric:"tabular-nums"}}>{sel===i?fmtV(p.v):`${p.pct}%`}</span></div>)}
       <div style={{borderTop:`1px solid ${D.border}`,marginTop:4,paddingTop:6,fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{color:D.text3}}>{ativo?ativo.label:"Total"}</span><span style={{fontWeight:700,color:ativo?ativo.color:D.text}}>{fmtV(ativo?ativo.v:total)}</span></div>
     </div>
   </div>;
@@ -1464,6 +1465,7 @@ function SplitwiseTab({currency,userEmail}){
   const [saldosGrupos,setSaldosGrupos]=useState({});
   const [mesSel,setMesSel]=useState(()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;}); // "AAAA-MM" recorte do mês (data local)
   const [catView,setCatView]=useState("grupo"); // "grupo" ou nome do membro: pizza por pessoa
+  const [catDet,setCatDet]=useState(null); // categoria aberta para ver os lançamentos
 
   // Ícones por categoria (estilo app oficial)
   const CATS=[
@@ -1663,7 +1665,7 @@ function SplitwiseTab({currency,userEmail}){
   function gastosPorCategoria(src=swData){
     const por={};
     (src?.despesas||[]).forEach(d=>{if(!d)return;const c=d.categoria||"Outros";por[c]=(por[c]||0)+(d.valor||0);});
-    return Object.entries(por).map(([nome,v])=>({label:`${iconeCat(nome)} ${nome}`,v,color:corCat(nome)})).filter(s=>s.v>0).sort((a,b)=>b.v-a.v);
+    return Object.entries(por).map(([nome,v])=>({label:`${iconeCat(nome)} ${nome}`,cat:nome,v,color:corCat(nome)})).filter(s=>s.v>0).sort((a,b)=>b.v-a.v);
   }
 
   // Gastos por categoria de UMA pessoa = a parte que ela consumiu (divisão)
@@ -1671,7 +1673,7 @@ function SplitwiseTab({currency,userEmail}){
     if(pessoa==="grupo")return gastosPorCategoria(src);
     const por={};
     (src?.despesas||[]).forEach(d=>{if(!d)return;const c=d.categoria||"Outros";(d.divisao||[]).forEach(div=>{const n=typeof div==="string"?div:div?.nome;const q=typeof div==="string"?((d.valor||0)/((d.divisao||[]).length||1)):(div?.valor||0);if(n===pessoa)por[c]=(por[c]||0)+q;});});
-    return Object.entries(por).map(([nome,v])=>({label:`${iconeCat(nome)} ${nome}`,v,color:corCat(nome)})).filter(s=>s.v>0).sort((a,b)=>b.v-a.v);
+    return Object.entries(por).map(([nome,v])=>({label:`${iconeCat(nome)} ${nome}`,cat:nome,v,color:corCat(nome)})).filter(s=>s.v>0).sort((a,b)=>b.v-a.v);
   }
 
   // Totais: quanto cada pessoa pagou e quanto consumiu
@@ -1801,7 +1803,21 @@ function SplitwiseTab({currency,userEmail}){
         <span style={{fontSize:12,color:D.text3}}>{catView==="grupo"?"total":catView===nomeUser?"sua parte":"parte"} {fmtM(totalGrupo,currency)}</span>
       </div>
       <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:10}}>{opcoes.map(o=><button key={o} onClick={()=>setCatView(o)} style={{padding:"3px 10px",borderRadius:16,fontSize:11,cursor:"pointer",border:catView===o?`1px solid ${D.green}`:`1px solid ${D.border}`,background:catView===o?D.green+"22":"transparent",color:catView===o?D.green:D.text3}}>{o==="grupo"?"Grupo":o===nomeUser?"Você":o}</button>)}</div>
-      {cats.length===0?<p style={{fontSize:12,color:D.text3}}>Sem consumo nesta visão neste mês.</p>:<PieChart slices={cats} currency={currency}/>}
+      {cats.length===0?<p style={{fontSize:12,color:D.text3}}>Sem consumo nesta visão neste mês.</p>:<PieChart slices={cats} currency={currency} onSlice={p=>setCatDet(prev=>prev===p.cat?null:p.cat)}/>}
+      {catDet&&(()=>{const itens=dadosMes.despesas.filter(d=>(d.categoria||"Outros")===catDet).sort((a,b)=>(b.data||"").localeCompare(a.data||""));const totCat=itens.reduce((a,d)=>a+(d.valor||0),0);return <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${D.border}`}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+          <span style={{fontSize:12,fontWeight:700,color:D.text}}>{iconeCat(catDet)} {catDet} · {itens.length} lançamento{itens.length!==1?"s":""}</span>
+          <button onClick={()=>setCatDet(null)} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:14}}>✕</button>
+        </div>
+        {itens.length===0?<p style={{fontSize:12,color:D.text3}}>Nenhum lançamento nesta categoria neste mês.</p>:itens.map(d=><div key={d.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:`1px solid ${D.border}`,gap:8}}>
+          <div style={{flex:1,minWidth:0}}>
+            <p style={{margin:0,fontSize:12,color:D.text}}>{d.descricao||"(sem descrição)"}</p>
+            <p style={{margin:"1px 0 0",fontSize:10,color:D.text3}}>{d.data}{d.pagoPor?` · ${d.pagoPor===nomeUser?"você":d.pagoPor} pagou`:""}</p>
+          </div>
+          <span style={{fontSize:13,fontWeight:700,color:D.text}}>{fmtM(d.valor||0,currency)}</span>
+        </div>)}
+        <div style={{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:11,color:D.text3}}><span>Total {catDet} no grupo</span><span style={{fontWeight:700,color:D.text2}}>{fmtM(totCat,currency)}</span></div>
+      </div>;})()}
     </Card>;})()}
 
     {dadosMes.despesas.length>0&&(()=>{const tot=totaisPorPessoa(dadosMes);const ent=Object.entries(tot);return <Card>
