@@ -79,7 +79,7 @@ const IND_COMP=[
 ];
 
 const hoje=new Date(),MES_ATUAL=hoje.getMonth(),ANO_ATUAL=hoje.getFullYear();
-const EMPTY={transacoes:[],faturas:[],investimentos:[],metas:[],bancos:[],orcamentos:[],recorrencias:[],dividendos:[],watchlist:[],alertas:[],historico:[],aporteMensal:0,catD:[...CAT_D_DEF],catR:[...CAT_R_DEF]};
+const EMPTY={transacoes:[],faturas:[],investimentos:[],metas:[],bancos:[],orcamentos:[],recorrencias:[],dividendos:[],watchlist:[],alertas:[],historico:[],aporteMensal:0,salario:null,catD:[...CAT_D_DEF],catR:[...CAT_R_DEF]};
 const EMPTY_ALL={br:{...EMPTY},au:{...EMPTY}};
 const lsGet=k=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch{return null;}};
 const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch{}};
@@ -3186,6 +3186,7 @@ function AppInner(){
   const [tab,setTab]=useState(0);
   const [mes,setMes]=useState(MES_ATUAL);
   const [grafico,setGrafico]=useState("barras");
+  const [modalSal,setModalSal]=useState(false);const [salForm,setSalForm]=useState({});
   const saveTimer=useRef(null);
   const importRef=useRef(null);
   // Trava de segurança: só permite salvar no Supabase DEPOIS de carregar com sucesso.
@@ -3446,10 +3447,31 @@ function AppInner(){
           {grafico==="pizza_r"&&<PieChart slices={catPieR}/>}
           {grafico==="linha"&&<LineChart data={lineData} currency={currency}/>}
         </Card>
-        {data.orcamentos?.length>0&&<Card>
-          <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>🎯 Orçamento</p>
-          {data.orcamentos.map(orc=>{const gasto=txMes.filter(t=>t.tipo==="despesa"&&t.categoria===orc.categoria).reduce((a,b)=>a+b.valor,0);const pct=orc.valor>0?Math.min(100,(gasto/orc.valor)*100):0;const cor=pct>90?D.red:pct>70?D.gold:D.green;return <div key={orc.id} style={{marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}><span style={{color:D.text2}}>{orc.categoria}</span><span style={{color:cor,fontWeight:600}}>{fmtM(gasto,currency)} / {fmtM(orc.valor,currency)}</span></div><div style={{background:D.bg3,borderRadius:4,height:5,overflow:"hidden"}}><div style={{width:pct+"%",background:cor,height:5,borderRadius:4}}/></div>{pct>90&&<p style={{fontSize:10,color:D.red,marginTop:2}}>⚠️ {pct>=100?"Ultrapassado!":"Próximo do limite"}</p>}</div>;})}
-        </Card>}
+        {data.orcamentos?.length>0&&(()=>{
+          const sal=data.salario;
+          const salMensal=sal&&sal.valor>0?(sal.freq==="semanal"?sal.valor*52/12:sal.freq==="quinzenal"?sal.valor*26/12:sal.freq==="anual"?sal.valor/12:sal.valor):0;
+          const orcTotal=data.orcamentos.reduce((a,o)=>a+(o.valor||0),0);
+          const gastoOrcadas=data.orcamentos.reduce((a,o)=>a+txMes.filter(t=>t.tipo==="despesa"&&t.categoria===o.categoria).reduce((s,t)=>s+t.valor,0),0);
+          const linhas=data.orcamentos.map(o=>{const gasto=txMes.filter(t=>t.tipo==="despesa"&&t.categoria===o.categoria).reduce((a,t)=>a+t.valor,0);const pctReal=o.valor>0?gasto/o.valor*100:0;return {o,gasto,pctReal,resta:o.valor-gasto};}).sort((a,b)=>b.pctReal-a.pctReal);
+          const sobra=salMensal-totD;
+          return <Card>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <p style={{fontSize:13,fontWeight:700,color:D.text,margin:0}}>🎯 Orçamento</p>
+              <button onClick={()=>{setSalForm(sal?{valor:sal.valor,freq:sal.freq}:{freq:"semanal"});setModalSal(true);}} style={{border:"none",background:"none",cursor:"pointer",fontSize:11,color:D.blue}}>{salMensal>0?"✏️ salário":"+ definir salário"}</button>
+            </div>
+            {salMensal>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:8,marginBottom:12}}>
+              <div style={{background:D.bg3,borderRadius:8,padding:"8px 10px"}}><p style={{margin:0,fontSize:10,color:D.text3}}>SALÁRIO/MÊS</p><p style={{margin:"2px 0 0",fontSize:15,fontWeight:700,color:D.text}}>{fmtM(salMensal,currency)}</p></div>
+              <div style={{background:D.bg3,borderRadius:8,padding:"8px 10px"}}><p style={{margin:0,fontSize:10,color:D.text3}}>GASTO REAL (MÊS)</p><p style={{margin:"2px 0 0",fontSize:15,fontWeight:700,color:totD/salMensal>0.9?D.red:totD/salMensal>0.7?D.gold:D.text}}>{fmtM(totD,currency)}</p><p style={{margin:0,fontSize:10,color:D.text3}}>{Math.round(totD/salMensal*100)}% do salário</p></div>
+              <div style={{background:D.bg3,borderRadius:8,padding:"8px 10px"}}><p style={{margin:0,fontSize:10,color:D.text3}}>SOBRA / POUPANÇA</p><p style={{margin:"2px 0 0",fontSize:15,fontWeight:700,color:sobra>=0?D.green:D.red}}>{fmtM(sobra,currency)}</p><p style={{margin:0,fontSize:10,color:D.text3}}>{Math.round(sobra/salMensal*100)}% do salário</p></div>
+            </div>}
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:D.text3,marginBottom:4}}>
+              <span>Orçado: <b style={{color:D.text2}}>{fmtM(orcTotal,currency)}</b>{salMensal>0?` · ${Math.round(orcTotal/salMensal*100)}% do salário`:""}</span>
+              <span>gasto nas orçadas: <b style={{color:D.text2}}>{fmtM(gastoOrcadas,currency)}</b></span>
+            </div>
+            <div style={{background:D.bg3,borderRadius:4,height:6,overflow:"hidden",marginBottom:12}}><div style={{width:Math.min(100,orcTotal>0?gastoOrcadas/orcTotal*100:0)+"%",height:6,background:gastoOrcadas>orcTotal?D.red:D.green}}/></div>
+            {linhas.map(({o,gasto,pctReal,resta})=>{const pct=Math.min(100,pctReal);const cor=pctReal>90?D.red:pctReal>70?D.gold:D.green;return <div key={o.id} style={{marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}><span style={{color:D.text2}}>{o.categoria}</span><span style={{color:cor,fontWeight:600}}>{fmtM(gasto,currency)} / {fmtM(o.valor,currency)}</span></div><div style={{background:D.bg3,borderRadius:4,height:5,overflow:"hidden"}}><div style={{width:pct+"%",background:cor,height:5,borderRadius:4}}/></div><div style={{display:"flex",justifyContent:"space-between",marginTop:2}}><span style={{fontSize:10,color:resta<0?D.red:D.text3}}>{resta<0?`⚠️ estourou ${fmtM(-resta,currency)}`:`resta ${fmtM(resta,currency)}`}</span><span style={{fontSize:10,color:D.text3}}>{Math.round(pctReal)}%</span></div></div>;})}
+          </Card>;
+        })()}
         {data.bancos.length>0&&<Card><p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:8}}>Bancos</p><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8}}>{data.bancos.map(b=>{const s=saldoBanco(b);return <div key={b.id} style={{background:D.bg3,borderRadius:10,padding:"10px 14px"}}><p style={{margin:0,fontSize:11,color:D.blue,fontWeight:600}}>🏦 {b.nome}</p><p style={{margin:"4px 0 0",fontSize:17,fontWeight:700,color:s>=0?D.green:D.red}}>{fmtM(s,currency)}</p></div>;})}</div></Card>}
         {tiposI.length>0&&<Card><p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:8}}>Carteira</p>{tiposI.map((x,i)=><div key={x.t} style={{marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",fontSize:13}}><span style={{color:D.text2}}>{x.t}</span><span style={{fontWeight:600,color:CORES[i%CORES.length]}}>{fmtM(x.v,currency)} <span style={{color:D.text3,fontWeight:400}}>({totInv>0?Math.round(x.v/totInv*100):0}%)</span></span></div><MiniBar valor={x.v} total={totInv} cor={CORES[i%CORES.length]}/></div>)}</Card>}
       </div>}
@@ -3462,6 +3484,24 @@ function AppInner(){
       {tab===6&&<AnaliseTab data={data} setData={setData} investimentos={data.investimentos} profileId={profileId} market={profileId} currency={currency}/>}
       {tab===7&&<SplitwiseTab currency={currency} userEmail={session?.user?.email}/>}
       {tab===8&&<RelatoriosTab data={data} setData={setData} currency={currency}/>}
+      {modalSal&&<Modal title="💰 Salário esperado" onClose={()=>setModalSal(false)}>
+        <p style={{fontSize:11,color:D.text3,marginBottom:10,lineHeight:1.5}}>Usado para projetar seus gastos como % do salário <b>garantido</b>. Extra (bônus, freela) fica de fora — é folga. Fica salvo por perfil ({currency}).</p>
+        <label style={{fontSize:12,color:D.text3,display:"block",marginBottom:8}}>Valor ({currency})<input type="number" value={salForm.valor||""} onChange={e=>setSalForm(f=>({...f,valor:e.target.value}))} placeholder="ex: 1875" style={{marginTop:4}}/></label>
+        <label style={{fontSize:12,color:D.text3,display:"block"}}>Frequência<select value={salForm.freq||"semanal"} onChange={e=>setSalForm(f=>({...f,freq:e.target.value}))} style={{marginTop:4}}>
+          <option value="semanal">Semanal</option>
+          <option value="quinzenal">Quinzenal (a cada 2 semanas)</option>
+          <option value="mensal">Mensal</option>
+          <option value="anual">Anual</option>
+        </select></label>
+        {parseFloat(salForm.valor)>0&&(()=>{const v=parseFloat(salForm.valor);const f=salForm.freq||"semanal";const m=f==="semanal"?v*52/12:f==="quinzenal"?v*26/12:f==="anual"?v/12:v;return <p style={{fontSize:13,color:D.green,marginTop:10,fontWeight:600}}>≈ {fmtM(m,currency)}/mês</p>;})()}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:14}}>
+          <Btn outline color={D.red} sm onClick={()=>{setData(d=>({...d,salario:null}));setModalSal(false);}}>Remover</Btn>
+          <div style={{display:"flex",gap:8}}>
+            <Btn outline color={D.text3} onClick={()=>setModalSal(false)}>Cancelar</Btn>
+            <Btn onClick={()=>{const v=parseFloat(salForm.valor)||0;setData(d=>({...d,salario:v>0?{valor:v,freq:salForm.freq||"semanal"}:null}));setModalSal(false);}}>Salvar</Btn>
+          </div>
+        </div>
+      </Modal>}
     </div>
   </>;
 }
