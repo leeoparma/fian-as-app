@@ -697,6 +697,7 @@ function LancamentosTab({data,setData,currency,mes,profileId}){
   const [impItens,setImpItens]=useState(null);
   const [impBanco,setImpBanco]=useState("");
   const [nfView,setNfView]=useState(null);
+  const [delParc,setDelParc]=useState(null);
   const isAU=profileId==="au";  // AU: ano fiscal 1 jul–30 jun · BR/US: ano-calendário 1 jan–31 dez
   const FY_ATUAL=isAU?(MES_ATUAL>=6?ANO_ATUAL:ANO_ATUAL-1):ANO_ATUAL;
   const [fyPdf,setFyPdf]=useState(FY_ATUAL);
@@ -983,10 +984,26 @@ ${paginas}
       <span style={{fontWeight:700,color:t.tipo==="receita"?D.green:D.red,fontSize:14,flexShrink:0}}>{t.tipo==="receita"?"+":"-"}{fmtM(t.valor,currency)}</span>
       <div style={{display:"flex",gap:4}}>
         <button onClick={()=>{setModal("tx");setForm({...t,editId:t.id});}} style={{border:"none",background:"none",cursor:"pointer",fontSize:13,color:D.text3}}>✏️</button>
-        <button onClick={()=>setData(d=>({...d,transacoes:d.transacoes.filter(x=>x.id!==t.id)}))} style={{border:"none",background:"none",cursor:"pointer",fontSize:13,color:D.red}}>🗑</button>
+        <button onClick={()=>t.parceladoId?setDelParc(t):setData(d=>({...d,transacoes:d.transacoes.filter(x=>x.id!==t.id)}))} style={{border:"none",background:"none",cursor:"pointer",fontSize:13,color:D.red}}>🗑</button>
       </div>
     </Card>)}
 
+    {delParc&&(()=>{
+      const grupo=data.transacoes.filter(x=>x.parceladoId===delParc.parceladoId);
+      const n=grupo.length;
+      const base=(delParc.descricao||"").replace(/\s*\(\d+\/\d+\)\s*$/,"");
+      const totalGrupo=grupo.reduce((a,x)=>a+x.valor,0);
+      const del=ids=>{setData(d=>({...d,transacoes:d.transacoes.filter(x=>!ids.includes(x.id))}));setDelParc(null);};
+      return <Modal title="Apagar compra parcelada" onClose={()=>setDelParc(null)}>
+        <p style={{fontSize:13,color:D.text2,lineHeight:1.5,margin:"0 0 4px"}}><b>{base}</b></p>
+        <p style={{fontSize:12,color:D.text3,lineHeight:1.5,margin:"0 0 12px"}}>Esta compra tem <b>{n} parcela{n>1?"s":""}</b> (total {fmtM(totalGrupo,currency)}). O que deseja apagar?</p>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          <Btn color={D.red} onClick={()=>del(grupo.map(x=>x.id))}>🗑 Apagar todas as {n} parcelas</Btn>
+          <Btn outline color={D.text3} onClick={()=>del([delParc.id])}>Apagar só esta parcela ({delParc.descricao.match(/\((\d+\/\d+)\)/)?.[1]||""})</Btn>
+          <Btn outline color={D.text3} onClick={()=>setDelParc(null)}>Cancelar</Btn>
+        </div>
+      </Modal>;
+    })()}
     {modal==="tx"&&<Modal title={form.editId?"Editar":"Novo lançamento completo"} onClose={()=>setModal(null)}>
       <label style={{fontSize:12,color:D.text3}}>Tipo<select value={form.tipo||"despesa"} onChange={e=>setForm(f=>({...f,tipo:e.target.value}))} style={{marginTop:4}}><option value="despesa">Despesa</option><option value="receita">Receita</option></select></label>
       <label style={{fontSize:12,color:D.text3}}>Descrição<input value={form.descricao||""} onChange={e=>setForm(f=>({...f,descricao:e.target.value}))} style={{marginTop:4}}/></label>
