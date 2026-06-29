@@ -79,6 +79,7 @@ const IND_COMP=[
 ];
 
 const hoje=new Date(),MES_ATUAL=hoje.getMonth(),ANO_ATUAL=hoje.getFullYear();
+const CAT_INTERNAS=["Transferência","Aplicação","Resgate"]; // movimento interno: não é receita nem despesa
 const EMPTY={transacoes:[],faturas:[],investimentos:[],metas:[],bancos:[],orcamentos:[],recorrencias:[],dividendos:[],watchlist:[],alertas:[],historico:[],aporteMensal:0,salario:null,catD:[...CAT_D_DEF],catR:[...CAT_R_DEF]};
 const EMPTY_ALL={br:{...EMPTY},au:{...EMPTY}};
 const lsGet=k=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch{return null;}};
@@ -1081,6 +1082,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
   const [atualizandoTodos,setAtualizandoTodos]=useState(false);
   const [aporteInput,setAporteInput]=useState(()=>String(data.aporteMensal||""));
   const [modalAporte,setModalAporte]=useState(null);const [aporteForm,setAporteForm]=useState({});
+  const [modalResgate,setModalResgate]=useState(null);const [resgateForm,setResgateForm]=useState({});
 
   // Aporta mais unidades numa ação existente e RECALCULA o preço médio
   function aportar(){
@@ -1192,7 +1194,10 @@ function InvestimentosTab({data,setData,currency,profileId}){
     const vi=parseFloat(form.valorInvestido)||parseFloat(form.precoMedio||0)*parseFloat(form.quantidade||1)||0;
     const i={id:form.editId||uid(),tipo:form.tipo||"Ações",descricao:form.descricao||"",ticker:(form.ticker||"").toUpperCase(),quantidade:parseFloat(form.quantidade)||1,precoMedio:parseFloat(form.precoMedio)||0,valorInvestido:vi,valor:vi,data:form.data||hoje.toISOString().slice(0,10),bancoId:form.bancoId||null,indice:form.indice||"CDI",taxaRF:parseFloat(form.taxaRF)||0,pctIndice:parseFloat(form.pctIndice)||100,rfTipo:form.rfTipo||"pct",vencimento:form.vencimento||""};
     if(isRF){i.valorAtual=calcValorAtualRF(i);i.lucro=i.valorAtual-vi;}
-    setData(d=>({...d,investimentos:form.editId?d.investimentos.map(x=>x.id===form.editId?i:x):[...d.investimentos,i]}));setModal(false);setForm({});
+    const debita=!form.editId&&form.bancoId&&form.debitarBanco!==false&&vi>0;
+    let aplicTx=null;
+    if(debita){aplicTx={id:uid(),tipo:"despesa",descricao:`Aplicação: ${i.ticker||i.descricao||i.tipo}`,valor:vi,categoria:"Aplicação",data:i.data,bancoId:i.bancoId};i.aplicacaoTxId=aplicTx.id;}
+    setData(d=>({...d,investimentos:form.editId?d.investimentos.map(x=>x.id===form.editId?i:x):[...d.investimentos,i],transacoes:aplicTx?[...d.transacoes,aplicTx]:d.transacoes}));setModal(false);setForm({});
   }
   function saveDiv(){const d={id:divForm.editId||uid(),ticker:divForm.ticker||"",valor:parseFloat(divForm.valor)||0,data:divForm.data||hoje.toISOString().slice(0,10),tipo:divForm.tipo||"Dividendo"};setData(dd=>({...dd,dividendos:divForm.editId?(dd.dividendos||[]).map(x=>x.id===divForm.editId?d:x):[...(dd.dividendos||[]),d]}));setModalDiv(false);setDivForm({});}
 
@@ -1221,8 +1226,9 @@ function InvestimentosTab({data,setData,currency,profileId}){
               </div>
               <button onClick={()=>buscarDados(inv)} disabled={loadingId===inv.id} style={{border:"none",background:"none",cursor:"pointer",fontSize:15,opacity:loadingId===inv.id?0.4:1,color:D.green,flexShrink:0}}>{loadingId===inv.id?"⏳":"🔄"}</button>
               {!isRFItem&&<button onClick={()=>{setModalAporte(inv.id);setAporteForm({});}} title="Aportar mais (recalcula preço médio)" style={{border:"none",background:"none",cursor:"pointer",fontSize:14,color:D.blue}}>➕</button>}
+              <button onClick={()=>{setModalResgate(inv.id);setResgateForm({valor:String(inv.valorAtual||inv.valorInvestido||inv.valor||0),bancoId:inv.bancoId||""});}} title="Resgatar (devolver à conta)" style={{border:"none",background:"none",cursor:"pointer",fontSize:14,color:D.green}}>💵</button>
               <button onClick={()=>{setModal(true);setForm({...inv,editId:inv.id});}} style={{border:"none",background:"none",cursor:"pointer",fontSize:12,color:D.text3}}>✏️</button>
-              <button onClick={()=>setData(d=>({...d,investimentos:d.investimentos.filter(x=>x.id!==inv.id)}))} style={{border:"none",background:"none",cursor:"pointer",fontSize:12,color:D.red}}>🗑</button>
+              <button onClick={()=>setData(d=>({...d,investimentos:d.investimentos.filter(x=>x.id!==inv.id),transacoes:inv.aplicacaoTxId?d.transacoes.filter(t=>t.id!==inv.aplicacaoTxId):d.transacoes}))} style={{border:"none",background:"none",cursor:"pointer",fontSize:12,color:D.red}}>🗑</button>
             </div>
           </div>
           {isRFItem&&<div style={{marginTop:6,display:"flex",gap:6}}><Badge color={D.gold}>Taxa: {calcRFAnual(inv).toFixed(2)}% a.a.</Badge></div>}
@@ -1348,8 +1354,18 @@ function InvestimentosTab({data,setData,currency,profileId}){
       {isRFForm&&<><label style={{fontSize:12,color:D.text3}}>Descrição<input value={form.descricao||""} onChange={e=>setForm(f=>({...f,descricao:e.target.value}))} style={{marginTop:4}}/></label><label style={{fontSize:12,color:D.text3}}>Valor investido ({currency})<input type="number" value={form.valorInvestido||""} onChange={e=>setForm(f=>({...f,valorInvestido:e.target.value}))} style={{marginTop:4}}/></label><label style={{fontSize:12,color:D.text3}}>Índice<select value={form.indice||"CDI"} onChange={e=>setForm(f=>({...f,indice:e.target.value}))} style={{marginTop:4}}>{INDICES_RF.map(i=><option key={i}>{i}</option>)}</select></label>{(form.indice||"CDI")!=="Prefixado"&&<><label style={{fontSize:12,color:D.text3}}>Tipo<select value={form.rfTipo||"pct"} onChange={e=>setForm(f=>({...f,rfTipo:e.target.value}))} style={{marginTop:4}}><option value="pct">% do índice</option><option value="mais">Índice + %</option></select></label>{(form.rfTipo||"pct")==="pct"?<label style={{fontSize:12,color:D.text3}}>% do índice<input type="number" value={form.pctIndice||""} onChange={e=>setForm(f=>({...f,pctIndice:e.target.value}))} placeholder="Ex: 102" style={{marginTop:4}}/></label>:<label style={{fontSize:12,color:D.text3}}>Taxa adicional %<input type="number" value={form.taxaRF||""} onChange={e=>setForm(f=>({...f,taxaRF:e.target.value}))} placeholder="Ex: 9" style={{marginTop:4}}/></label>}</>}{(form.indice||"CDI")==="Prefixado"&&<label style={{fontSize:12,color:D.text3}}>Taxa prefixada %<input type="number" value={form.taxaRF||""} onChange={e=>setForm(f=>({...f,taxaRF:e.target.value}))} style={{marginTop:4}}/></label>}<label style={{fontSize:12,color:D.text3}}>Vencimento<input type="date" value={form.vencimento||""} onChange={e=>setForm(f=>({...f,vencimento:e.target.value}))} style={{marginTop:4}}/></label></>}
       <label style={{fontSize:12,color:D.text3}}>Data de compra<input type="date" value={form.data||hoje.toISOString().slice(0,10)} onChange={e=>setForm(f=>({...f,data:e.target.value}))} style={{marginTop:4}}/></label>
       {data.bancos.length>0&&<label style={{fontSize:12,color:D.text3}}>Vincular ao banco<select value={form.bancoId||""} onChange={e=>setForm(f=>({...f,bancoId:e.target.value}))} style={{marginTop:4}}><option value="">Nenhum</option>{data.bancos.map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}</select></label>}
+      {!form.editId&&form.bancoId&&<label style={{fontSize:12,color:D.text2,display:"flex",alignItems:"center",gap:8,marginTop:8,cursor:"pointer"}}><input type="checkbox" checked={form.debitarBanco!==false} onChange={e=>setForm(f=>({...f,debitarBanco:e.target.checked}))} style={{width:"auto"}}/>Debitar este valor da conta do banco (aplicação). Desmarque se o dinheiro já está na corretora.</label>}
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn outline color={D.text3} onClick={()=>setModal(false)}>Cancelar</Btn><Btn color={D.blue} onClick={saveInv}>Salvar</Btn></div>
     </Modal>}
+    {modalResgate&&(()=>{const inv=data.investimentos.find(x=>x.id===modalResgate);if(!inv)return null;
+      return <Modal title="💵 Resgatar investimento" onClose={()=>setModalResgate(null)}>
+        <p style={{fontSize:13,color:D.text2,margin:"0 0 4px"}}><b>{inv.ticker||inv.descricao||inv.tipo}</b></p>
+        <p style={{fontSize:11,color:D.text3,margin:"0 0 12px",lineHeight:1.5}}>Valor de mercado: {fmtM(inv.valorAtual||inv.valorInvestido||0,currency)} · aplicado: {fmtM(inv.valorInvestido||inv.valor||0,currency)}. Ajuste abaixo para o que <b>realmente caiu na conta</b> (após IR/taxas, se houver).</p>
+        <label style={{fontSize:12,color:D.text3}}>Valor que voltou ({currency})<input type="number" value={resgateForm.valor||""} onChange={e=>setResgateForm(f=>({...f,valor:e.target.value}))} style={{marginTop:4}}/></label>
+        <label style={{fontSize:12,color:D.text3,display:"block",marginTop:8}}>Creditar no banco<select value={resgateForm.bancoId||""} onChange={e=>setResgateForm(f=>({...f,bancoId:e.target.value}))} style={{marginTop:4}}><option value="">Não creditar (só remover)</option>{data.bancos.map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}</select></label>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}><Btn outline color={D.text3} onClick={()=>setModalResgate(null)}>Cancelar</Btn><Btn color={D.green} onClick={()=>{const v=parseFloat(resgateForm.valor)||0;const bid=resgateForm.bancoId;setData(d=>({...d,investimentos:d.investimentos.filter(x=>x.id!==inv.id),transacoes:(bid&&v>0)?[...d.transacoes,{id:uid(),tipo:"receita",descricao:`Resgate: ${inv.ticker||inv.descricao||inv.tipo}`,valor:v,categoria:"Resgate",data:hoje.toISOString().slice(0,10),bancoId:bid}]:d.transacoes}));setModalResgate(null);setResgateForm({});}}>Resgatar</Btn></div>
+      </Modal>;
+    })()}
     {modalAporte&&(()=>{const inv=data.investimentos.find(x=>x.id===modalAporte);if(!inv)return null;
       const qN=parseFloat(aporteForm.quantidade)||0,pN=parseFloat(aporteForm.preco)||0;
       const qA=inv.quantidade||0,pmA=inv.precoMedio||0;
@@ -2992,8 +3008,8 @@ function RelatoriosTab({data,setData,currency}){
     return true;
   }).sort((a,b)=>b.data.localeCompare(a.data));
 
-  const totR=txs.filter(t=>t.tipo==="receita").reduce((a,b)=>a+(b.valor||0),0);
-  const totD=txs.filter(t=>t.tipo==="despesa").reduce((a,b)=>a+(b.valor||0),0);
+  const totR=txs.filter(t=>t.tipo==="receita"&&!CAT_INTERNAS.includes(t.categoria)).reduce((a,b)=>a+(b.valor||0),0);
+  const totD=txs.filter(t=>t.tipo==="despesa"&&!CAT_INTERNAS.includes(t.categoria)).reduce((a,b)=>a+(b.valor||0),0);
 
   const porCat={};
   txs.filter(t=>t.tipo==="despesa").forEach(t=>{porCat[t.categoria]=(porCat[t.categoria]||0)+(t.valor||0);});
@@ -3359,14 +3375,14 @@ function AppInner(){
   const catD=data.catD.length?data.catD:CAT_D_DEF,catR=data.catR.length?data.catR:CAT_R_DEF;
 
   const txMes=data.transacoes.filter(t=>{const d=new Date(t.data);return d.getMonth()===mes&&d.getFullYear()===ANO_ATUAL;});
-  const totR=txMes.filter(t=>t.tipo==="receita").reduce((a,b)=>a+b.valor,0);
-  const totD=txMes.filter(t=>t.tipo==="despesa").reduce((a,b)=>a+b.valor,0);
+  const totR=txMes.filter(t=>t.tipo==="receita"&&!CAT_INTERNAS.includes(t.categoria)).reduce((a,b)=>a+b.valor,0);
+  const totD=txMes.filter(t=>t.tipo==="despesa"&&!CAT_INTERNAS.includes(t.categoria)).reduce((a,b)=>a+b.valor,0);
   const totInv=data.investimentos.reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0);
   function saldoBanco(b){const txs=data.transacoes.filter(t=>t.bancoId===b.id);return(b.saldoInicial||0)+txs.filter(t=>t.tipo==="receita").reduce((a,x)=>a+x.valor,0)-txs.filter(t=>t.tipo==="despesa").reduce((a,x)=>a+x.valor,0);}
   const totBancos=data.bancos.reduce((a,b)=>a+saldoBanco(b),0);
   const patrimonioLiq=totBancos+totInv;
   const tiposI=TIPOS_INV.map(t=>({t,v:data.investimentos.filter(i=>i.tipo===t).reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0)})).filter(x=>x.v>0);
-  const ultimos6=Array.from({length:6},(_,i)=>{const d=new Date(ANO_ATUAL,MES_ATUAL-5+i,1),m=d.getMonth(),a=d.getFullYear();const txs=data.transacoes.filter(t=>{const td=new Date(t.data);return td.getMonth()===m&&td.getFullYear()===a;});return{label:MESES[m],r:txs.filter(t=>t.tipo==="receita").reduce((a,b)=>a+b.valor,0),d:txs.filter(t=>t.tipo==="despesa").reduce((a,b)=>a+b.valor,0)};});
+  const ultimos6=Array.from({length:6},(_,i)=>{const d=new Date(ANO_ATUAL,MES_ATUAL-5+i,1),m=d.getMonth(),a=d.getFullYear();const txs=data.transacoes.filter(t=>{const td=new Date(t.data);return td.getMonth()===m&&td.getFullYear()===a&&!CAT_INTERNAS.includes(t.categoria);});return{label:MESES[m],r:txs.filter(t=>t.tipo==="receita").reduce((a,b)=>a+b.valor,0),d:txs.filter(t=>t.tipo==="despesa").reduce((a,b)=>a+b.valor,0)};});
   let acc=0;const lineData=ultimos6.map(d=>{acc+=d.r-d.d;return{label:d.label,v:acc};});
   const catPieD=catD.map((c,i)=>({label:c,v:txMes.filter(t=>t.tipo==="despesa"&&t.categoria===c).reduce((a,b)=>a+b.valor,0),color:CORES[i%CORES.length]})).filter(x=>x.v>0);
   const catPieR=catR.map((c,i)=>({label:c,v:txMes.filter(t=>t.tipo==="receita"&&t.categoria===c).reduce((a,b)=>a+b.valor,0),color:CORES[i%CORES.length]})).filter(x=>x.v>0);
