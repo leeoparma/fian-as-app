@@ -1463,6 +1463,7 @@ function SplitwiseTab({currency,userEmail}){
   const [setupNome,setSetupNome]=useState("");
   const [saldosGrupos,setSaldosGrupos]=useState({});
   const [mesSel,setMesSel]=useState(()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;}); // "AAAA-MM" recorte do mês (data local)
+  const [catView,setCatView]=useState("grupo"); // "grupo" ou nome do membro: pizza por pessoa
 
   // Ícones por categoria (estilo app oficial)
   const CATS=[
@@ -1665,6 +1666,14 @@ function SplitwiseTab({currency,userEmail}){
     return Object.entries(por).map(([nome,v])=>({label:`${iconeCat(nome)} ${nome}`,v,color:corCat(nome)})).filter(s=>s.v>0).sort((a,b)=>b.v-a.v);
   }
 
+  // Gastos por categoria de UMA pessoa = a parte que ela consumiu (divisão)
+  function gastosPorCategoriaPessoa(src,pessoa){
+    if(pessoa==="grupo")return gastosPorCategoria(src);
+    const por={};
+    (src?.despesas||[]).forEach(d=>{if(!d)return;const c=d.categoria||"Outros";(d.divisao||[]).forEach(div=>{const n=typeof div==="string"?div:div?.nome;const q=typeof div==="string"?((d.valor||0)/((d.divisao||[]).length||1)):(div?.valor||0);if(n===pessoa)por[c]=(por[c]||0)+q;});});
+    return Object.entries(por).map(([nome,v])=>({label:`${iconeCat(nome)} ${nome}`,v,color:corCat(nome)})).filter(s=>s.v>0).sort((a,b)=>b.v-a.v);
+  }
+
   // Totais: quanto cada pessoa pagou e quanto consumiu
   function totaisPorPessoa(src=swData){
     const t={};
@@ -1786,12 +1795,13 @@ function SplitwiseTab({currency,userEmail}){
       <Btn onClick={()=>loadSW(ativo)} color={D.purple} outline sm>🔄 Atualizar</Btn>
     </div>
 
-    {dadosMes.despesas.length>0&&(()=>{const cats=gastosPorCategoria(dadosMes);const totalGrupo=cats.reduce((a,b)=>a+b.v,0);return <Card>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+    {dadosMes.despesas.length>0&&(()=>{const cats=gastosPorCategoriaPessoa(dadosMes,catView);const totalGrupo=cats.reduce((a,b)=>a+b.v,0);const opcoes=["grupo",...dadosMes.membros.map(m=>m.nome)];return <Card>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:6}}>
         <p style={{fontSize:13,fontWeight:700,color:D.text,margin:0}}>Gastos de {labelMes} por categoria</p>
-        <span style={{fontSize:12,color:D.text3}}>total {fmtM(totalGrupo,currency)}</span>
+        <span style={{fontSize:12,color:D.text3}}>{catView==="grupo"?"total":catView===nomeUser?"sua parte":"parte"} {fmtM(totalGrupo,currency)}</span>
       </div>
-      <PieChart slices={cats} currency={currency}/>
+      <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:10}}>{opcoes.map(o=><button key={o} onClick={()=>setCatView(o)} style={{padding:"3px 10px",borderRadius:16,fontSize:11,cursor:"pointer",border:catView===o?`1px solid ${D.green}`:`1px solid ${D.border}`,background:catView===o?D.green+"22":"transparent",color:catView===o?D.green:D.text3}}>{o==="grupo"?"Grupo":o===nomeUser?"Você":o}</button>)}</div>
+      {cats.length===0?<p style={{fontSize:12,color:D.text3}}>Sem consumo nesta visão neste mês.</p>:<PieChart slices={cats} currency={currency}/>}
     </Card>;})()}
 
     {dadosMes.despesas.length>0&&(()=>{const tot=totaisPorPessoa(dadosMes);const ent=Object.entries(tot);return <Card>
