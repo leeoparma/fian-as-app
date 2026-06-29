@@ -184,7 +184,7 @@ async function askClaude(prompt,maxTokens=900,images=[]){
 
 // Cache de preços em memória (evita buscar o mesmo ticker repetidamente)
 const _precoCache = {};
-const PRECO_TTL = 30000; // 30 segundos
+const PRECO_TTL = 15000; // 15 segundos
 
 async function fetchPrecoReal(ticker, profileId, full=false) {
   const market = profileId || "au";
@@ -1956,7 +1956,7 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
       setWlUpd(new Date());
     }
     refreshAll();
-    wlRefreshRef.current=setInterval(refreshAll,60000);
+    wlRefreshRef.current=setInterval(refreshAll,30000);
     return()=>clearInterval(wlRefreshRef.current);
   },[profileId,watchlist.length]);
 
@@ -2597,7 +2597,7 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
         const vs=watchlist.map(w=>w.variacao_dia).filter(v=>typeof v==="number");
         const media=vs.length?vs.reduce((a,b)=>a+b,0)/vs.length:null;
         return <p style={{margin:"0 0 8px",fontSize:11,color:D.text3}}>
-          {wlUpd?`Atualizado ${wlUpd.toLocaleTimeString("pt-BR")} · auto a cada 60s`:"Atualizando…"}
+          {wlUpd?`Atualizado ${wlUpd.toLocaleTimeString("pt-BR")} · auto a cada 30s`:"Atualizando…"}
           {media!=null&&<> · média do dia <b style={{color:media>=0?D.green:D.red}}>{media>=0?"▲":"▼"} {Math.abs(media).toFixed(2)}%</b> <span style={{color:D.text3}}>(peso igual)</span></>}
         </p>;
       })()}
