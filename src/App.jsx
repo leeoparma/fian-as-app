@@ -2962,6 +2962,8 @@ function RelatoriosTab({data,setData,currency}){
   const [periodo,setPeriodo]=useState("mes:"+MES_ATUAL);  // "mes:<0-11>" | "ano" | "tudo"
   const [bancoFiltro,setBancoFiltro]=useState("");         // "" = todos
   const [tipoFiltro,setTipoFiltro]=useState("");           // "" = ambos
+  const [catFiltro,setCatFiltro]=useState("");             // "" = todas
+  const [dDe,setDDe]=useState("");const [dAte,setDAte]=useState("");  // intervalo de datas
   const [aiResult,setAiResult]=useState(null);
   const [aiLoading,setAiLoading]=useState(false);
   const [aiErro,setAiErro]=useState("");
@@ -2972,8 +2974,10 @@ function RelatoriosTab({data,setData,currency}){
     const d=new Date(t.data);
     if(periodo.startsWith("mes:")){const m=+periodo.split(":")[1];if(d.getMonth()!==m||d.getFullYear()!==ANO_ATUAL)return false;}
     else if(periodo==="ano"){if(d.getFullYear()!==ANO_ATUAL)return false;}
+    else if(periodo==="intervalo"){if(dDe&&t.data<dDe)return false;if(dAte&&t.data>dAte)return false;}
     if(bancoFiltro&&t.bancoId!==bancoFiltro)return false;
     if(tipoFiltro&&t.tipo!==tipoFiltro)return false;
+    if(catFiltro&&t.categoria!==catFiltro)return false;
     return true;
   }).sort((a,b)=>b.data.localeCompare(a.data));
 
@@ -2988,7 +2992,8 @@ function RelatoriosTab({data,setData,currency}){
   txs.forEach(t=>{const k=t.bancoId||"sem";if(!porBanco[k])porBanco[k]={r:0,d:0};porBanco[k][t.tipo==="receita"?"r":"d"]+=(t.valor||0);});
   const bancoList=Object.entries(porBanco).map(([id,o])=>({nome:id==="sem"?"Sem banco":nomeBanco(id),...o}));
 
-  const labelPeriodo=periodo.startsWith("mes:")?`${MESES[+periodo.split(":")[1]]} ${ANO_ATUAL}`:periodo==="ano"?`Ano ${ANO_ATUAL}`:"Todo o histórico";
+  const labelPeriodo=periodo.startsWith("mes:")?`${MESES[+periodo.split(":")[1]]} ${ANO_ATUAL}`:periodo==="ano"?`Ano ${ANO_ATUAL}`:periodo==="intervalo"?`${dDe||"início"} a ${dAte||"hoje"}`:"Todo o histórico";
+  const catsDisponiveis=[...new Set((data.transacoes||[]).map(t=>t.categoria).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
 
   // ── IA: "Como uso meu dinheiro" — números calculados aqui no JS, IA só interpreta ──
   const ESSENCIAIS_PADRAO=["Moradia","Saúde","Alimentação","Educação"];
@@ -3036,7 +3041,7 @@ function RelatoriosTab({data,setData,currency}){
 <style>body{font-family:system-ui,Arial,sans-serif;color:#111;padding:24px;max-width:820px;margin:0 auto}h1{font-size:18px;margin:0 0 4px}h2{font-size:14px;margin:24px 0 6px;border-bottom:1px solid #ccc;padding-bottom:4px}table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:5px 8px;border-bottom:1px solid #eee;text-align:left}th{background:#f4f4f4}.tot{display:flex;gap:24px;margin:12px 0;font-size:13px}</style>
 </head><body>
 <h1>📄 Relatório financeiro — ${labelPeriodo}</h1>
-<p style="font-size:12px;color:#666">Gerado em ${new Date().toLocaleString("pt-BR")}${bancoFiltro?` · Banco: ${escH(nomeBanco(bancoFiltro))}`:""}${tipoFiltro?` · ${tipoFiltro==="receita"?"Só receitas":"Só despesas"}`:""}</p>
+<p style="font-size:12px;color:#666">Gerado em ${new Date().toLocaleString("pt-BR")}${bancoFiltro?` · Banco: ${escH(nomeBanco(bancoFiltro))}`:""}${tipoFiltro?` · ${tipoFiltro==="receita"?"Só receitas":"Só despesas"}`:""}${catFiltro?` · Categoria: ${escH(catFiltro)}`:""}</p>
 <div class="tot"><div><b>Receitas:</b> ${fmtM(totR,currency)}</div><div><b>Despesas:</b> ${fmtM(totD,currency)}</div><div><b>Saldo:</b> ${fmtM(totR-totD,currency)}</div></div>
 <h2>Despesas por categoria</h2><table><thead><tr><th>Categoria</th><th style="text-align:right">Total</th></tr></thead><tbody>${linhasCat||'<tr><td colspan="2">Sem despesas no período</td></tr>'}</tbody></table>
 <h2>Lançamentos (${txs.length})</h2><table><thead><tr><th>Data</th><th>Tipo</th><th>Descrição</th><th>Categoria</th><th>Banco</th><th style="text-align:right">Valor</th></tr></thead><tbody>${linhasTx||'<tr><td colspan="6">Nenhum lançamento</td></tr>'}</tbody></table>
@@ -3055,9 +3060,14 @@ function RelatoriosTab({data,setData,currency}){
           <select value={periodo} onChange={e=>setPeriodo(e.target.value)} style={{marginTop:4}}>
             {MESES.map((m,i)=><option key={i} value={"mes:"+i}>{m} {ANO_ATUAL}</option>)}
             <option value="ano">Ano {ANO_ATUAL} (todos os meses)</option>
+            <option value="intervalo">Intervalo de datas…</option>
             <option value="tudo">Todo o histórico</option>
           </select>
         </label>
+        {periodo==="intervalo"&&<>
+          <label style={{fontSize:11,color:D.text3}}>De<input type="date" value={dDe} onChange={e=>setDDe(e.target.value)} style={{marginTop:4}}/></label>
+          <label style={{fontSize:11,color:D.text3}}>Até<input type="date" value={dAte} onChange={e=>setDAte(e.target.value)} style={{marginTop:4}}/></label>
+        </>}
         <label style={{fontSize:11,color:D.text3}}>Banco
           <select value={bancoFiltro} onChange={e=>setBancoFiltro(e.target.value)} style={{marginTop:4}}>
             <option value="">Todos</option>
@@ -3069,6 +3079,12 @@ function RelatoriosTab({data,setData,currency}){
             <option value="">Receitas + Despesas</option>
             <option value="receita">Só receitas</option>
             <option value="despesa">Só despesas</option>
+          </select>
+        </label>
+        <label style={{fontSize:11,color:D.text3}}>Categoria
+          <select value={catFiltro} onChange={e=>setCatFiltro(e.target.value)} style={{marginTop:4}}>
+            <option value="">Todas</option>
+            {catsDisponiveis.map(c=><option key={c} value={c}>{c}</option>)}
           </select>
         </label>
       </div>
