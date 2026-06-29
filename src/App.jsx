@@ -475,13 +475,19 @@ function BarChart({data,currency}){
   </div>
   <div style={{display:"flex",gap:16,justifyContent:"center",marginTop:8}}><span style={{fontSize:11,color:D.green}}>● Receitas</span><span style={{fontSize:11,color:D.red}}>● Despesas</span></div></div>;
 }
-function PieChart({slices}){
+function PieChart({slices,currency}){
+  const [sel,setSel]=useState(null);
   let cum=0;const total=slices.reduce((a,b)=>a+b.v,0);
   if(!total)return <p style={{fontSize:13,color:D.text3}}>Sem dados.</p>;
-  const paths=slices.filter(s=>s.v>0).map(s=>{const pct=s.v/total,start=cum,end=cum+pct;cum=end;const x1=Math.cos(2*Math.PI*start-Math.PI/2),y1=Math.sin(2*Math.PI*start-Math.PI/2),x2=Math.cos(2*Math.PI*end-Math.PI/2),y2=Math.sin(2*Math.PI*end-Math.PI/2);return{d:`M0,0 L${x1},${y1} A1,1,0,${pct>0.5?1:0},1,${x2},${y2}Z`,color:s.color,label:s.label,pct:Math.round(pct*100)};});
+  const fmtV=v=>currency?fmtM(v,currency):String(Math.round(v));
+  const paths=slices.filter(s=>s.v>0).map(s=>{const pct=s.v/total,start=cum,end=cum+pct;cum=end;const x1=Math.cos(2*Math.PI*start-Math.PI/2),y1=Math.sin(2*Math.PI*start-Math.PI/2),x2=Math.cos(2*Math.PI*end-Math.PI/2),y2=Math.sin(2*Math.PI*end-Math.PI/2);return{d:`M0,0 L${x1},${y1} A1,1,0,${pct>0.5?1:0},1,${x2},${y2}Z`,color:s.color,label:s.label,pct:Math.round(pct*100),v:s.v};});
+  const ativo=sel!=null&&paths[sel]?paths[sel]:null;
   return <div style={{display:"flex",gap:16,alignItems:"center",flexWrap:"wrap"}}>
-    <svg viewBox="-1.15 -1.15 2.3 2.3" style={{width:110,height:110,flexShrink:0}}>{paths.map((p,i)=><path key={i} d={p.d} fill={p.color} stroke={D.bg2} strokeWidth="0.04"/>)}</svg>
-    <div style={{display:"flex",flexDirection:"column",gap:5,flex:1}}>{paths.map((p,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:8,fontSize:11}}><div style={{width:8,height:8,borderRadius:2,background:p.color,flexShrink:0}}/><span style={{color:D.text2,flex:1}}>{p.label}</span><span style={{color:p.color,fontWeight:600}}>{p.pct}%</span></div>)}</div>
+    <svg viewBox="-1.15 -1.15 2.3 2.3" style={{width:110,height:110,flexShrink:0}}>{paths.map((p,i)=><path key={i} d={p.d} fill={p.color} stroke={D.bg2} strokeWidth="0.04" style={{cursor:"pointer",opacity:sel==null||sel===i?1:0.4,transition:"opacity .15s"}} onClick={()=>setSel(sel===i?null:i)} onMouseEnter={()=>setSel(i)} onMouseLeave={()=>setSel(null)}><title>{p.label}: {fmtV(p.v)} ({p.pct}%)</title></path>)}</svg>
+    <div style={{display:"flex",flexDirection:"column",gap:5,flex:1,minWidth:140}}>
+      {paths.map((p,i)=><div key={i} onClick={()=>setSel(sel===i?null:i)} onMouseEnter={()=>setSel(i)} onMouseLeave={()=>setSel(null)} style={{display:"flex",alignItems:"center",gap:8,fontSize:11,cursor:"pointer",opacity:sel==null||sel===i?1:0.5}}><div style={{width:8,height:8,borderRadius:2,background:p.color,flexShrink:0}}/><span style={{color:D.text2,flex:1}}>{p.label}</span><span style={{color:p.color,fontWeight:600,fontVariantNumeric:"tabular-nums"}}>{sel===i?fmtV(p.v):`${p.pct}%`}</span></div>)}
+      <div style={{borderTop:`1px solid ${D.border}`,marginTop:4,paddingTop:6,fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{color:D.text3}}>{ativo?ativo.label:"Total"}</span><span style={{fontWeight:700,color:ativo?ativo.color:D.text}}>{fmtV(ativo?ativo.v:total)}</span></div>
+    </div>
   </div>;
 }
 function LineChart({data,currency}){
@@ -1296,7 +1302,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
         </div>
         <MiniBar valor={c.total} total={totalInvest} cor={c.color}/>
       </Card>)}
-      <PieChart slices={[{label:"Renda Variável",v:totalRV,color:D.blue},{label:"Renda Fixa",v:totalRF,color:D.gold},{label:"Outros",v:totalOu,color:D.purple}].filter(s=>s.v>0)}/>
+      <PieChart slices={[{label:"Renda Variável",v:totalRV,color:D.blue},{label:"Renda Fixa",v:totalRF,color:D.gold},{label:"Outros",v:totalOu,color:D.purple}].filter(s=>s.v>0)} currency={currency}/>
     </div>}
 
     {view==="rv"&&<div>
@@ -1785,7 +1791,7 @@ function SplitwiseTab({currency,userEmail}){
         <p style={{fontSize:13,fontWeight:700,color:D.text,margin:0}}>Gastos de {labelMes} por categoria</p>
         <span style={{fontSize:12,color:D.text3}}>total {fmtM(totalGrupo,currency)}</span>
       </div>
-      <PieChart slices={cats}/>
+      <PieChart slices={cats} currency={currency}/>
     </Card>;})()}
 
     {dadosMes.despesas.length>0&&(()=>{const tot=totaisPorPessoa(dadosMes);const ent=Object.entries(tot);return <Card>
@@ -3485,8 +3491,8 @@ function AppInner(){
               <LineChart data={pts} currency={currency}/>
             </div>;
           })()}
-          {grafico==="pizza_d"&&<PieChart slices={catPieD}/>}
-          {grafico==="pizza_r"&&<PieChart slices={catPieR}/>}
+          {grafico==="pizza_d"&&<PieChart slices={catPieD} currency={currency}/>}
+          {grafico==="pizza_r"&&<PieChart slices={catPieR} currency={currency}/>}
           {grafico==="linha"&&<LineChart data={lineData} currency={currency}/>}
         </Card>
         {data.orcamentos?.length>0&&(()=>{
