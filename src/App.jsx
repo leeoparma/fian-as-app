@@ -1456,7 +1456,7 @@ function SplitwiseTab({currency,userEmail}){
   const [inputCod,setInputCod]=useState("");
   const [setupNome,setSetupNome]=useState("");
   const [saldosGrupos,setSaldosGrupos]=useState({});
-  const [mesSel,setMesSel]=useState(()=>new Date().toISOString().slice(0,7)); // "AAAA-MM" recorte do mês
+  const [mesSel,setMesSel]=useState(()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;}); // "AAAA-MM" recorte do mês (data local)
 
   // Ícones por categoria (estilo app oficial)
   const CATS=[
@@ -1734,7 +1734,7 @@ function SplitwiseTab({currency,userEmail}){
   const saldos=calcSaldos(dadosMes);const dividas=calcDividas(dadosMes);const meuSaldo=saldos[nomeUser]||0;
   const meuSaldoGeral=calcSaldos()[nomeUser]||0;
   const [ay,am]=mesSel.split("-");const labelMes=`${MESES[(+am)-1]} ${ay}`;
-  const passoMes=delta=>{const dt=new Date(+ay,(+am)-1+delta,1);setMesSel(dt.toISOString().slice(0,7));};
+  const passoMes=delta=>{let y=+ay,m=(+am)-1+delta;y+=Math.floor(m/12);m=((m%12)+12)%12;setMesSel(`${y}-${String(m+1).padStart(2,"0")}`);};
   const temDespesasMes=dadosMes.despesas.length>0;
 
   return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
