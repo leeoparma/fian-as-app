@@ -3135,15 +3135,42 @@ function RelatoriosTab({data,setData,currency}){
     const escH=s=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
     const linhasTx=txs.map(t=>`<tr><td>${t.data}</td><td>${t.tipo==="receita"?"Receita":"Despesa"}</td><td>${escH(t.descricao)}</td><td>${escH(t.categoria)}</td><td>${escH(nomeBanco(t.bancoId))}</td><td style="text-align:right;color:${t.tipo==="receita"?"#0a7":"#c33"}">${t.tipo==="receita"?"+":"-"}${fmtM(t.valor,currency)}</td></tr>`).join("");
     const linhasCat=catList.map(c=>`<tr><td>${escH(c.cat)}</td><td style="text-align:right">${fmtM(c.v,currency)}</td></tr>`).join("");
+    const logoURL=`${location.origin}/logo.svg`;
+    const metaLinha=`Gerado em ${new Date().toLocaleString("pt-BR")}${bancoFiltro?` · Banco: ${escH(nomeBanco(bancoFiltro))}`:""}${tipoFiltro?` · ${tipoFiltro==="receita"?"Só receitas":"Só despesas"}`:""}${catFiltro?` · Categoria: ${escH(catFiltro)}`:""}`;
     const html=`<!doctype html><html><head><meta charset="utf-8"><title>Relatório ${labelPeriodo}</title>
-<style>body{font-family:system-ui,Arial,sans-serif;color:#111;padding:24px;max-width:820px;margin:0 auto}h1{font-size:18px;margin:0 0 4px}h2{font-size:14px;margin:24px 0 6px;border-bottom:1px solid #ccc;padding-bottom:4px}table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:5px 8px;border-bottom:1px solid #eee;text-align:left}th{background:#f4f4f4}.tot{display:flex;gap:24px;margin:12px 0;font-size:13px}</style>
-</head><body>
-<h1>📄 Relatório financeiro — ${labelPeriodo}</h1>
-<p style="font-size:12px;color:#666">Gerado em ${new Date().toLocaleString("pt-BR")}${bancoFiltro?` · Banco: ${escH(nomeBanco(bancoFiltro))}`:""}${tipoFiltro?` · ${tipoFiltro==="receita"?"Só receitas":"Só despesas"}`:""}${catFiltro?` · Categoria: ${escH(catFiltro)}`:""}</p>
-<div class="tot"><div><b>Receitas:</b> ${fmtM(totR,currency)}</div><div><b>Despesas:</b> ${fmtM(totD,currency)}</div><div><b>Saldo:</b> ${fmtM(totR-totD,currency)}</div></div>
+<style>
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,'Segoe UI',Arial,sans-serif;color:#111;margin:0;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.hdr{background:linear-gradient(135deg,#0a0e1a,#151d35);color:#fff;padding:22px 28px;display:flex;align-items:center;gap:16px;border-bottom:3px solid #00d084}
+.hdr img{width:54px;height:54px;border-radius:12px;box-shadow:0 0 18px rgba(0,208,132,.4)}
+.hdr .t1{font-size:11px;letter-spacing:.6px;color:#00d084;font-weight:700;text-transform:uppercase}
+.hdr .t2{font-size:20px;font-weight:800;margin:2px 0 0}
+.hdr .t3{font-size:11px;color:#9aa4b2;margin-top:3px}
+.wrap{max-width:840px;margin:0 auto;padding:0 28px 36px}
+.cards{display:flex;gap:12px;margin:22px 0}
+.card{flex:1;border:1px solid #e5e7eb;border-radius:12px;padding:12px 14px}
+.card .lbl{font-size:10px;color:#666;text-transform:uppercase;letter-spacing:.5px}
+.card .val{font-size:18px;font-weight:800;margin-top:3px}
+h2{font-size:12px;margin:26px 0 8px;color:#0a7d3b;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid rgba(0,208,132,.3);padding-bottom:5px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{background:#ecfdf5;color:#065f46;text-align:left;padding:7px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.4px;border-bottom:2px solid #00d084}
+td{padding:6px 10px;border-bottom:1px solid #eef0f2}
+tbody tr:nth-child(even){background:#f8fafc}
+.ft{margin-top:30px;padding-top:12px;border-top:1px solid #e5e7eb;font-size:10px;color:#9aa;text-align:center}
+.ft b{color:#00a36a}
+</style></head><body>
+<div class="hdr"><img id="lg" src="${logoURL}" alt=""><div><div class="t1">Controle Financeiro</div><div class="t2">Relatório financeiro — ${labelPeriodo}</div><div class="t3">${metaLinha}</div></div></div>
+<div class="wrap">
+<div class="cards">
+  <div class="card"><div class="lbl">Receitas</div><div class="val" style="color:#0a7d3b">${fmtM(totR,currency)}</div></div>
+  <div class="card"><div class="lbl">Despesas</div><div class="val" style="color:#c0392b">${fmtM(totD,currency)}</div></div>
+  <div class="card"><div class="lbl">Saldo</div><div class="val" style="color:${totR-totD>=0?'#0a7d3b':'#c0392b'}">${fmtM(totR-totD,currency)}</div></div>
+</div>
 <h2>Despesas por categoria</h2><table><thead><tr><th>Categoria</th><th style="text-align:right">Total</th></tr></thead><tbody>${linhasCat||'<tr><td colspan="2">Sem despesas no período</td></tr>'}</tbody></table>
 <h2>Lançamentos (${txs.length})</h2><table><thead><tr><th>Data</th><th>Tipo</th><th>Descrição</th><th>Categoria</th><th>Banco</th><th style="text-align:right">Valor</th></tr></thead><tbody>${linhasTx||'<tr><td colspan="6">Nenhum lançamento</td></tr>'}</tbody></table>
-<script>window.onload=function(){window.print();}</script>
+<div class="ft">Gerado por <b>Controle Financeiro</b> · ${new Date().toLocaleDateString("pt-BR")}</div>
+</div>
+<script>window.addEventListener('load',function(){var img=document.getElementById('lg');function go(){window.print();}if(img&&!img.complete){img.addEventListener('load',go);img.addEventListener('error',go);setTimeout(go,800);}else{setTimeout(go,250);}});</script>
 </body></html>`;
     const w=window.open("","_blank");
     if(!w){alert("Permita pop-ups neste site para gerar o relatório em PDF.");return;}
