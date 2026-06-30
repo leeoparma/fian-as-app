@@ -585,6 +585,7 @@ function ScoreCard({data}){
 function LoginScreen({onLogin}){
   const [mode,setMode]=useState("login");const [email,setEmail]=useState(()=>lsGet("last_email")||"");const [pass,setPass]=useState("");
   const [loading,setLoading]=useState(false);const [erro,setErro]=useState("");const [msg,setMsg]=useState("");
+  const [estrelas]=useState(()=>Array.from({length:34},()=>({top:Math.random()*100,left:Math.random()*100,size:Math.random()*1.6+0.8,delay:Math.random()*4,dur:2+Math.random()*3})));
   const lembrado=!!lsGet("last_email");
   async function handle(){if(!email||!pass){setErro("Preencha email e senha.");return;}setLoading(true);setErro("");setMsg("");
     try{if(mode==="register"){const r=await supa.signUp(email,pass);if(r.error)setErro(r.error.message);else{setMsg("✅ Conta criada! Verifique seu email.");setMode("login");}}
@@ -592,14 +593,25 @@ function LoginScreen({onLogin}){
   return <div style={{position:"relative",minHeight:"100vh",overflow:"hidden",background:`radial-gradient(ellipse at top,${D.bg2} 0%,${D.bg} 70%)`,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
     <style>{`
       @keyframes flLogoFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
-      @keyframes flGlow{0%,100%{opacity:.32;transform:scale(1)}50%{opacity:.5;transform:scale(1.14)}}
+      @keyframes flGlow{0%,100%{opacity:.28;transform:scale(1)}50%{opacity:.44;transform:scale(1.12)}}
       @keyframes flCardIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+      @keyframes flTwinkle{0%,100%{opacity:.12}50%{opacity:.85}}
+      @keyframes flShoot{0%{transform:translate(0,0) rotate(32deg);opacity:0}6%{opacity:1}26%{opacity:1}42%{transform:translate(340px,212px) rotate(32deg);opacity:0}100%{transform:translate(340px,212px) rotate(32deg);opacity:0}}
+      @keyframes flDraw{0%{stroke-dashoffset:1300;opacity:0}12%{opacity:1}58%{stroke-dashoffset:0;opacity:1}84%{opacity:1}100%{stroke-dashoffset:0;opacity:0}}
+      @keyframes flPulse{0%,100%{opacity:.04}50%{opacity:.13}}
       .fl-glow{position:absolute;border-radius:50%;filter:blur(64px);pointer-events:none}
       .fl-glass{background:rgba(255,255,255,.045);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border:1px solid rgba(255,255,255,.09);box-shadow:0 24px 64px rgba(0,0,0,.5);animation:flCardIn .6s ease both}
+      .fl-star{position:absolute;border-radius:50%;background:#fff;pointer-events:none}
     `}</style>
-    <div className="fl-glow" style={{width:360,height:360,top:-80,left:-60,background:`radial-gradient(circle,${D.green}55,transparent 70%)`,animation:"flGlow 12s ease-in-out infinite"}}/>
-    <div className="fl-glow" style={{width:380,height:380,bottom:-90,right:-70,background:`radial-gradient(circle,${D.blue}4d,transparent 70%)`,animation:"flGlow 14s ease-in-out infinite 2s"}}/>
-    <div className="fl-glow" style={{width:300,height:300,bottom:30,left:-50,background:`radial-gradient(circle,${D.purple}3a,transparent 70%)`,animation:"flGlow 16s ease-in-out infinite 1s"}}/>
+    <div className="fl-glow" style={{width:340,height:340,top:-80,left:-60,background:`radial-gradient(circle,${D.green}4d,transparent 70%)`,animation:"flGlow 12s ease-in-out infinite"}}/>
+    <div className="fl-glow" style={{width:360,height:360,bottom:-90,right:-70,background:`radial-gradient(circle,${D.blue}40,transparent 70%)`,animation:"flGlow 14s ease-in-out infinite 2s"}}/>
+    {estrelas.map((s,i)=><div key={i} className="fl-star" style={{top:s.top+"%",left:s.left+"%",width:s.size,height:s.size,animation:`flTwinkle ${s.dur}s ease-in-out ${s.delay}s infinite`}}/>)}
+    <div style={{position:"absolute",top:"10%",left:"-8%",width:90,height:2,borderRadius:2,background:`linear-gradient(90deg,transparent,${D.green})`,filter:`drop-shadow(0 0 6px ${D.green})`,opacity:0,pointerEvents:"none",animation:"flShoot 8s ease-in 1.5s infinite"}}/>
+    <div style={{position:"absolute",top:"24%",left:"6%",width:70,height:2,borderRadius:2,background:"linear-gradient(90deg,transparent,#fff)",filter:"drop-shadow(0 0 6px #fff)",opacity:0,pointerEvents:"none",animation:"flShoot 11s ease-in 5s infinite"}}/>
+    <svg viewBox="0 0 400 200" preserveAspectRatio="none" style={{position:"absolute",left:0,right:0,bottom:0,width:"100%",height:"44%",pointerEvents:"none"}}>
+      <path d="M0,175 L33,158 L66,168 L100,140 L133,150 L166,118 L200,128 L233,95 L266,105 L300,70 L333,82 L366,48 L400,32 L400,200 L0,200 Z" fill={D.green} style={{opacity:.07,animation:"flPulse 6s ease-in-out infinite"}}/>
+      <path d="M0,175 L33,158 L66,168 L100,140 L133,150 L166,118 L200,128 L233,95 L266,105 L300,70 L333,82 L366,48 L400,32" fill="none" stroke={D.green} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" style={{filter:`drop-shadow(0 0 5px ${D.green})`,strokeDasharray:1300,animation:"flDraw 6s ease-in-out infinite"}}/>
+    </svg>
     <div style={{position:"relative",width:"min(100%,400px)",zIndex:1}}>
       <div style={{textAlign:"center",marginBottom:"2rem"}}>
         <div style={{marginBottom:12}}><img src="/logo.svg" alt="logo" style={{width:84,height:84,borderRadius:20,filter:`drop-shadow(0 0 24px ${D.green}77)`,animation:"flLogoFloat 5s ease-in-out infinite"}}/></div>
