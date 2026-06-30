@@ -3133,42 +3133,52 @@ function RelatoriosTab({data,setData,currency}){
 
   function imprimir(){
     const escH=s=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-    const linhasTx=txs.map(t=>`<tr><td>${t.data}</td><td>${t.tipo==="receita"?"Receita":"Despesa"}</td><td>${escH(t.descricao)}</td><td>${escH(t.categoria)}</td><td>${escH(nomeBanco(t.bancoId))}</td><td style="text-align:right;color:${t.tipo==="receita"?"#0a7":"#c33"}">${t.tipo==="receita"?"+":"-"}${fmtM(t.valor,currency)}</td></tr>`).join("");
+    const linhasTx=txs.map(t=>`<tr><td>${t.data}</td><td>${t.tipo==="receita"?"Receita":"Despesa"}</td><td>${escH(t.descricao)}</td><td>${escH(t.categoria)}</td><td>${escH(nomeBanco(t.bancoId))}</td><td style="text-align:right;color:${t.tipo==="receita"?"#0a7d3b":"#b91c1c"};font-variant-numeric:tabular-nums">${t.tipo==="receita"?"+":"−"}${fmtM(t.valor,currency)}</td></tr>`).join("");
     const linhasCat=catList.map(c=>`<tr><td>${escH(c.cat)}</td><td style="text-align:right">${fmtM(c.v,currency)}</td></tr>`).join("");
     const logoURL=`${location.origin}/logo.svg`;
     const metaLinha=`Gerado em ${new Date().toLocaleString("pt-BR")}${bancoFiltro?` · Banco: ${escH(nomeBanco(bancoFiltro))}`:""}${tipoFiltro?` · ${tipoFiltro==="receita"?"Só receitas":"Só despesas"}`:""}${catFiltro?` · Categoria: ${escH(catFiltro)}`:""}`;
     const html=`<!doctype html><html><head><meta charset="utf-8"><title>Relatório ${labelPeriodo}</title>
 <style>
 *{box-sizing:border-box}
-body{font-family:system-ui,-apple-system,'Segoe UI',Arial,sans-serif;color:#111;margin:0;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-.hdr{background:linear-gradient(135deg,#0a0e1a,#151d35);color:#fff;padding:22px 28px;display:flex;align-items:center;gap:16px;border-bottom:3px solid #00d084}
-.hdr img{width:54px;height:54px;border-radius:12px;box-shadow:0 0 18px rgba(0,208,132,.4)}
-.hdr .t1{font-size:11px;letter-spacing:.6px;color:#00d084;font-weight:700;text-transform:uppercase}
-.hdr .t2{font-size:20px;font-weight:800;margin:2px 0 0}
-.hdr .t3{font-size:11px;color:#9aa4b2;margin-top:3px}
-.wrap{max-width:840px;margin:0 auto;padding:0 28px 36px}
-.cards{display:flex;gap:12px;margin:22px 0}
-.card{flex:1;border:1px solid #e5e7eb;border-radius:12px;padding:12px 14px}
-.card .lbl{font-size:10px;color:#666;text-transform:uppercase;letter-spacing:.5px}
-.card .val{font-size:18px;font-weight:800;margin-top:3px}
-h2{font-size:12px;margin:26px 0 8px;color:#0a7d3b;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid rgba(0,208,132,.3);padding-bottom:5px}
-table{width:100%;border-collapse:collapse;font-size:12px}
-th{background:#ecfdf5;color:#065f46;text-align:left;padding:7px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.4px;border-bottom:2px solid #00d084}
-td{padding:6px 10px;border-bottom:1px solid #eef0f2}
-tbody tr:nth-child(even){background:#f8fafc}
-.ft{margin-top:30px;padding-top:12px;border-top:1px solid #e5e7eb;font-size:10px;color:#9aa;text-align:center}
-.ft b{color:#00a36a}
+body{font-family:system-ui,-apple-system,'Segoe UI',Arial,sans-serif;color:#1f2937;margin:0;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;font-size:12px;line-height:1.5}
+.wrap{max-width:840px;margin:0 auto;padding:40px 40px 48px}
+.lh{display:flex;justify-content:space-between;align-items:flex-end;padding-bottom:14px;border-bottom:2px solid #0a7d3b}
+.lh .brand{display:flex;align-items:center;gap:12px}
+.lh img{width:42px;height:42px;border-radius:9px}
+.lh .nm{font-size:16px;font-weight:800;letter-spacing:.3px;color:#111}
+.lh .tg{font-size:10px;color:#6b7280;letter-spacing:.5px;text-transform:uppercase;margin-top:1px}
+.lh .doc{text-align:right}
+.lh .doc .l1{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:#0a7d3b;font-weight:700}
+.lh .doc .l2{font-size:18px;font-weight:800;color:#111;margin-top:2px}
+.meta{font-size:10px;color:#9ca3af;margin:8px 0 0}
+.summary{display:flex;margin:24px 0;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden}
+.summary .c{flex:1;padding:12px 16px;border-right:1px solid #e5e7eb}
+.summary .c:last-child{border-right:none}
+.summary .lbl{font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px}
+.summary .val{font-size:17px;font-weight:800;margin-top:3px;font-variant-numeric:tabular-nums}
+h2{font-size:11px;margin:28px 0 8px;color:#111;text-transform:uppercase;letter-spacing:.8px;font-weight:700;display:flex;align-items:center;gap:7px}
+h2:before{content:"";width:9px;height:9px;background:#0a7d3b;border-radius:2px;display:inline-block}
+table{width:100%;border-collapse:collapse;font-size:11.5px}
+th{text-align:left;padding:7px 10px;font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280;border-bottom:1.5px solid #111}
+td{padding:6px 10px;border-bottom:1px solid #f0f1f3}
+tbody tr:nth-child(even){background:#fafbfc}
+.ft{margin-top:34px;padding-top:12px;border-top:1px solid #e5e7eb;font-size:9.5px;color:#9ca3af;display:flex;justify-content:space-between}
+@page{margin:14mm}
 </style></head><body>
-<div class="hdr"><img id="lg" src="${logoURL}" alt=""><div><div class="t1">Controle Financeiro</div><div class="t2">Relatório financeiro — ${labelPeriodo}</div><div class="t3">${metaLinha}</div></div></div>
 <div class="wrap">
-<div class="cards">
-  <div class="card"><div class="lbl">Receitas</div><div class="val" style="color:#0a7d3b">${fmtM(totR,currency)}</div></div>
-  <div class="card"><div class="lbl">Despesas</div><div class="val" style="color:#c0392b">${fmtM(totD,currency)}</div></div>
-  <div class="card"><div class="lbl">Saldo</div><div class="val" style="color:${totR-totD>=0?'#0a7d3b':'#c0392b'}">${fmtM(totR-totD,currency)}</div></div>
+<div class="lh">
+  <div class="brand"><img id="lg" src="${logoURL}" alt=""><div><div class="nm">Controle Financeiro</div><div class="tg">Gestão de finanças pessoais</div></div></div>
+  <div class="doc"><div class="l1">Relatório financeiro</div><div class="l2">${labelPeriodo}</div></div>
+</div>
+<div class="meta">${metaLinha}</div>
+<div class="summary">
+  <div class="c"><div class="lbl">Receitas</div><div class="val" style="color:#0a7d3b">${fmtM(totR,currency)}</div></div>
+  <div class="c"><div class="lbl">Despesas</div><div class="val" style="color:#b91c1c">${fmtM(totD,currency)}</div></div>
+  <div class="c"><div class="lbl">Saldo do período</div><div class="val" style="color:${totR-totD>=0?'#0a7d3b':'#b91c1c'}">${fmtM(totR-totD,currency)}</div></div>
 </div>
 <h2>Despesas por categoria</h2><table><thead><tr><th>Categoria</th><th style="text-align:right">Total</th></tr></thead><tbody>${linhasCat||'<tr><td colspan="2">Sem despesas no período</td></tr>'}</tbody></table>
 <h2>Lançamentos (${txs.length})</h2><table><thead><tr><th>Data</th><th>Tipo</th><th>Descrição</th><th>Categoria</th><th>Banco</th><th style="text-align:right">Valor</th></tr></thead><tbody>${linhasTx||'<tr><td colspan="6">Nenhum lançamento</td></tr>'}</tbody></table>
-<div class="ft">Gerado por <b>Controle Financeiro</b> · ${new Date().toLocaleDateString("pt-BR")}</div>
+<div class="ft"><span>Controle Financeiro</span><span>Documento gerado em ${new Date().toLocaleDateString("pt-BR")}</span></div>
 </div>
 <script>window.addEventListener('load',function(){var img=document.getElementById('lg');function go(){window.print();}if(img&&!img.complete){img.addEventListener('load',go);img.addEventListener('error',go);setTimeout(go,800);}else{setTimeout(go,250);}});</script>
 </body></html>`;
