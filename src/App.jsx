@@ -3285,6 +3285,7 @@ function AppInner(){
   const [mes,setMes]=useState(MES_ATUAL);
   const [grafico,setGrafico]=useState("barras");
   const [modalSal,setModalSal]=useState(false);const [salForm,setSalForm]=useState({});
+  const [catDet,setCatDet]=useState(null); // {cat,tipo} aberto no gráfico de pizza
   const saveTimer=useRef(null);
   const importRef=useRef(null);
   // Trava de segurança: só permite salvar no Supabase DEPOIS de carregar com sucesso.
@@ -3455,8 +3456,8 @@ function AppInner(){
   const tiposI=TIPOS_INV.map(t=>({t,v:data.investimentos.filter(i=>i.tipo===t).reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0)})).filter(x=>x.v>0);
   const ultimos6=Array.from({length:6},(_,i)=>{const d=new Date(ANO_ATUAL,MES_ATUAL-5+i,1),m=d.getMonth(),a=d.getFullYear();const txs=data.transacoes.filter(t=>{const td=new Date(t.data);return td.getMonth()===m&&td.getFullYear()===a&&!CAT_INTERNAS.includes(t.categoria);});return{label:MESES[m],r:txs.filter(t=>t.tipo==="receita").reduce((a,b)=>a+b.valor,0),d:txs.filter(t=>t.tipo==="despesa").reduce((a,b)=>a+b.valor,0)};});
   let acc=0;const lineData=ultimos6.map(d=>{acc+=d.r-d.d;return{label:d.label,v:acc};});
-  const catPieD=catD.map((c,i)=>({label:c,v:txMes.filter(t=>t.tipo==="despesa"&&t.categoria===c).reduce((a,b)=>a+b.valor,0),color:CORES[i%CORES.length]})).filter(x=>x.v>0);
-  const catPieR=catR.map((c,i)=>({label:c,v:txMes.filter(t=>t.tipo==="receita"&&t.categoria===c).reduce((a,b)=>a+b.valor,0),color:CORES[i%CORES.length]})).filter(x=>x.v>0);
+  const catPieD=catD.map((c,i)=>({label:c,cat:c,v:txMes.filter(t=>t.tipo==="despesa"&&t.categoria===c).reduce((a,b)=>a+b.valor,0),color:CORES[i%CORES.length]})).filter(x=>x.v>0);
+  const catPieR=catR.map((c,i)=>({label:c,cat:c,v:txMes.filter(t=>t.tipo==="receita"&&t.categoria===c).reduce((a,b)=>a+b.valor,0),color:CORES[i%CORES.length]})).filter(x=>x.v>0);
 
   return <>
     <style>{GS}</style>
@@ -3541,8 +3542,26 @@ function AppInner(){
               <LineChart data={pts} currency={currency}/>
             </div>;
           })()}
-          {grafico==="pizza_d"&&<PieChart slices={catPieD} currency={currency}/>}
-          {grafico==="pizza_r"&&<PieChart slices={catPieR} currency={currency}/>}
+          {grafico==="pizza_d"&&<PieChart slices={catPieD} currency={currency} onSlice={p=>setCatDet(prev=>prev&&prev.cat===p.cat&&prev.tipo==="despesa"?null:{cat:p.cat,tipo:"despesa"})}/>}
+          {grafico==="pizza_r"&&<PieChart slices={catPieR} currency={currency} onSlice={p=>setCatDet(prev=>prev&&prev.cat===p.cat&&prev.tipo==="receita"?null:{cat:p.cat,tipo:"receita"})}/>}
+          {(grafico==="pizza_d"||grafico==="pizza_r")&&catDet&&catDet.tipo===(grafico==="pizza_d"?"despesa":"receita")&&(()=>{
+            const itens=txMes.filter(t=>t.tipo===catDet.tipo&&(t.categoria||"")===catDet.cat).sort((a,b)=>(b.data||"").localeCompare(a.data||""));
+            const tot=itens.reduce((a,t)=>a+(t.valor||0),0);
+            return <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${D.border}`}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                <span style={{fontSize:12,fontWeight:700,color:D.text}}>{catDet.cat} · {itens.length} lançamento{itens.length!==1?"s":""}</span>
+                <button onClick={()=>setCatDet(null)} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:14}}>✕</button>
+              </div>
+              {itens.length===0?<p style={{fontSize:12,color:D.text3}}>Nada neste mês.</p>:itens.map(t=><div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:`1px solid ${D.border}`,gap:8}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <p style={{margin:0,fontSize:12,color:D.text}}>{t.descricao||"(sem descrição)"}</p>
+                  <p style={{margin:"1px 0 0",fontSize:10,color:D.text3}}>{t.data}{t.bancoId?` · ${(data.bancos.find(b=>b.id===t.bancoId)||{}).nome||""}`:""}</p>
+                </div>
+                <span style={{fontSize:13,fontWeight:700,color:catDet.tipo==="despesa"?D.red:D.green}}>{fmtM(t.valor||0,currency)}</span>
+              </div>)}
+              <div style={{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:11,color:D.text3}}><span>Total {catDet.cat} no mês</span><span style={{fontWeight:700,color:D.text2}}>{fmtM(tot,currency)}</span></div>
+            </div>;
+          })()}
           {grafico==="linha"&&<LineChart data={lineData} currency={currency}/>}
         </Card>
         {data.orcamentos?.length>0&&(()=>{
