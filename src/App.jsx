@@ -583,23 +583,35 @@ function ScoreCard({data}){
 
 // ── Login ─────────────────────────────────────────────────────────────────────
 function LoginScreen({onLogin}){
-  const [mode,setMode]=useState("login");const [email,setEmail]=useState("");const [pass,setPass]=useState("");
+  const [mode,setMode]=useState("login");const [email,setEmail]=useState(()=>lsGet("last_email")||"");const [pass,setPass]=useState("");
   const [loading,setLoading]=useState(false);const [erro,setErro]=useState("");const [msg,setMsg]=useState("");
+  const lembrado=!!lsGet("last_email");
   async function handle(){if(!email||!pass){setErro("Preencha email e senha.");return;}setLoading(true);setErro("");setMsg("");
     try{if(mode==="register"){const r=await supa.signUp(email,pass);if(r.error)setErro(r.error.message);else{setMsg("✅ Conta criada! Verifique seu email.");setMode("login");}}
-    else{const r=await supa.signIn(email,pass);if(r.error)setErro("Email ou senha incorretos.");else onLogin(r.access_token,r.user);}}catch{setErro("Erro de conexão.");}setLoading(false);}
-  return <div style={{minHeight:"100vh",background:`radial-gradient(ellipse at top,${D.bg2} 0%,${D.bg} 70%)`,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
-    <div style={{width:"min(100%,400px)"}}>
+    else{const r=await supa.signIn(email,pass);if(r.error)setErro("Email ou senha incorretos.");else{lsSet("last_email",email);onLogin(r.access_token,r.user);}}}catch{setErro("Erro de conexão.");}setLoading(false);}
+  return <div style={{position:"relative",minHeight:"100vh",overflow:"hidden",background:`radial-gradient(ellipse at top,${D.bg2} 0%,${D.bg} 70%)`,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
+    <style>{`
+      @keyframes flLogoFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+      @keyframes flGlow{0%,100%{opacity:.32;transform:scale(1)}50%{opacity:.5;transform:scale(1.14)}}
+      @keyframes flCardIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+      .fl-glow{position:absolute;border-radius:50%;filter:blur(64px);pointer-events:none}
+      .fl-glass{background:rgba(255,255,255,.045);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border:1px solid rgba(255,255,255,.09);box-shadow:0 24px 64px rgba(0,0,0,.5);animation:flCardIn .6s ease both}
+    `}</style>
+    <div className="fl-glow" style={{width:360,height:360,top:-80,left:-60,background:`radial-gradient(circle,${D.green}55,transparent 70%)`,animation:"flGlow 12s ease-in-out infinite"}}/>
+    <div className="fl-glow" style={{width:380,height:380,bottom:-90,right:-70,background:`radial-gradient(circle,${D.blue}4d,transparent 70%)`,animation:"flGlow 14s ease-in-out infinite 2s"}}/>
+    <div className="fl-glow" style={{width:300,height:300,bottom:30,left:-50,background:`radial-gradient(circle,${D.purple}3a,transparent 70%)`,animation:"flGlow 16s ease-in-out infinite 1s"}}/>
+    <div style={{position:"relative",width:"min(100%,400px)",zIndex:1}}>
       <div style={{textAlign:"center",marginBottom:"2rem"}}>
-        <div style={{marginBottom:12}}><img src="/logo.svg" alt="logo" style={{width:84,height:84,borderRadius:20,filter:`drop-shadow(0 0 20px ${D.green}66)`}}/></div>
-        <h1 style={{fontSize:24,fontWeight:800,color:D.text}}>Controle Financeiro</h1>
+        <div style={{marginBottom:12}}><img src="/logo.svg" alt="logo" style={{width:84,height:84,borderRadius:20,filter:`drop-shadow(0 0 24px ${D.green}77)`,animation:"flLogoFloat 5s ease-in-out infinite"}}/></div>
+        <h1 style={{fontSize:24,fontWeight:800,color:D.text,margin:0}}>Controle Financeiro</h1>
         <p style={{color:D.text3,fontSize:13,marginTop:4}}>Gerencie suas finanças em qualquer lugar</p>
+        {lembrado&&mode==="login"&&<p style={{color:D.green,fontSize:13,marginTop:8,fontWeight:600}}>Que bom te ver de novo 👋</p>}
       </div>
-      <div style={{background:D.card,border:`1px solid ${D.border}`,borderRadius:20,padding:"2rem"}}>
+      <div className="fl-glass" style={{borderRadius:20,padding:"2rem"}}>
         {erro&&<div style={{background:D.red+"22",border:`1px solid ${D.red}44`,borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:12,color:D.red}}>{erro}</div>}
         {msg&&<div style={{background:D.green+"22",border:`1px solid ${D.green}44`,borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:12,color:D.green}}>{msg}</div>}
         <div style={{display:"flex",gap:4,marginBottom:"1.5rem",background:D.bg3,borderRadius:10,padding:4}}>
-          {[["login","Entrar"],["register","Criar conta"]].map(([v,l])=><button key={v} onClick={()=>{setMode(v);setErro("");setMsg("");}} style={{flex:1,padding:"9px",borderRadius:8,border:"none",cursor:"pointer",fontSize:13,fontWeight:mode===v?700:400,background:mode===v?D.green:"transparent",color:mode===v?"#000":D.text3}}>{l}</button>)}
+          {[["login","Entrar"],["register","Criar conta"]].map(([v,l])=><button key={v} onClick={()=>{setMode(v);setErro("");setMsg("");}} style={{flex:1,padding:"9px",borderRadius:8,border:"none",cursor:"pointer",fontSize:13,fontWeight:mode===v?700:400,background:mode===v?D.green:"transparent",color:mode===v?"#000":D.text3,transition:"all .2s"}}>{l}</button>)}
         </div>
         <label style={{fontSize:12,color:D.text3,display:"block",marginBottom:12}}>Email<input type="email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handle()} placeholder="seu@email.com" style={{marginTop:6}}/></label>
         <label style={{fontSize:12,color:D.text3,display:"block",marginBottom:20}}>Senha<input type="password" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handle()} placeholder="••••••••" style={{marginTop:6}}/></label>
