@@ -3456,8 +3456,8 @@ function AppInner(){
   const tiposI=TIPOS_INV.map(t=>({t,v:data.investimentos.filter(i=>i.tipo===t).reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0)})).filter(x=>x.v>0);
   const ultimos6=Array.from({length:6},(_,i)=>{const d=new Date(ANO_ATUAL,MES_ATUAL-5+i,1),m=d.getMonth(),a=d.getFullYear();const txs=data.transacoes.filter(t=>{const td=new Date(t.data);return td.getMonth()===m&&td.getFullYear()===a&&!CAT_INTERNAS.includes(t.categoria);});return{label:MESES[m],r:txs.filter(t=>t.tipo==="receita").reduce((a,b)=>a+b.valor,0),d:txs.filter(t=>t.tipo==="despesa").reduce((a,b)=>a+b.valor,0)};});
   let acc=0;const lineData=ultimos6.map(d=>{acc+=d.r-d.d;return{label:d.label,v:acc};});
-  const catPieD=catD.map((c,i)=>({label:c,cat:c,v:txMes.filter(t=>t.tipo==="despesa"&&t.categoria===c).reduce((a,b)=>a+b.valor,0),color:CORES[i%CORES.length]})).filter(x=>x.v>0);
-  const catPieR=catR.map((c,i)=>({label:c,cat:c,v:txMes.filter(t=>t.tipo==="receita"&&t.categoria===c).reduce((a,b)=>a+b.valor,0),color:CORES[i%CORES.length]})).filter(x=>x.v>0);
+  const catPieD=catD.map((c,i)=>({label:c,cat:c,v:txMes.filter(t=>t.tipo==="despesa"&&t.categoria===c).reduce((a,b)=>a+b.valor,0),color:CORES[i%CORES.length]})).filter(x=>x.v>0).sort((a,b)=>b.v-a.v);
+  const catPieR=catR.map((c,i)=>({label:c,cat:c,v:txMes.filter(t=>t.tipo==="receita"&&t.categoria===c).reduce((a,b)=>a+b.valor,0),color:CORES[i%CORES.length]})).filter(x=>x.v>0).sort((a,b)=>b.v-a.v);
 
   return <>
     <style>{GS}</style>
