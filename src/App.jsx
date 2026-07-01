@@ -80,7 +80,7 @@ const IND_COMP=[
 
 const hoje=new Date(),MES_ATUAL=hoje.getMonth(),ANO_ATUAL=hoje.getFullYear();
 const CAT_INTERNAS=["Transferência","Aplicação","Resgate"]; // movimento interno: não é receita nem despesa
-const EMPTY={transacoes:[],faturas:[],investimentos:[],metas:[],bancos:[],orcamentos:[],recorrencias:[],dividendos:[],watchlist:[],alertas:[],historico:[],aporteMensal:0,salario:null,catD:[...CAT_D_DEF],catR:[...CAT_R_DEF]};
+const EMPTY={transacoes:[],faturas:[],investimentos:[],metas:[],bancos:[],orcamentos:[],recorrencias:[],dividendos:[],proventosAgendados:[],watchlist:[],alertas:[],historico:[],aporteMensal:0,salario:null,catD:[...CAT_D_DEF],catR:[...CAT_R_DEF]};
 const EMPTY_ALL={br:{...EMPTY},au:{...EMPTY}};
 const lsGet=k=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch{return null;}};
 const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch{}};
@@ -1132,6 +1132,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
   const [modal,setModal]=useState(false);const [form,setForm]=useState({});
   const [chartTicker,setChartTicker]=useState(null);const [loadingId,setLoadingId]=useState(null);
   const [modalDiv,setModalDiv]=useState(false);const [divForm,setDivForm]=useState({});
+  const [modalAg,setModalAg]=useState(false);const [agForm,setAgForm]=useState({});
   const [atualizandoTodos,setAtualizandoTodos]=useState(false);
   const [aporteInput,setAporteInput]=useState(()=>String(data.aporteMensal||""));
   const [modalAporte,setModalAporte]=useState(null);const [aporteForm,setAporteForm]=useState({});
@@ -1180,6 +1181,17 @@ function InvestimentosTab({data,setData,currency,profileId}){
   const proxDiv=data.investimentos.filter(i=>i.prox_dividendo&&i.prox_dividendo>=hojeStr).sort((a,b)=>a.prox_dividendo.localeCompare(b.prox_dividendo));
   // Dividendos com data já vencida (para avisar que precisam atualizar)
   const divVencidos=data.investimentos.filter(i=>i.prox_dividendo&&i.prox_dividendo<hojeStr);
+  // Proventos agendados manualmente (a receber)
+  const agendados=(data.proventosAgendados||[]).slice().sort((a,b)=>(a.dataPagamento||"").localeCompare(b.dataPagamento||""));
+  const agFuturos=agendados.filter(a=>(a.dataPagamento||"")>=hojeStr);
+  const agVencidos=agendados.filter(a=>(a.dataPagamento||"")<hojeStr);
+  const totalAgTotal=a=>(parseFloat(a.valorAcao)||0)*(parseFloat(a.quantidade)||0);
+  const totalAReceber=agFuturos.reduce((s,a)=>s+totalAgTotal(a),0);
+  const em7=new Date(hoje.getTime()+7*864e5).toISOString().slice(0,10);
+  const agProximos=agFuturos.filter(a=>(a.dataPagamento||"")<=em7);
+  // Estimativa de renda passiva pelo DY histórico
+  const estDY=data.investimentos.filter(i=>i.dy>0&&(i.valorAtual||i.valorInvestido||i.valor)>0).map(i=>({ticker:i.ticker||i.descricao||i.tipo,dy:i.dy,anual:(i.valorAtual||i.valorInvestido||i.valor||0)*i.dy/100})).sort((a,b)=>b.anual-a.anual);
+  const totEstAnual=estDY.reduce((s,x)=>s+x.anual,0);
 
   async function buscarDados(inv){
     if(inv.tipo==="Renda Fixa"||inv.tipo==="Tesouro Direto"){
@@ -1253,6 +1265,9 @@ function InvestimentosTab({data,setData,currency,profileId}){
     setData(d=>({...d,investimentos:form.editId?d.investimentos.map(x=>x.id===form.editId?i:x):[...d.investimentos,i],transacoes:aplicTx?[...d.transacoes,aplicTx]:d.transacoes}));setModal(false);setForm({});
   }
   function saveDiv(){const d={id:divForm.editId||uid(),ticker:divForm.ticker||"",valor:parseFloat(divForm.valor)||0,data:divForm.data||hoje.toISOString().slice(0,10),tipo:divForm.tipo||"Dividendo"};setData(dd=>({...dd,dividendos:divForm.editId?(dd.dividendos||[]).map(x=>x.id===divForm.editId?d:x):[...(dd.dividendos||[]),d]}));setModalDiv(false);setDivForm({});}
+  function saveAg(){const q=parseFloat(agForm.quantidade)||0,va=parseFloat(agForm.valorAcao)||0;const a={id:agForm.editId||uid(),ticker:(agForm.ticker||"").toUpperCase(),valorAcao:va,quantidade:q,dataPagamento:agForm.dataPagamento||hojeStr,dataCom:agForm.dataCom||"",tipo:agForm.tipo||"Dividendo"};setData(dd=>({...dd,proventosAgendados:agForm.editId?(dd.proventosAgendados||[]).map(x=>x.id===agForm.editId?a:x):[...(dd.proventosAgendados||[]),a]}));setModalAg(false);setAgForm({});}
+  function receberAg(a){const total=totalAgTotal(a);if(!window.confirm(`Marcar como recebido? Vai lançar ${fmtM(total,currency)} de ${a.ticker} nos proventos recebidos.`))return;setData(dd=>({...dd,dividendos:[...(dd.dividendos||[]),{id:uid(),ticker:a.ticker,valor:Math.round(total*100)/100,data:a.dataPagamento,tipo:a.tipo||"Dividendo"}],proventosAgendados:(dd.proventosAgendados||[]).filter(x=>x.id!==a.id)}));}
+  function delAg(id){setData(dd=>({...dd,proventosAgendados:(dd.proventosAgendados||[]).filter(x=>x.id!==id)}));}
 
   const isRFForm=form.tipo==="Renda Fixa"||form.tipo==="Tesouro Direto";
 
@@ -1369,12 +1384,53 @@ function InvestimentosTab({data,setData,currency,profileId}){
     </div>}
 
     {view==="proventos"&&<div style={{display:"flex",flexDirection:"column",gap:10}}>
-      <Card style={{background:`linear-gradient(135deg,${D.bg3},${D.card2})`,border:`1px solid ${D.gold}33`}}>
-        <p style={{fontSize:10,color:D.text3,textTransform:"uppercase",letterSpacing:"1px",marginBottom:4}}>Total investido · {hoje.toLocaleDateString("pt-BR")}</p>
-        <p style={{fontSize:28,fontWeight:800,color:D.gold}}>{fmtM(totDiv,currency)}</p>
-        <p style={{fontSize:11,color:D.text3,marginTop:2}}>{divMes.length} ativo{divMes.length!==1?"s":""} encontrado{divMes.length!==1?"s":""}</p>
+      {agProximos.length>0&&<Card style={{border:`1px solid ${D.green}55`,background:D.green+"12"}}>
+        <p style={{fontSize:12,fontWeight:700,color:D.green,margin:"0 0 4px"}}>🔔 A receber nos próximos dias</p>
+        {agProximos.map(a=>{const dd=(a.dataPagamento||"").split("-").reverse().join("/");return <p key={a.id} style={{margin:"2px 0",fontSize:12,color:D.text2}}>{a.ticker} · <b style={{color:D.green}}>{fmtM(totalAgTotal(a),currency)}</b> em {dd}</p>;})}
+      </Card>}
+
+      <Card style={{border:`1px solid ${D.gold}33`}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,flexWrap:"wrap",gap:8}}>
+          <div><p style={{margin:0,fontSize:13,fontWeight:700,color:D.text}}>💰 A receber (agendados)</p><p style={{margin:"2px 0 0",fontSize:11,color:D.text3}}>Total futuro: <b style={{color:D.gold}}>{fmtM(totalAReceber,currency)}</b></p></div>
+          <Btn sm color={D.gold} onClick={()=>{setModalAg(true);setAgForm({});}}>+ Agendar</Btn>
+        </div>
+        {agFuturos.length===0&&agVencidos.length===0&&<p style={{fontSize:12,color:D.text3,margin:0}}>Registre o que sua corretora anunciou (ex.: ITUB4, R$ 0,80/ação, paga em 15/08) e acompanhe aqui quanto vai receber e quando.</p>}
+        {[...agFuturos,...agVencidos].map(a=>{const venceu=(a.dataPagamento||"")<hojeStr;return <div key={a.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderTop:`1px solid ${D.border}`,gap:8}}>
+          <div style={{flex:1,minWidth:0}}>
+            <p style={{margin:0,fontSize:13,fontWeight:700,color:D.text}}>{a.ticker} <span style={{fontSize:10,color:D.text3,fontWeight:400}}>{a.tipo}</span></p>
+            <p style={{margin:"2px 0 0",fontSize:11,color:venceu?D.gold:D.text3}}>{venceu?"⏰ pagou em ":"paga em "}{(a.dataPagamento||"").split("-").reverse().join("/")}{a.dataCom?` · data-com ${a.dataCom.split("-").reverse().join("/")}`:""}</p>
+            <p style={{margin:"2px 0 0",fontSize:11,color:D.text3}}>{a.quantidade} × {fmtM(a.valorAcao,currency)}/ação</p>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <p style={{margin:0,fontSize:14,fontWeight:700,color:D.gold}}>{fmtM(totalAgTotal(a),currency)}</p>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:3}}>
+              {venceu&&<button onClick={()=>receberAg(a)} style={{border:"none",background:"none",cursor:"pointer",color:D.green,fontSize:12,fontWeight:700}}>✓ Recebi</button>}
+              <button onClick={()=>{setModalAg(true);setAgForm({...a,editId:a.id});}} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:12}}>✏️</button>
+              <button onClick={()=>delAg(a.id)} style={{border:"none",background:"none",cursor:"pointer",color:D.red,fontSize:12}}>🗑</button>
+            </div>
+          </div>
+        </div>;})}
       </Card>
-      <p style={{fontSize:13,fontWeight:700,color:D.text}}>Meus Ativos</p>
+
+      {estDY.length>0&&<Card style={{border:`1px solid ${D.blue}33`}}>
+        <p style={{margin:0,fontSize:13,fontWeight:700,color:D.text}}>📈 Estimativa de renda passiva</p>
+        <p style={{margin:"2px 0 8px",fontSize:11,color:D.text3}}>Baseada no DY histórico × sua posição. É estimativa, não valor garantido nem a data real.</p>
+        {estDY.map(x=><div key={x.ticker} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderTop:`1px solid ${D.border}`}}>
+          <span style={{color:D.text2}}>{x.ticker} <span style={{color:D.text3,fontSize:10}}>DY {x.dy}%</span></span>
+          <span style={{color:D.text}}>{fmtM(x.anual,currency)}/ano · <span style={{color:D.text3}}>{fmtM(x.anual/12,currency)}/mês</span></span>
+        </div>)}
+        <div style={{display:"flex",justifyContent:"space-between",marginTop:8,paddingTop:8,borderTop:`1px solid ${D.border2}`,fontSize:12,fontWeight:700}}>
+          <span style={{color:D.text2}}>Total estimado</span>
+          <span style={{color:D.blue}}>{fmtM(totEstAnual,currency)}/ano · {fmtM(totEstAnual/12,currency)}/mês</span>
+        </div>
+      </Card>}
+
+      <Card style={{background:`linear-gradient(135deg,${D.bg3},${D.card2})`,border:`1px solid ${D.gold}33`}}>
+        <p style={{fontSize:10,color:D.text3,textTransform:"uppercase",letterSpacing:"1px",marginBottom:4}}>Recebido este mês · {hoje.toLocaleDateString("pt-BR")}</p>
+        <p style={{fontSize:28,fontWeight:800,color:D.gold}}>{fmtM(totDiv,currency)}</p>
+        <p style={{fontSize:11,color:D.text3,marginTop:2}}>{divMes.length} provento{divMes.length!==1?"s":""} recebido{divMes.length!==1?"s":""}</p>
+      </Card>
+      <p style={{fontSize:13,fontWeight:700,color:D.text}}>Recebidos</p>
       {divMes.length===0&&<p style={{fontSize:13,color:D.text3}}>Nenhum provento registrado este mês. Clique em "💰 Dividendo" para registrar.</p>}
       {divMes.map(d=><Card key={d.id} style={{border:`1px solid ${D.gold}33`}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
@@ -1454,6 +1510,18 @@ function InvestimentosTab({data,setData,currency,profileId}){
       <label style={{fontSize:12,color:D.text3}}>Tipo<select value={divForm.tipo||"Dividendo"} onChange={e=>setDivForm(f=>({...f,tipo:e.target.value}))} style={{marginTop:4}}><option>Dividendo</option><option>JCP</option><option>JUROS SOBRE CAPITAL PROPRIO</option><option>Rendimento FII</option><option>Rendimento ETF</option></select></label>
       <label style={{fontSize:12,color:D.text3}}>Data de pagamento<input type="date" value={divForm.data||hoje.toISOString().slice(0,10)} onChange={e=>setDivForm(f=>({...f,data:e.target.value}))} style={{marginTop:4}}/></label>
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn outline color={D.text3} onClick={()=>setModalDiv(false)}>Cancelar</Btn><Btn color={D.gold} onClick={saveDiv}>Salvar</Btn></div>
+    </Modal>}
+    {modalAg&&<Modal title={agForm.editId?"Editar agendamento":"Agendar provento"} onClose={()=>{setModalAg(false);setAgForm({});}}>
+      <p style={{fontSize:11,color:D.text3,marginTop:0,lineHeight:1.5}}>Registre o que a corretora anunciou. Ex.: a XP diz que ITUB4 paga R$ 0,80/ação em 15/08 → preencha abaixo e o app calcula quanto você recebe.</p>
+      {data.investimentos.filter(i=>i.ticker).length>0&&<label style={{fontSize:12,color:D.text3}}>Puxar da carteira (opcional)<select value="" onChange={e=>{const inv=data.investimentos.find(i=>i.id===e.target.value);if(inv)setAgForm(f=>({...f,ticker:(inv.ticker||"").toUpperCase(),quantidade:inv.quantidade||f.quantidade}));}} style={{marginTop:4}}><option value="">— escolher ativo —</option>{data.investimentos.filter(i=>i.ticker).map(i=><option key={i.id} value={i.id}>{i.ticker} ({i.quantidade||0} ações)</option>)}</select></label>}
+      <label style={{fontSize:12,color:D.text3}}>Ticker<input value={agForm.ticker||""} onChange={e=>setAgForm(f=>({...f,ticker:e.target.value.toUpperCase()}))} placeholder="Ex: ITUB4" style={{marginTop:4}}/></label>
+      <label style={{fontSize:12,color:D.text3}}>Quantidade de ações<input type="number" value={agForm.quantidade||""} onChange={e=>setAgForm(f=>({...f,quantidade:e.target.value}))} style={{marginTop:4}}/></label>
+      <label style={{fontSize:12,color:D.text3}}>Valor por ação ({currency})<input type="number" step="0.0001" value={agForm.valorAcao||""} onChange={e=>setAgForm(f=>({...f,valorAcao:e.target.value}))} placeholder="Ex: 0.80" style={{marginTop:4}}/></label>
+      <label style={{fontSize:12,color:D.text3}}>Tipo<select value={agForm.tipo||"Dividendo"} onChange={e=>setAgForm(f=>({...f,tipo:e.target.value}))} style={{marginTop:4}}><option>Dividendo</option><option>JCP</option><option>Rendimento FII</option><option>Rendimento ETF</option></select></label>
+      <label style={{fontSize:12,color:D.text3}}>Data de pagamento<input type="date" value={agForm.dataPagamento||""} onChange={e=>setAgForm(f=>({...f,dataPagamento:e.target.value}))} style={{marginTop:4}}/></label>
+      <label style={{fontSize:12,color:D.text3}}>Data-com (opcional — último dia p/ ter direito)<input type="date" value={agForm.dataCom||""} onChange={e=>setAgForm(f=>({...f,dataCom:e.target.value}))} style={{marginTop:4}}/></label>
+      {parseFloat(agForm.valorAcao)>0&&parseFloat(agForm.quantidade)>0&&<p style={{fontSize:12,color:D.text2,marginTop:6}}>Total a receber: <b style={{color:D.gold}}>{fmtM((parseFloat(agForm.valorAcao)||0)*(parseFloat(agForm.quantidade)||0),currency)}</b></p>}
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn outline color={D.text3} onClick={()=>{setModalAg(false);setAgForm({});}}>Cancelar</Btn><Btn color={D.gold} onClick={saveAg}>Salvar</Btn></div>
     </Modal>}
   </div>;
 }
@@ -3498,7 +3566,7 @@ function AppInner(){
   // mesmo se vierem corrompidos do localStorage/nuvem. Evita crash de renderização.
   const data=(()=>{
     const raw={...EMPTY,...(allData[profileId]||{})};
-    const arrayFields=["transacoes","faturas","investimentos","metas","bancos","orcamentos","recorrencias","dividendos","watchlist","alertas","historico","catD","catR"];
+    const arrayFields=["transacoes","faturas","investimentos","metas","bancos","orcamentos","recorrencias","dividendos","proventosAgendados","watchlist","alertas","historico","catD","catR"];
     for(const f of arrayFields){ if(!Array.isArray(raw[f])) raw[f]=Array.isArray(EMPTY[f])?[...EMPTY[f]]:[]; }
     if(typeof raw.aporteMensal!=="number") raw.aporteMensal=0;
     return raw;
