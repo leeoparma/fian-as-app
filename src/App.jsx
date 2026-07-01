@@ -493,13 +493,27 @@ function PieChart({slices,currency,onSlice}){
   </div>;
 }
 function LineChart({data,currency}){
+  const [sel,setSel]=useState(null);
   const vals=data.map(d=>d.v),max=Math.max(...vals,1),min=Math.min(...vals,0),range=max-min||1;
   const W=320,H=110,pad=14;
-  const pts=data.map((d,i)=>`${pad+(i/(data.length-1||1))*(W-pad*2)},${H-pad-((d.v-min)/range)*(H-pad*2)}`).join(" ");
-  return <div><svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height:H}}>
-    <polyline points={pts} fill="none" stroke={D.green} strokeWidth="2" style={{filter:`drop-shadow(0 0 4px ${D.green})`}}/>
-    {data.map((d,i)=>{const x=pad+(i/(data.length-1||1))*(W-pad*2),y=H-pad-((d.v-min)/range)*(H-pad*2);return <circle key={i} cx={x} cy={y} r="3" fill={D.green}><title>{d.label}: {fmtM(d.v,currency)}</title></circle>;})}
-  </svg></div>;
+  const coord=(d,i)=>({x:pad+(i/(data.length-1||1))*(W-pad*2),y:H-pad-((d.v-min)/range)*(H-pad*2)});
+  const pts=data.map((d,i)=>{const{x,y}=coord(d,i);return `${x},${y}`;}).join(" ");
+  const s=sel!=null&&data[sel]?coord(data[sel],sel):null;
+  const leftPct=s?(s.x/W)*100:0,topPct=s?(s.y/H)*100:0;
+  const tx=leftPct>72?"-88%":leftPct<28?"-12%":"-50%";
+  const ty=topPct<32?"48%":"-140%";
+  return <div style={{position:"relative"}}>
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height:H,display:"block"}}>
+      <polyline points={pts} fill="none" stroke={D.green} strokeWidth="2" style={{filter:`drop-shadow(0 0 4px ${D.green})`}}/>
+      {data.map((d,i)=>{const{x,y}=coord(d,i);const active=sel===i;return <g key={i}>
+        <circle cx={x} cy={y} r={active?5:3} fill={D.green} style={active?{filter:`drop-shadow(0 0 5px ${D.green})`}:undefined}/>
+        <circle cx={x} cy={y} r="13" fill="transparent" style={{cursor:"pointer"}} onMouseEnter={()=>setSel(i)} onMouseLeave={()=>setSel(null)} onClick={()=>setSel(v=>v===i?null:i)}/>
+      </g>;})}
+    </svg>
+    {s&&<div style={{position:"absolute",left:`${leftPct}%`,top:`${topPct}%`,transform:`translate(${tx},${ty})`,pointerEvents:"none",background:D.bg3,border:`1px solid ${D.green}55`,borderRadius:8,padding:"4px 9px",fontSize:11,color:D.text,whiteSpace:"nowrap",boxShadow:"0 4px 14px rgba(0,0,0,.45)",zIndex:5}}>
+      <span style={{color:D.text3}}>{data[sel].label}</span> · <b style={{color:D.green}}>{fmtM(data[sel].v,currency)}</b>
+    </div>}
+  </div>;
 }
 
 // ── OCR Nota Fiscal ───────────────────────────────────────────────────────────
@@ -3567,7 +3581,8 @@ function AppInner(){
           </div>
           {grafico==="barras"&&<BarChart data={ultimos6} currency={currency}/>}
           {grafico==="patrimonio"&&(()=>{
-            const h=(data.historico||[]).slice(-12);
+            const mesKeyAtual=`${ANO_ATUAL}-${String(MES_ATUAL+1).padStart(2,"0")}`;
+            const h=[...(data.historico||[]).filter(x=>x.mes!==mesKeyAtual),{mes:mesKeyAtual,patrimonio:patrimonioLiq}].sort((a,b)=>a.mes.localeCompare(b.mes)).slice(-12);
             if(h.length<2)return <p style={{fontSize:12,color:D.text3,padding:"20px 0",textAlign:"center"}}>📊 O histórico de patrimônio aparece aqui conforme você usa o app ao longo dos meses. Precisa de pelo menos 2 meses de dados (o app registra automaticamente 1x por mês).</p>;
             const pts=h.map(x=>{const[a,m]=x.mes.split("-");return{label:MESES[parseInt(m)-1],v:x.patrimonio};});
             const prim=h[0].patrimonio,ult=h[h.length-1].patrimonio;
