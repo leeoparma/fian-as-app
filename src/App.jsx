@@ -207,6 +207,13 @@ async function fetchPrecoReal(ticker, profileId, full=false) {
 
 const GS=`*{box-sizing:border-box;margin:0;padding:0;}body{background:${D.bg};color:${D.text};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}input,select,textarea{background:${D.bg3};color:${D.text};border:1px solid ${D.border2};border-radius:8px;padding:8px 12px;font-size:13px;width:100%;outline:none;transition:border-color .2s;}input:focus,select:focus{border-color:${D.green};}input::placeholder{color:${D.text3};}select option{background:${D.bg3};}::-webkit-scrollbar{width:4px;height:4px;}::-webkit-scrollbar-thumb{background:${D.border2};border-radius:2px;}`;
 
+const GRAF_HELP={
+  barras:"📊 Barras — receitas (verde) e despesas (vermelho) de cada um dos últimos 6 meses, lado a lado. Serve para comparar o que entrou e o que saiu, mês a mês.",
+  patrimonio:"💰 Patrimônio — quanto você TEM ao longo do tempo: saldo dos bancos + investimentos, mês a mês. O último ponto é o valor de hoje. Toque nos pontos para ver o valor de cada mês.",
+  pizza_d:"🥧 Despesas — suas despesas do mês atual divididas por categoria. Toque numa fatia para ver os lançamentos daquela categoria.",
+  pizza_r:"🥧 Receitas — suas receitas do mês atual divididas por categoria. Toque numa fatia para ver os lançamentos daquela categoria.",
+  linha:"📈 Linha — fluxo de caixa acumulado dos últimos 6 meses: soma de (receitas − despesas) mês a mês. Subindo = você guardou; descendo = gastou mais do que ganhou. Não é o patrimônio; usa só o que foi lançado. Toque nos pontos para ver cada mês.",
+};
 function Tip({text,children}){
   const [show,setShow]=useState(false);
   return <span style={{position:"relative",display:"inline-flex",alignItems:"center",gap:4}}>
@@ -3574,7 +3581,7 @@ function AppInner(){
         <Card><ScoreCard data={data}/></Card>
         <Card>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:8}}>
-            <p style={{fontSize:14,fontWeight:700,color:D.text}}>Evolução financeira</p>
+            <Tip text={GRAF_HELP[grafico]}><p style={{fontSize:14,fontWeight:700,color:D.text}}>Evolução financeira</p></Tip>
             <div style={{display:"flex",gap:3}}>
               {[["barras","📊"],["patrimonio","💰"],["pizza_d","🥧D"],["pizza_r","🥧R"],["linha","📈"]].map(([v,l])=><button key={v} onClick={()=>setGrafico(v)} style={{padding:"4px 10px",borderRadius:16,fontSize:11,cursor:"pointer",border:grafico===v?`1px solid ${D.green}`:`1px solid ${D.border}`,background:grafico===v?D.green+"22":"transparent",color:grafico===v?D.green:D.text3}}>{l}</button>)}
             </div>
