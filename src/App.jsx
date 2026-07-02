@@ -577,6 +577,46 @@ function NFModal({onClose,onSave,currency}){
 }
 
 // ── Score ─────────────────────────────────────────────────────────────────────
+// ── Radar de proventos (Dashboard) ────────────────────────────────────────────
+function ProventosRadar({data,currency}){
+  const [sel,setSel]=useState(null);
+  const h=new Date();const h0=new Date(h.getFullYear(),h.getMonth(),h.getDate());
+  const parse=s=>{const[y,m,d]=(s||"").split("-").map(Number);return y?new Date(y,m-1,d):null;};
+  const ags=(data.proventosAgendados||[]).map(a=>{const dt=parse(a.dataPagamento);if(!dt)return null;const dias=Math.round((dt-h0)/864e5);return dias<0?null:{...a,dias,total:(parseFloat(a.valorAcao)||0)*(parseFloat(a.quantidade)||0)};}).filter(Boolean).sort((a,b)=>a.dias-b.dias);
+  if(ags.length===0)return null;
+  const JANELA=30;
+  const dentro=ags.filter(a=>a.dias<=JANELA);
+  const depois=ags.filter(a=>a.dias>JANELA);
+  const totJanela=dentro.reduce((s,a)=>s+a.total,0);
+  // agrupa por dia (para pontos no mesmo dia)
+  const porDia={};dentro.forEach(a=>{(porDia[a.dias]=porDia[a.dias]||[]).push(a);});
+  const dias=Object.keys(porDia).map(Number).sort((a,b)=>a-b);
+  const prox=ags[0];
+  const quando=d=>d===0?"hoje":d===1?"amanhã":`em ${d} dias`;
+  return <Card style={{border:`1px solid ${D.gold}44`,background:`linear-gradient(135deg,${D.card},${D.gold}0a)`}}>
+    <style>{`@keyframes pvPulse{0%,100%{box-shadow:0 0 0 0 ${D.gold}66}50%{box-shadow:0 0 0 7px ${D.gold}00}}`}</style>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",flexWrap:"wrap",gap:6}}>
+      <p style={{margin:0,fontSize:13,fontWeight:700,color:D.text}}>📡 Radar de proventos <span style={{fontSize:10,color:D.text3,fontWeight:400}}>próximos {JANELA} dias</span></p>
+      {totJanela>0&&<p style={{margin:0,fontSize:13,fontWeight:800,color:D.gold}}>{fmtM(totJanela,currency)}</p>}
+    </div>
+    {dentro.length>0?<>
+      <div style={{position:"relative",height:34,margin:"14px 2px 2px"}}>
+        <div style={{position:"absolute",top:16,left:0,right:0,height:2,background:`linear-gradient(90deg,${D.gold}88,${D.border2})`,borderRadius:2}}/>
+        {[0,10,20,30].map(dd=><span key={dd} style={{position:"absolute",top:24,left:`calc(${(dd/JANELA)*100}% - 8px)`,fontSize:8,color:D.text3}}>{dd===0?"hoje":`+${dd}d`}</span>)}
+        {dias.map(dd=>{const grupo=porDia[dd];const ativo=sel===dd;const primeiro=dd===dias[0];
+          return <div key={dd} onClick={()=>setSel(s=>s===dd?null:dd)} style={{position:"absolute",top:10,left:`calc(${(dd/JANELA)*100}% - 7px)`,width:14,height:14,borderRadius:"50%",background:ativo?D.gold:D.card,border:`2.5px solid ${D.gold}`,cursor:"pointer",animation:primeiro?"pvPulse 1.6s infinite":"none",zIndex:2}}>
+            {grupo.length>1&&<span style={{position:"absolute",top:-9,right:-6,fontSize:8,fontWeight:800,color:D.gold}}>×{grupo.length}</span>}
+          </div>;})}
+      </div>
+      {sel!=null&&porDia[sel]?<div style={{marginTop:10,padding:"8px 10px",background:D.bg3,borderRadius:8,border:`1px solid ${D.gold}33`}}>
+        {porDia[sel].map(a=><p key={a.id} style={{margin:"2px 0",fontSize:12,color:D.text2}}>{a.ticker} · <b style={{color:D.gold}}>{fmtM(a.total,currency)}</b> {quando(a.dias)} ({(a.dataPagamento||"").split("-").reverse().join("/")})</p>)}
+      </div>
+      :<p style={{margin:"8px 0 0",fontSize:12,color:D.text2}}>Próximo: <b style={{color:D.text}}>{prox.ticker}</b> · <b style={{color:D.gold}}>{fmtM(prox.total,currency)}</b> {quando(prox.dias)}<span style={{color:D.text3,fontSize:10}}> · toque nos pontos</span></p>}
+    </>:<p style={{margin:"8px 0 0",fontSize:12,color:D.text2}}>Nada nos próximos {JANELA} dias. Próximo: <b style={{color:D.text}}>{prox.ticker}</b> · <b style={{color:D.gold}}>{fmtM(prox.total,currency)}</b> {quando(prox.dias)}.</p>}
+    {depois.length>0&&dentro.length>0&&<p style={{margin:"6px 0 0",fontSize:10,color:D.text3}}>+{depois.length} agendado{depois.length>1?"s":""} depois de {JANELA} dias</p>}
+  </Card>;
+}
+
 function ScoreCard({data}){
   const txMes=data.transacoes.filter(t=>{const d=new Date(t.data);return d.getMonth()===MES_ATUAL&&d.getFullYear()===ANO_ATUAL;});
   const r=txMes.filter(t=>t.tipo==="receita").reduce((a,b)=>a+b.valor,0);
@@ -3647,6 +3687,7 @@ function AppInner(){
           <MetricCard label="Investimentos" value={fmtM(totInv,currency)} color={D.blue}/>
         </div>
         <Card><ScoreCard data={data}/></Card>
+        <ProventosRadar data={data} currency={currency}/>
         <Card>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:8}}>
             <Tip text={GRAF_HELP[grafico]}><p style={{fontSize:14,fontWeight:700,color:D.text}}>Evolução financeira</p></Tip>
