@@ -1,4 +1,14 @@
 import { useState, useEffect, useRef, useCallback, Component } from "react";
+// Matemática pura extraída para src/calc.mjs — testada por tests/calc.test.mjs (GitHub Actions)
+import {
+  CAT_INTERNAS, INDICES_RATE,
+  _clampDia, _ymdC, _ddmm, faturaDeCompra, vencimentoDe, faturaAbertaHoje,
+  calcRFAnual, calcValorAtualRF, calcImpostoBR, calcImpostoAU,
+  aporteMedio, totalProventoAgendado, diasAte,
+  totaisTransacoes, saldoBanco as saldoBancoCalc, parcelaValor, parcelaData,
+  calcSaldos as calcSaldosPure, calcDividas as calcDividasPure, totaisPorPessoa as totaisPorPessoaPure,
+  salarioMensal, converteMoeda, taxaMensalSim, simularJuros,
+} from "./calc.mjs";
 
 const SUPA_URL="https://llpzdrqgvkpxjnecttkb.supabase.co";
 const SUPA_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxscHpkcnFndmtweGpuZWN0dGtiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3MDA2MjAsImV4cCI6MjA5NjI3NjYyMH0.X3DDKVRppRO-NiC5a2Cc0JrpFAaf5J-hymFHv6vNQ6Q";
@@ -9,20 +19,57 @@ const supa={
   async signUp(e,p){return(await fetch(`${SUPA_URL}/auth/v1/signup`,{method:"POST",headers:supa.h,body:JSON.stringify({email:e,password:p})})).json();},
   async signIn(e,p){return(await fetch(`${SUPA_URL}/auth/v1/token?grant_type=password`,{method:"POST",headers:supa.h,body:JSON.stringify({email:e,password:p})})).json();},
   async signOut(t){await fetch(`${SUPA_URL}/auth/v1/logout`,{method:"POST",headers:supa.ah(t)});},
+  // Troca o refresh_token por um access_token novo (o access dura ~1h)
+  async refresh(rt){const r=await fetch(`${SUPA_URL}/auth/v1/token?grant_type=refresh_token`,{method:"POST",headers:supa.h,body:JSON.stringify({refresh_token:rt})});if(!r.ok)return null;return r.json();},
   async load(t,id){
     const resp=await fetch(`${SUPA_URL}/rest/v1/profiles?id=eq.${id}&select=data`,{headers:supa.ah(t)});
-    if(!resp.ok) throw new Error("Supabase load HTTP "+resp.status); // 4xx/5xx (ex: restoring) -> erro, NÃO conta vazia
+    if(!resp.ok){const e=new Error("Supabase load HTTP "+resp.status);e.status=resp.status;throw e;} // 4xx/5xx (ex: restoring) -> erro, NÃO conta vazia
     const r=await resp.json();
     if(!Array.isArray(r)) throw new Error("Resposta inesperada do servidor"); // formato errado -> erro
     return r?.[0]?.data||null; // array vazio = conta realmente nova
   },
-  async save(t,id,d){await fetch(`${SUPA_URL}/rest/v1/profiles`,{method:"POST",headers:{...supa.ah(t),"Prefer":"resolution=merge-duplicates"},body:JSON.stringify({id,data:d,updated_at:new Date().toISOString()})});},
+  async save(t,id,d){const resp=await fetch(`${SUPA_URL}/rest/v1/profiles`,{method:"POST",headers:{...supa.ah(t),"Prefer":"resolution=merge-duplicates"},body:JSON.stringify({id,data:d,updated_at:new Date().toISOString()})});if(!resp.ok){const e=new Error("Supabase save HTTP "+resp.status);e.status=resp.status;throw e;}},
   async loadShared(codigo){const r=await fetch(`${SUPA_URL}/rest/v1/rpc/load_shared`,{method:"POST",headers:supa.h,body:JSON.stringify({p_codigo:codigo})});if(!r.ok)return null;const d=await r.json();return d||null;},
   async saveShared(codigo,d){await fetch(`${SUPA_URL}/rest/v1/rpc/save_shared`,{method:"POST",headers:supa.h,body:JSON.stringify({p_codigo:codigo,p_data:d})});},
 };
 
 const D={bg:"#0a0e1a",bg2:"#0f1629",bg3:"#151d35",card:"#111827",card2:"#1a2235",border:"#1e2d4a",border2:"#253352",green:"#00d084",red:"#ff4757",blue:"#3b82f6",gold:"#f59e0b",purple:"#8b5cf6",text:"#f1f5f9",text2:"#94a3b8",text3:"#64748b"};
 const CORES=[D.green,D.blue,D.purple,D.gold,D.red,"#06b6d4","#ec4899"];
+// ── Sessão: renovação automática do token ─────────────────────────────────────
+// O access_token do Supabase dura ~1h. Sem renovar, o app "morre" em silêncio
+// (banner de sem conexão, IA com 401). Aqui: renova usando o refresh_token,
+// com trava para não renovar duas vezes ao mesmo tempo.
+let _renovando=null;
+async function renovarSessao(){
+  if(_renovando)return _renovando;
+  _renovando=(async()=>{
+    try{
+      const s=lsGet("session");
+      if(!s?.refresh)return null;               // sessão antiga, sem refresh guardado → precisa relogar 1x
+      const r=await supa.refresh(s.refresh);
+      if(!r?.access_token)return null;          // refresh vencido/revogado → relogar
+      const ns={...s,token:r.access_token,refresh:r.refresh_token||s.refresh,user:r.user||s.user};
+      lsSet("session",ns);                      // authHdr() e os saves passam a usar o token novo
+      return ns;
+    }catch{return null;}
+  })();
+  try{return await _renovando;}finally{_renovando=null;}
+}
+// Salva na nuvem lendo o token NA HORA (não um token velho preso na closure);
+// se tomar 401, renova a sessão e tenta mais uma vez.
+async function salvarComRetry(id,dados){
+  const t=lsGet("session")?.token;
+  if(!t)return;
+  try{await supa.save(t,id,dados);}
+  catch(e){
+    if(e?.status===401){
+      const ns=await renovarSessao();
+      if(!ns)throw e;
+      await supa.save(ns.token,id,dados);
+    }else throw e;
+  }
+}
+
 const PROFILES=[{id:"br",label:"🇧🇷 Brasil",currency:"R$",market:"brazil",locale:"pt-BR"},{id:"au",label:"🇦🇺 Austrália",currency:"A$",market:"australia",locale:"en-AU"},{id:"us",label:"🇺🇸 EUA",currency:"US$",market:"usa",locale:"en-US"}];
 
 // Calcula se a bolsa de um perfil está aberta AGORA (sem API, usa horário local de cada bolsa)
@@ -63,7 +110,6 @@ const CAT_D_DEF=["Alimentação","Transporte","Saúde","Lazer","Moradia","Educa�
 const CAT_R_DEF=["Salário","Freelance","Investimentos","Aluguel","Dividendos","Bônus","Outros"];
 const TIPOS_INV=["Ações","FII","ETF","Cripto","Renda Fixa","Tesouro Direto","Outros"];
 const INDICES_RF=["CDI","IPCA","Selic","IGPM","Prefixado"];
-const INDICES_RATE={CDI:10.5,Selic:10.5,IPCA:4.62,IGPM:5.1};
 const MESES=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
 const TABS=["Dashboard","Bancos","Lançamentos","Cartão","Investimentos","Metas","Análise","Splitwise","Relatórios"];
 const WL_CATS=["Todas","Banco","Infraestrutura","Fundo Imobiliário","Energia","Tecnologia","Varejo","Saúde","Agronegócio","Mineração","Petróleo","ETF","Exterior","Outros"];
@@ -79,7 +125,6 @@ const IND_COMP=[
 ];
 
 const hoje=new Date(),MES_ATUAL=hoje.getMonth(),ANO_ATUAL=hoje.getFullYear();
-const CAT_INTERNAS=["Transferência","Aplicação","Resgate"]; // movimento interno: não é receita nem despesa
 const EMPTY={transacoes:[],faturas:[],investimentos:[],metas:[],bancos:[],orcamentos:[],recorrencias:[],dividendos:[],proventosAgendados:[],watchlist:[],alertas:[],historico:[],aporteMensal:0,salario:null,catD:[...CAT_D_DEF],catR:[...CAT_R_DEF]};
 const EMPTY_ALL={br:{...EMPTY},au:{...EMPTY}};
 const lsGet=k=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch{return null;}};
@@ -168,10 +213,7 @@ function categorizar(descricao,tipo){
   return null; // null = precisa categorizar manualmente
 }
 
-function calcRFAnual(inv){const indice=inv.indice||"CDI",taxa=parseFloat(inv.taxaRF)||0,pct=parseFloat(inv.pctIndice)||100;if(indice==="Prefixado")return taxa;const base=INDICES_RATE[indice]||10.5;return inv.rfTipo==="pct"?base*(pct/100):base+taxa;}
-function calcValorAtualRF(inv){const anos=(new Date()-new Date(inv.data))/(1000*60*60*24*365);return(inv.valorInvestido||inv.valor||0)*Math.pow(1+calcRFAnual(inv)/100,Math.max(0,anos));}
-function calcImpostoBR(r,m){if(r<=0)return 0;if(m<=6)return r*0.225;if(m<=12)return r*0.20;if(m<=24)return r*0.175;return r*0.15;}
-function calcImpostoAU(r,m){if(r<=0)return 0;return(m>=12?r*0.5:r)*0.325;}
+// calcRFAnual / calcValorAtualRF / calcImpostoBR / calcImpostoAU → src/calc.mjs
 
 const authHdr=()=>{const t=lsGet("session")?.token;return t?{"Authorization":`Bearer ${t}`}:{};};
 async function askClaude(prompt,maxTokens=900,images=[]){
@@ -580,9 +622,8 @@ function NFModal({onClose,onSave,currency}){
 // ── Radar de proventos (Dashboard) ────────────────────────────────────────────
 function ProventosRadar({data,currency}){
   const [sel,setSel]=useState(null);
-  const h=new Date();const h0=new Date(h.getFullYear(),h.getMonth(),h.getDate());
-  const parse=s=>{const[y,m,d]=(s||"").split("-").map(Number);return y?new Date(y,m-1,d):null;};
-  const ags=(data.proventosAgendados||[]).map(a=>{const dt=parse(a.dataPagamento);if(!dt)return null;const dias=Math.round((dt-h0)/864e5);return dias<0?null:{...a,dias,total:(parseFloat(a.valorAcao)||0)*(parseFloat(a.quantidade)||0)};}).filter(Boolean).sort((a,b)=>a.dias-b.dias);
+  const h=new Date();
+  const ags=(data.proventosAgendados||[]).map(a=>{const dias=diasAte(a.dataPagamento,h);if(dias==null||dias<0)return null;return {...a,dias,total:totalProventoAgendado(a)};}).filter(Boolean).sort((a,b)=>a.dias-b.dias); // testado em calc.mjs
   if(ags.length===0)return null;
   const JANELA=30;
   const dentro=ags.filter(a=>a.dias<=JANELA);
@@ -651,7 +692,7 @@ function LoginScreen({onLogin}){
   const lembrado=!!lsGet("last_email");
   async function handle(){if(!email||!pass){setErro("Preencha email e senha.");return;}setLoading(true);setErro("");setMsg("");
     try{if(mode==="register"){const r=await supa.signUp(email,pass);if(r.error)setErro(r.error.message);else{setMsg("✅ Conta criada! Verifique seu email.");setMode("login");}}
-    else{const r=await supa.signIn(email,pass);if(r.error)setErro("Email ou senha incorretos.");else{lsSet("last_email",email);onLogin(r.access_token,r.user);}}}catch{setErro("Erro de conexão.");}setLoading(false);}
+    else{const r=await supa.signIn(email,pass);if(r.error)setErro("Email ou senha incorretos.");else{lsSet("last_email",email);onLogin(r.access_token,r.user,r.refresh_token);}}}catch{setErro("Erro de conexão.");}setLoading(false);}
   return <div style={{position:"relative",minHeight:"100vh",overflow:"hidden",background:`radial-gradient(ellipse at top,${D.bg2} 0%,${D.bg} 70%)`,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
     <style>{`
       @keyframes flLogoFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
@@ -852,18 +893,14 @@ ${paginas}
     if(valorNum<=0){alert("⚠️ O valor precisa ser maior que zero.\n\nDica: confira se você digitou o número no campo VALOR (e não no campo Descrição).");return;}
     const np=(profileId==="br"&&!form.editId&&(form.tipo||"despesa")!=="receita")?Math.max(1,parseInt(form.parcelas)||1):1;
     if(np>1){
-      const base=Math.round(valorNum/np*100)/100;
       const grupo=uid();
       const desc=form.descricao||"Compra parcelada";
       const cat=form.categoria||catD[0];
       const inicio=form.data||hoje.toISOString().slice(0,10);
-      const [iy,im,id]=inicio.split("-").map(Number);
       const novas=[];
       for(let k=0;k<np;k++){
-        const tm=im-1+k, ty=iy+Math.floor(tm/12), tmo=((tm%12)+12)%12;
-        const lastDay=new Date(ty,tmo+1,0).getDate(), dd=Math.min(id,lastDay);
-        const dstr=`${ty}-${String(tmo+1).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
-        const val=k===np-1?Math.round((valorNum-base*(np-1))*100)/100:base;
+        const dstr=parcelaData(inicio,k);           // testado em calc.mjs
+        const val=parcelaValor(valorNum,np,k);      // testado em calc.mjs
         novas.push({id:uid(),tipo:"despesa",descricao:`${desc} (${k+1}/${np})`,valor:val,categoria:cat,data:dstr,bancoId:form.bancoId||null,nfImg:k===0?(form.nfImg||null):null,nfManual:false,parceladoId:grupo});
       }
       setData(d=>({...d,transacoes:[...d.transacoes,...novas]}));
@@ -1185,12 +1222,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
     const qtdNova=parseFloat(aporteForm.quantidade);
     const precoNovo=parseFloat(aporteForm.preco);
     if(!qtdNova||qtdNova<=0||!precoNovo||precoNovo<=0)return;
-    const qtdAntiga=inv.quantidade||0;
-    const custoAntigo=(inv.precoMedio||0)*qtdAntiga;
-    const custoNovo=precoNovo*qtdNova;
-    const qtdTotal=qtdAntiga+qtdNova;
-    const pmNovo=qtdTotal>0?(custoAntigo+custoNovo)/qtdTotal:precoNovo;
-    const viNovo=custoAntigo+custoNovo;
+    const {qtdTotal,pmNovo,custoTotal:viNovo}=aporteMedio(inv.quantidade||0,inv.precoMedio||0,qtdNova,precoNovo); // testado em calc.mjs
     // Mantém o preço atual de mercado se existir, recalcula valor atual
     const precoAtual=inv.preco_atual||pmNovo;
     const valorAtual=precoAtual*qtdTotal;
@@ -1225,7 +1257,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
   const agendados=(data.proventosAgendados||[]).slice().sort((a,b)=>(a.dataPagamento||"").localeCompare(b.dataPagamento||""));
   const agFuturos=agendados.filter(a=>(a.dataPagamento||"")>=hojeStr);
   const agVencidos=agendados.filter(a=>(a.dataPagamento||"")<hojeStr);
-  const totalAgTotal=a=>(parseFloat(a.valorAcao)||0)*(parseFloat(a.quantidade)||0);
+  const totalAgTotal=totalProventoAgendado; // testado em calc.mjs
   const totalAReceber=agFuturos.reduce((s,a)=>s+totalAgTotal(a),0);
   const em7=new Date(hoje.getTime()+7*864e5).toISOString().slice(0,10);
   const agProximos=agFuturos.filter(a=>(a.dataPagamento||"")<=em7);
@@ -1784,36 +1816,9 @@ function SplitwiseTab({currency,userEmail}){
     saveSW({...swData,pagamentos:swData.pagamentos.filter(p=>p.id!==id)});
   }
 
-  function calcSaldos(src=swData){
-    if(!src)return {};
-    const saldos={};
-    (src.membros||[]).forEach(m=>{if(m&&m.nome)saldos[m.nome]=0;});
-    (src.despesas||[]).forEach(d=>{
-      if(!d)return;
-      if(d.pagoPor)saldos[d.pagoPor]=(saldos[d.pagoPor]||0)+(d.valor||0);
-      (d.divisao||[]).forEach(div=>{
-        const nome=typeof div==="string"?div:div?.nome;
-        const qto=typeof div==="string"?((d.valor||0)/((d.divisao||[]).length||1)):(div?.valor||0);
-        if(nome)saldos[nome]=(saldos[nome]||0)-qto;
-      });
-    });
-    (src.pagamentos||[]).forEach(p=>{if(!p)return;if(p.de)saldos[p.de]=(saldos[p.de]||0)+(p.valor||0);if(p.para)saldos[p.para]=(saldos[p.para]||0)-(p.valor||0);});
-    return saldos;
-  }
+  const calcSaldos=(src=swData)=>calcSaldosPure(src); // testado em calc.mjs
 
-  function calcDividas(src=swData){
-    const saldos=calcSaldos(src);
-    const devedores=Object.entries(saldos).filter(([,v])=>v<-0.01).map(([n,v])=>({nome:n,valor:-v}));
-    const credores=Object.entries(saldos).filter(([,v])=>v>0.01).map(([n,v])=>({nome:n,valor:v}));
-    const transacoes=[];const dev=[...devedores],cred=[...credores];
-    while(dev.length&&cred.length){
-      const d=dev[0],c=cred[0],v=Math.min(d.valor,c.valor);
-      if(v>0.01)transacoes.push({de:d.nome,para:c.nome,valor:v});
-      d.valor-=v;c.valor-=v;
-      if(d.valor<0.01)dev.shift();if(c.valor<0.01)cred.shift();
-    }
-    return transacoes;
-  }
+  const calcDividas=(src=swData)=>calcDividasPure(src); // testado em calc.mjs
 
   // Gastos do grupo por categoria (para o gráfico)
   function gastosPorCategoria(src=swData){
@@ -1831,16 +1836,7 @@ function SplitwiseTab({currency,userEmail}){
   }
 
   // Totais: quanto cada pessoa pagou e quanto consumiu
-  function totaisPorPessoa(src=swData){
-    const t={};
-    (src?.membros||[]).forEach(m=>{if(m&&m.nome)t[m.nome]={pagou:0,consumiu:0};});
-    (src?.despesas||[]).forEach(d=>{
-      if(!d)return;
-      if(d.pagoPor&&t[d.pagoPor])t[d.pagoPor].pagou+=(d.valor||0);
-      (d.divisao||[]).forEach(div=>{const n=typeof div==="string"?div:div?.nome;const q=typeof div==="string"?((d.valor||0)/((d.divisao||[]).length||1)):(div?.valor||0);if(n&&t[n])t[n].consumiu+=q;});
-    });
-    return t;
-  }
+  const totaisPorPessoa=(src=swData)=>totaisPorPessoaPure(src); // testado em calc.mjs
 
   // ───── TELA: LISTA DE GRUPOS (nenhum grupo aberto) ─────
   if(!ativo){
@@ -2472,11 +2468,8 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
 
   function simJuros(){
     const ini=parseFloat(simForm.ini)||0,ap=parseFloat(simForm.ap)||0,meses=parseInt(simForm.meses)||0;if(!meses)return;
-    let tm;if(simForm.tipo==="fixo"){tm=parseFloat(simForm.taxa)/100;}
-    else{const base=INDICES_RATE[simForm.indice]||10.5;const anual=simForm.tipo==="pct"?base*(parseFloat(simForm.pctInd)||100)/100:base+parseFloat(simForm.taxa||0);tm=Math.pow(1+anual/100,1/12)-1;}
-    let saldo=ini;const pts=[{mes:0,saldo:Math.round(ini)}];
-    for(let i=1;i<=meses;i++){saldo=saldo*(1+tm)+ap;if(i%(Math.max(1,Math.floor(meses/12)))===0||i===meses)pts.push({mes:i,saldo:Math.round(saldo)});}
-    const rendimento=saldo-(ini+ap*meses);
+    const tm=taxaMensalSim(simForm.tipo,simForm.taxa,simForm.indice,simForm.pctInd); // testado em calc.mjs
+    const {saldo,pts,rendimento}=simularJuros(ini,ap,meses,tm);                       // testado em calc.mjs
     const imposto=isBR?calcImpostoBR(rendimento,meses):calcImpostoAU(rendimento,meses);
     const aliquota=isBR?(meses<=6?"22.5%":meses<=12?"20%":meses<=24?"17.5%":"15%"):(meses>=12?"50% desc.×32.5%":"32.5%");
     setSimRes({saldo:Math.round(saldo),saldoLiq:Math.round(saldo-imposto),aportado:Math.round(ini+ap*meses),juros:Math.round(rendimento),imposto:Math.round(imposto),pts,aliquota});
@@ -3027,12 +3020,7 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
 
 // ── Cartão Tab ────────────────────────────────────────────────────────────────
 // ── Ciclo de fatura de cartão (datas testadas isolado, 14/14) ────────────────
-function _clampDia(year,month,dia){const last=new Date(year,month+1,0).getDate();return new Date(year,month,Math.min(dia,last));}
-function _ymdC(d){const p=n=>String(n).padStart(2,"0");return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;}
-function _ddmm(d){return d?`${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}`:"—";}
-function faturaDeCompra(diaFecha,dataStr){const d=new Date(dataStr+"T00:00:00");let c=_clampDia(d.getFullYear(),d.getMonth(),diaFecha);if(d>c)c=_clampDia(d.getFullYear(),d.getMonth()+1,diaFecha);return c;}
-function vencimentoDe(fechaDate,diaFecha,diaVence){if(diaVence>=diaFecha)return _clampDia(fechaDate.getFullYear(),fechaDate.getMonth(),diaVence);return _clampDia(fechaDate.getFullYear(),fechaDate.getMonth()+1,diaVence);}
-function faturaAbertaHoje(diaFecha,hojeD){const h=new Date(hojeD);h.setHours(0,0,0,0);let fecha=_clampDia(h.getFullYear(),h.getMonth(),diaFecha);if(h>fecha)fecha=_clampDia(h.getFullYear(),h.getMonth()+1,diaFecha);return fecha;}
+// helpers de ciclo de fatura → src/calc.mjs
 
 function CartaoTab({data,setData,currency,mes}){
   const hojeStr=new Date().toISOString().slice(0,10);
@@ -3209,8 +3197,7 @@ function RelatoriosTab({data,setData,currency}){
     return true;
   }).sort((a,b)=>b.data.localeCompare(a.data));
 
-  const totR=txs.filter(t=>t.tipo==="receita"&&!CAT_INTERNAS.includes(t.categoria)).reduce((a,b)=>a+(b.valor||0),0);
-  const totD=txs.filter(t=>t.tipo==="despesa"&&!CAT_INTERNAS.includes(t.categoria)).reduce((a,b)=>a+(b.valor||0),0);
+  const {receitas:totR,despesas:totD}=totaisTransacoes(txs); // testado em calc.mjs (exclui categorias internas)
 
   const porCat={};
   txs.filter(t=>t.tipo==="despesa").forEach(t=>{porCat[t.categoria]=(porCat[t.categoria]||0)+(t.valor||0);});
@@ -3445,6 +3432,12 @@ class ErrorBoundary extends Component{
 // ── App Principal ─────────────────────────────────────────────────────────────
 function AppInner(){
   const [session,setSession]=useState(()=>lsGet("session"));
+  // Mantém o token vivo enquanto o app está aberto (o access dura ~1h; renova a cada 45 min)
+  useEffect(()=>{
+    if(!session?.refresh)return;
+    const iv=setInterval(async()=>{const ns=await renovarSessao();if(ns)setSession(ns);},45*60*1000);
+    return ()=>clearInterval(iv);
+  },[session?.refresh]);
   const [allData,setAllData]=useState(()=>lsGet("all_profiles")||EMPTY_ALL);
   const [syncing,setSyncing]=useState(false);
   const [profileId,setProfileId]=useState(()=>lsGet("active_profile")||"br");
@@ -3486,13 +3479,7 @@ function AppInner(){
   }
 
   // Converte um valor da moeda de origem para a moeda de destino usando o câmbio (base BRL)
-  function converte(valor,de,para){
-    if(!cambio)return null;
-    const emBRL={br:cambio.brl,au:cambio.aud,us:cambio.usd}; // 1 unidade da moeda do perfil em BRL
-    const moedaParaBRL={BRL:cambio.brl,AUD:cambio.aud,USD:cambio.usd};
-    const valorBRL=valor*(emBRL[de]||1);
-    return valorBRL/(moedaParaBRL[para]||1);
-  }
+  const converte=(valor,de,para)=>converteMoeda(valor,de,para,cambio); // testado em calc.mjs
 
   // Patrimônio consolidado dos 3 perfis na moeda escolhida
   function patrimonioConsolidado(){
@@ -3509,7 +3496,15 @@ function AppInner(){
     (async()=>{
       setSyncing(true);
       try{
-        const r=await supa.load(session.token,session.user.id);
+        // Garante token fresco antes de carregar (o access dura ~1h)
+        let sess=session;
+        if(session.refresh){const ns=await renovarSessao();if(ns){sess=ns;setSession(ns);}}
+        let r;
+        try{r=await supa.load(sess.token,sess.user.id);}
+        catch(e){
+          if(e?.status===401){const ns=await renovarSessao();if(!ns)throw e;sess=ns;setSession(ns);r=await supa.load(ns.token,ns.user.id);}
+          else throw e;
+        }
         if(r){
           // Carregou dados da nuvem com sucesso → libera o salvamento
           setAllData(r);
@@ -3523,7 +3518,7 @@ function AppInner(){
           const temConteudo=local&&Object.values(local).some(p=>p&&((p.transacoes?.length)||(p.investimentos?.length)||(p.bancos?.length)));
           loadOk.current=true;
           if(temConteudo){
-            try{await supa.save(session.token,session.user.id,local);}catch{}
+            try{await salvarComRetry(session.user.id,local);}catch{}
           }
         }
       }catch{
@@ -3545,11 +3540,11 @@ function AppInner(){
     // Assim nunca salvamos vazio por cima de dados bons quando a nuvem está fora.
     if(session&&loadOk.current){
       clearTimeout(saveTimer.current);
-      saveTimer.current=setTimeout(()=>supa.save(session.token,session.user.id,updated).catch(()=>{}),1500);
+      saveTimer.current=setTimeout(()=>salvarComRetry(session.user.id,updated).catch(()=>{}),1500);
     }
     return updated;
   });}
-  function handleLogin(t,u){const s={token:t,user:u};setSession(s);lsSet("session",s);}
+  function handleLogin(t,u,rt){const s={token:t,user:u,refresh:rt||null};setSession(s);lsSet("session",s);}
   async function handleLogout(){
     // Logout local imediato — não trava se o Supabase estiver fora
     try{ if(session) supa.signOut(session.token).catch(()=>{}); }catch{}
@@ -3596,7 +3591,7 @@ function AppInner(){
   },[profileId,session]);
 
   function exportar(){const p={version:4,exportedAt:new Date().toISOString(),all_profiles:allData,watchlist_br:lsGet("watchlist_br")||[],watchlist_au:lsGet("watchlist_au")||[]};const b=new Blob([JSON.stringify(p,null,2)],{type:"application/json"});const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download=`financas_${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(u);}
-  function importar(e){const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=ev=>{try{const p=JSON.parse(ev.target.result);if(!p.all_profiles){alert("Arquivo inválido.");return;}if(!window.confirm("Substituir todos os dados?"))return;lsSet("all_profiles",p.all_profiles);if(p.watchlist_br)lsSet("watchlist_br",p.watchlist_br);if(p.watchlist_au)lsSet("watchlist_au",p.watchlist_au);setAllData(p.all_profiles);if(session)supa.save(session.token,session.user.id,p.all_profiles).catch(()=>{});alert("✅ Dados restaurados!");}catch{alert("Arquivo inválido.");}};r.readAsText(file);e.target.value="";}
+  function importar(e){const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=ev=>{try{const p=JSON.parse(ev.target.result);if(!p.all_profiles){alert("Arquivo inválido.");return;}if(!window.confirm("Substituir todos os dados?"))return;lsSet("all_profiles",p.all_profiles);if(p.watchlist_br)lsSet("watchlist_br",p.watchlist_br);if(p.watchlist_au)lsSet("watchlist_au",p.watchlist_au);setAllData(p.all_profiles);if(session)salvarComRetry(session.user.id,p.all_profiles).catch(()=>{});alert("✅ Dados restaurados!");}catch{alert("Arquivo inválido.");}};r.readAsText(file);e.target.value="";}
 
   if(!session)return <><style>{GS}</style><LoginScreen onLogin={handleLogin}/></>;
 
@@ -3614,14 +3609,13 @@ function AppInner(){
   const catD=data.catD.length?data.catD:CAT_D_DEF,catR=data.catR.length?data.catR:CAT_R_DEF;
 
   const txMes=data.transacoes.filter(t=>{const d=new Date(t.data);return d.getMonth()===mes&&d.getFullYear()===ANO_ATUAL;});
-  const totR=txMes.filter(t=>t.tipo==="receita"&&!CAT_INTERNAS.includes(t.categoria)).reduce((a,b)=>a+b.valor,0);
-  const totD=txMes.filter(t=>t.tipo==="despesa"&&!CAT_INTERNAS.includes(t.categoria)).reduce((a,b)=>a+b.valor,0);
+  const {receitas:totR,despesas:totD}=totaisTransacoes(txMes); // testado em calc.mjs (exclui categorias internas)
   const totInv=data.investimentos.reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0);
-  function saldoBanco(b){const txs=data.transacoes.filter(t=>t.bancoId===b.id);return(b.saldoInicial||0)+txs.filter(t=>t.tipo==="receita").reduce((a,x)=>a+x.valor,0)-txs.filter(t=>t.tipo==="despesa").reduce((a,x)=>a+x.valor,0);}
+  function saldoBanco(b){return saldoBancoCalc(b,data.transacoes);} // testado em calc.mjs
   const totBancos=data.bancos.reduce((a,b)=>a+saldoBanco(b),0);
   const patrimonioLiq=totBancos+totInv;
   const tiposI=TIPOS_INV.map(t=>({t,v:data.investimentos.filter(i=>i.tipo===t).reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0)})).filter(x=>x.v>0);
-  const ultimos6=Array.from({length:6},(_,i)=>{const d=new Date(ANO_ATUAL,MES_ATUAL-5+i,1),m=d.getMonth(),a=d.getFullYear();const txs=data.transacoes.filter(t=>{const td=new Date(t.data);return td.getMonth()===m&&td.getFullYear()===a&&!CAT_INTERNAS.includes(t.categoria);});return{label:MESES[m],r:txs.filter(t=>t.tipo==="receita").reduce((a,b)=>a+b.valor,0),d:txs.filter(t=>t.tipo==="despesa").reduce((a,b)=>a+b.valor,0)};});
+  const ultimos6=Array.from({length:6},(_,i)=>{const d=new Date(ANO_ATUAL,MES_ATUAL-5+i,1),m=d.getMonth(),a=d.getFullYear();const txs=data.transacoes.filter(t=>{const td=new Date(t.data);return td.getMonth()===m&&td.getFullYear()===a&&!CAT_INTERNAS.includes(t.categoria);});const tt=totaisTransacoes(txs);return{label:MESES[m],r:tt.receitas,d:tt.despesas};});
   let acc=0;const lineData=ultimos6.map(d=>{acc+=d.r-d.d;return{label:d.label,v:acc};});
   const catPieD=catD.map((c,i)=>({label:c,cat:c,v:txMes.filter(t=>t.tipo==="despesa"&&t.categoria===c).reduce((a,b)=>a+b.valor,0),color:CORES[i%CORES.length]})).filter(x=>x.v>0).sort((a,b)=>b.v-a.v);
   const catPieR=catR.map((c,i)=>({label:c,cat:c,v:txMes.filter(t=>t.tipo==="receita"&&t.categoria===c).reduce((a,b)=>a+b.valor,0),color:CORES[i%CORES.length]})).filter(x=>x.v>0).sort((a,b)=>b.v-a.v);
@@ -3735,7 +3729,7 @@ function AppInner(){
         </Card>
         {data.orcamentos?.length>0&&(()=>{
           const sal=data.salario;
-          const salMensal=sal&&sal.valor>0?(sal.freq==="semanal"?sal.valor*52/12:sal.freq==="quinzenal"?sal.valor*26/12:sal.freq==="anual"?sal.valor/12:sal.valor):0;
+          const salMensal=sal?salarioMensal(sal.valor,sal.freq):0; // testado em calc.mjs
           const orcTotal=data.orcamentos.reduce((a,o)=>a+(o.valor||0),0);
           const gastoOrcadas=data.orcamentos.reduce((a,o)=>a+txMes.filter(t=>t.tipo==="despesa"&&t.categoria===o.categoria).reduce((s,t)=>s+t.valor,0),0);
           const linhas=data.orcamentos.map(o=>{const gasto=txMes.filter(t=>t.tipo==="despesa"&&t.categoria===o.categoria).reduce((a,t)=>a+t.valor,0);const pctReal=o.valor>0?gasto/o.valor*100:0;return {o,gasto,pctReal,resta:o.valor-gasto};}).sort((a,b)=>b.pctReal-a.pctReal);
@@ -3779,7 +3773,7 @@ function AppInner(){
           <option value="mensal">Mensal</option>
           <option value="anual">Anual</option>
         </select></label>
-        {parseFloat(salForm.valor)>0&&(()=>{const v=parseFloat(salForm.valor);const f=salForm.freq||"semanal";const m=f==="semanal"?v*52/12:f==="quinzenal"?v*26/12:f==="anual"?v/12:v;return <p style={{fontSize:13,color:D.green,marginTop:10,fontWeight:600}}>≈ {fmtM(m,currency)}/mês</p>;})()}
+        {parseFloat(salForm.valor)>0&&(()=>{const m=salarioMensal(parseFloat(salForm.valor),salForm.freq||"semanal");return <p style={{fontSize:13,color:D.green,marginTop:10,fontWeight:600}}>≈ {fmtM(m,currency)}/mês</p>;})()}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:14}}>
           <Btn outline color={D.red} sm onClick={()=>{setData(d=>({...d,salario:null}));setModalSal(false);}}>Remover</Btn>
           <div style={{display:"flex",gap:8}}>
