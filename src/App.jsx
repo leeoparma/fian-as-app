@@ -3445,6 +3445,7 @@ function AppInner(){
   const [mes,setMes]=useState(MES_ATUAL);
   const [grafico,setGrafico]=useState("barras");
   const [modalSal,setModalSal]=useState(false);const [salForm,setSalForm]=useState({});
+  const [modalTransf,setModalTransf]=useState(false);const [transfForm,setTransfForm]=useState({});
   const [catDet,setCatDet]=useState(null); // {cat,tipo} aberto no gráfico de pizza
   const saveTimer=useRef(null);
   const importRef=useRef(null);
@@ -3530,6 +3531,38 @@ function AppInner(){
       setSyncing(false);
     })();
   },[session?.token]);
+
+  // Transferência entre países: cria as duas pernas (e a taxa) de uma vez,
+  // nos DOIS perfis, com a mesma proteção do setData (loadOk + save debounced).
+  function fazerTransferencia(){
+    const de=transfForm.de,para=transfForm.para;
+    const vEnv=parseFloat(transfForm.valorEnviado)||0;
+    const vRec=parseFloat(transfForm.valorRecebido)||0;
+    const taxa=parseFloat(transfForm.taxa)||0;
+    if(!de||!para||de===para){alert("Escolha países de origem e destino diferentes.");return;}
+    if(vEnv<=0||vRec<=0){alert("Preencha o valor enviado e o valor recebido.");return;}
+    const dt=transfForm.data||hoje.toISOString().slice(0,10);
+    const labelDe=PROFILES.find(p=>p.id===de)?.label||de;
+    const labelPara=PROFILES.find(p=>p.id===para)?.label||para;
+    const obs=transfForm.descricao?` — ${transfForm.descricao}`:"";
+    const transfId=uid();
+    setAllData(all=>{
+      const pDe={...(all[de]||{...EMPTY})},pPara={...(all[para]||{...EMPTY})};
+      const txsDe=[...(pDe.transacoes||[]),
+        {id:uid(),tipo:"despesa",descricao:`Transf. → ${labelPara}${obs}`,valor:vEnv,categoria:"Transferência",data:dt,bancoId:transfForm.bancoDe||null,transfId},
+        ...(taxa>0?[{id:uid(),tipo:"despesa",descricao:`Taxa de remessa → ${labelPara}`,valor:taxa,categoria:"Câmbio",data:dt,bancoId:transfForm.bancoDe||null,transfId}]:[])];
+      const txsPara=[...(pPara.transacoes||[]),
+        {id:uid(),tipo:"receita",descricao:`Transf. ← ${labelDe}${obs}`,valor:vRec,categoria:"Transferência",data:dt,bancoId:transfForm.bancoPara||null,transfId}];
+      const updated={...all,[de]:{...pDe,transacoes:txsDe},[para]:{...pPara,transacoes:txsPara}};
+      lsSet("all_profiles",updated);
+      if(session&&loadOk.current){
+        clearTimeout(saveTimer.current);
+        saveTimer.current=setTimeout(()=>salvarComRetry(session.user.id,updated).catch(()=>{}),1500);
+      }
+      return updated;
+    });
+    setModalTransf(false);setTransfForm({});
+  }
 
   function setData(upd){setAllData(all=>{
     const prev=all[profileId]||{...EMPTY};
@@ -3657,8 +3690,9 @@ function AppInner(){
         {(()=>{const cons=patrimonioConsolidado();const simbolo={BRL:"R$",AUD:"A$",USD:"US$"}[moedaCons];return <Card style={{border:`1px solid ${D.blue}33`}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:6}}>
             <p style={{fontSize:10,color:D.text3,textTransform:"uppercase",letterSpacing:"1px",margin:0}}>🌍 Patrimônio Consolidado (3 países)</p>
-            <div style={{display:"flex",gap:4}}>
+            <div style={{display:"flex",gap:4,alignItems:"center"}}>
               {["BRL","AUD","USD"].map(m=><button key={m} onClick={()=>{setMoedaCons(m);lsSet("moeda_cons",m);}} style={{padding:"3px 9px",borderRadius:14,fontSize:10,cursor:"pointer",border:`1px solid ${moedaCons===m?D.blue:D.border}`,background:moedaCons===m?D.blue+"22":"transparent",color:moedaCons===m?D.blue:D.text3,fontWeight:moedaCons===m?700:400}}>{({BRL:"R$",AUD:"A$",USD:"US$"})[m]}</button>)}
+              <button onClick={()=>{setTransfForm({de:profileId,para:PROFILES.find(p=>p.id!==profileId)?.id,data:hoje.toISOString().slice(0,10)});setModalTransf(true);}} style={{padding:"3px 10px",borderRadius:14,fontSize:10,cursor:"pointer",border:`1px solid ${D.green}55`,background:D.green+"15",color:D.green,fontWeight:700}}>💱 Transferir</button>
             </div>
           </div>
           {cambioErro&&!cambio&&<p style={{fontSize:13,color:D.gold}}>⚠ Câmbio indisponível agora. <button onClick={carregarCambio} style={{color:D.blue,background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>Tentar de novo</button></p>}
@@ -3764,6 +3798,27 @@ function AppInner(){
       {tab===6&&<AnaliseTab data={data} setData={setData} investimentos={data.investimentos} profileId={profileId} market={profileId} currency={currency}/>}
       {tab===7&&<SplitwiseTab currency={currency} userEmail={session?.user?.email}/>}
       {tab===8&&<RelatoriosTab data={data} setData={setData} currency={currency}/>}
+      {modalTransf&&(()=>{
+        const de=transfForm.de,para=transfForm.para;
+        const curDe=PROFILES.find(p=>p.id===de)?.currency||"";
+        const curPara=PROFILES.find(p=>p.id===para)?.currency||"";
+        const bancosDe=(allData[de]?.bancos)||[],bancosPara=(allData[para]?.bancos)||[];
+        return <Modal title="💱 Transferência entre países" onClose={()=>{setModalTransf(false);setTransfForm({});}}>
+        <p style={{fontSize:11,color:D.text3,marginTop:0,lineHeight:1.5}}>Cria as duas pernas de uma vez, na categoria <b>Transferência</b> (não conta como gasto nem como renda — só move os saldos). A taxa, se houver, entra como despesa real em "Câmbio".</p>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <label style={{fontSize:12,color:D.text3}}>Sai de<select value={de||""} onChange={e=>setTransfForm(f=>({...f,de:e.target.value,bancoDe:""}))} style={{marginTop:4}}>{PROFILES.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}</select></label>
+          <label style={{fontSize:12,color:D.text3}}>Vai para<select value={para||""} onChange={e=>setTransfForm(f=>({...f,para:e.target.value,bancoPara:""}))} style={{marginTop:4}}>{PROFILES.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}</select></label>
+          <label style={{fontSize:12,color:D.text3}}>Banco de origem{bancosDe.length===0&&" (nenhum)"}<select value={transfForm.bancoDe||""} onChange={e=>setTransfForm(f=>({...f,bancoDe:e.target.value}))} style={{marginTop:4}}><option value="">—</option>{bancosDe.map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}</select></label>
+          <label style={{fontSize:12,color:D.text3}}>Banco de destino{bancosPara.length===0&&" (nenhum)"}<select value={transfForm.bancoPara||""} onChange={e=>setTransfForm(f=>({...f,bancoPara:e.target.value}))} style={{marginTop:4}}><option value="">—</option>{bancosPara.map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}</select></label>
+          <label style={{fontSize:12,color:D.text3}}>Valor enviado ({curDe})<input type="number" step="0.01" value={transfForm.valorEnviado||""} onChange={e=>setTransfForm(f=>({...f,valorEnviado:e.target.value}))} style={{marginTop:4}}/></label>
+          <label style={{fontSize:12,color:D.text3}}>Valor recebido ({curPara})<input type="number" step="0.01" value={transfForm.valorRecebido||""} onChange={e=>setTransfForm(f=>({...f,valorRecebido:e.target.value}))} placeholder="o que chegou de fato" style={{marginTop:4}}/></label>
+          <label style={{fontSize:12,color:D.text3}}>Taxa da remessa ({curDe}, opcional)<input type="number" step="0.01" value={transfForm.taxa||""} onChange={e=>setTransfForm(f=>({...f,taxa:e.target.value}))} style={{marginTop:4}}/></label>
+          <label style={{fontSize:12,color:D.text3}}>Data<input type="date" value={transfForm.data||""} onChange={e=>setTransfForm(f=>({...f,data:e.target.value}))} style={{marginTop:4}}/></label>
+        </div>
+        <label style={{fontSize:12,color:D.text3,display:"block",marginTop:8}}>Observação (opcional)<input value={transfForm.descricao||""} onChange={e=>setTransfForm(f=>({...f,descricao:e.target.value}))} placeholder="Ex: Wise, envio p/ investir" style={{marginTop:4}}/></label>
+        {parseFloat(transfForm.valorEnviado)>0&&parseFloat(transfForm.valorRecebido)>0&&de&&para&&de!==para&&<p style={{fontSize:12,color:D.text2,marginTop:8,lineHeight:1.6}}>Vai criar: <b style={{color:D.red}}>−{fmtM(parseFloat(transfForm.valorEnviado),curDe)}</b> em {PROFILES.find(p=>p.id===de)?.label}{parseFloat(transfForm.taxa)>0&&<> + taxa <b style={{color:D.red}}>−{fmtM(parseFloat(transfForm.taxa),curDe)}</b></>} e <b style={{color:D.green}}>+{fmtM(parseFloat(transfForm.valorRecebido),curPara)}</b> em {PROFILES.find(p=>p.id===para)?.label}.</p>}
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:10}}><Btn outline color={D.text3} onClick={()=>{setModalTransf(false);setTransfForm({});}}>Cancelar</Btn><Btn color={D.green} onClick={fazerTransferencia}>Transferir</Btn></div>
+      </Modal>;})()}
       {modalSal&&<Modal title="💰 Salário esperado" onClose={()=>setModalSal(false)}>
         <p style={{fontSize:11,color:D.text3,marginBottom:10,lineHeight:1.5}}>Usado para projetar seus gastos como % do salário <b>garantido</b>. Extra (bônus, freela) fica de fora — é folga. Fica salvo por perfil ({currency}).</p>
         <label style={{fontSize:12,color:D.text3,display:"block",marginBottom:8}}>Valor ({currency})<input type="number" value={salForm.valor||""} onChange={e=>setSalForm(f=>({...f,valor:e.target.value}))} placeholder="ex: 1875" style={{marginTop:4}}/></label>
