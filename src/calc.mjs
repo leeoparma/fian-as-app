@@ -227,3 +227,22 @@ export function projetarFluxo({saldoHoje,hojeStr,dias=90,txs=[],recorrencias=[],
   const em=n=>diario[Math.min(n,dias)].saldo;
   return{diario,minimo:{...minimo,data:addDias(hojeStr,minimo.off)},d30:em(30),d60:em(60),d90:em(90)};
 }
+
+// ── Importação de extrato: marcação de duplicatas (conciliação) ──────────────
+// Duplicata = mesma data + mesmo tipo + mesmo valor (em centavos), contra os
+// lançamentos do MESMO banco (ou sem banco definido). Conta ocorrências:
+// se o extrato tem 2 pedágios iguais no dia e o app já tem 1, marca só 1.
+export function marcarDuplicatas(candidatas,existentes,bancoId){
+  const chave=t=>`${t.data}|${t.tipo}|${Math.round((t.valor||0)*100)}`;
+  const pool=new Map();
+  for(const t of (existentes||[])){
+    if(!t)continue;
+    if(bancoId&&t.bancoId&&t.bancoId!==bancoId)continue; // outro banco não conta
+    const k=chave(t);pool.set(k,(pool.get(k)||0)+1);
+  }
+  return (candidatas||[]).map(c=>{
+    const k=chave(c);const n=pool.get(k)||0;
+    if(n>0){pool.set(k,n-1);return {...c,dup:true};}
+    return {...c,dup:false};
+  });
+}
