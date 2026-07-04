@@ -150,3 +150,30 @@ export function simularJuros(ini,ap,meses,tm){
   const rendimento=saldo-(ini+ap*meses);
   return {saldo,pts,rendimento,aportado:ini+ap*meses};
 }
+
+// ── Backup: snapshots sem fotos (e mescla de volta ao restaurar) ─────────────
+// As fotos de NF (base64, 1–5MB cada) NÃO entram no snapshot — senão cada
+// backup diário carregaria megabytes. Ao restaurar, as fotos que existem nos
+// dados atuais são devolvidas às transações correspondentes (por id).
+export function semFotos(all){
+  const out={};
+  for(const k of Object.keys(all||{})){
+    const p=all[k];
+    if(!p||typeof p!=="object"||Array.isArray(p)){out[k]=p;continue;}
+    out[k]={...p,transacoes:(p.transacoes||[]).map(t=>t&&t.nfImg?{...t,nfImg:null}:t)};
+  }
+  return out;
+}
+export function mesclarFotos(backup,atual){
+  const fotos={};
+  for(const k of Object.keys(atual||{})){
+    for(const t of (atual[k]?.transacoes||[]))if(t&&t.id&&t.nfImg)fotos[t.id]=t.nfImg;
+  }
+  const out={};
+  for(const k of Object.keys(backup||{})){
+    const p=backup[k];
+    if(!p||typeof p!=="object"||Array.isArray(p)){out[k]=p;continue;}
+    out[k]={...p,transacoes:(p.transacoes||[]).map(t=>t&&t.id&&!t.nfImg&&fotos[t.id]?{...t,nfImg:fotos[t.id]}:t)};
+  }
+  return out;
+}
