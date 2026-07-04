@@ -8,7 +8,7 @@ import {
   totaisTransacoes, saldoBanco as saldoBancoCalc, parcelaValor, parcelaData,
   calcSaldos as calcSaldosPure, calcDividas as calcDividasPure, totaisPorPessoa as totaisPorPessoaPure,
   salarioMensal, converteMoeda, taxaMensalSim, simularJuros,
-  semFotos, mesclarFotos,
+  semFotos, mesclarFotos, projetarFluxo, addDias,
 } from "./calc.mjs";
 
 const SUPA_URL="https://llpzdrqgvkpxjnecttkb.supabase.co";
@@ -3477,6 +3477,7 @@ function AppInner(){
   const [modalSal,setModalSal]=useState(false);const [salForm,setSalForm]=useState({});
   const [modalTransf,setModalTransf]=useState(false);const [transfForm,setTransfForm]=useState({});
   const [modalBk,setModalBk]=useState(null); // null | {loading} | {lista} | {erro}
+  const [projSal,setProjSal]=useState(()=>lsGet("proj_sal")||{}); // por perfil: incluir salário na projeção?
   const [catDet,setCatDet]=useState(null); // {cat,tipo} aberto no gráfico de pizza
   const saveTimer=useRef(null);
   const importRef=useRef(null);
@@ -3817,6 +3818,30 @@ function AppInner(){
           })()}
           {grafico==="linha"&&<LineChart data={lineData} currency={currency}/>}
         </Card>
+        {(()=>{ // 🔮 Projeção de caixa (90 dias) — matemática em calc.mjs, testada
+          const hs=hoje.toISOString().slice(0,10);
+          const saldoHojeReal=data.bancos.reduce((a,b)=>a+(b.saldoInicial||0),0)+data.transacoes.reduce((a,t)=>(t.data&&t.data<=hs)?(a+(t.tipo==="receita"?(t.valor||0):-(t.valor||0))):a,0);
+          const salM=data.salario?salarioMensal(data.salario.valor,data.salario.freq):0;
+          const temRecReceita=(data.recorrencias||[]).some(r=>r.tipo==="receita");
+          const incluirSal=projSal[profileId]!=null?projSal[profileId]:(salM>0&&!temRecReceita);
+          const proj=projetarFluxo({saldoHoje:saldoHojeReal,hojeStr:hs,dias:90,txs:data.transacoes,recorrencias:data.recorrencias||[],salarioMes:incluirSal?salM:0});
+          const pts=proj.diario.filter((p,i)=>i%7===0||i===proj.diario.length-1).map(p=>({label:addDias(hs,p.off).slice(5).split("-").reverse().join("/"),v:p.saldo}));
+          return <Card>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6,marginBottom:6}}>
+              <Tip text="🔮 Projeta o saldo em caixa dos próximos 90 dias a partir do saldo REAL de hoje, somando: parcelas e lançamentos futuros já registrados (nas datas deles), recorrências (sem contar 2x as já lançadas) e, se ligado, o salário declarado pingando por dia. É projeção, não garantia — imprevistos não entram."><p style={{fontSize:14,fontWeight:700,color:D.text}}>🔮 Projeção de caixa <span style={{fontSize:10,color:D.text3,fontWeight:400}}>90 dias</span></p></Tip>
+              {salM>0&&<label style={{fontSize:10,color:D.text3,display:"flex",alignItems:"center",gap:5,cursor:"pointer"}}><input type="checkbox" checked={incluirSal} onChange={e=>{const nv={...projSal,[profileId]:e.target.checked};setProjSal(nv);lsSet("proj_sal",nv);}}/>incluir salário ({fmtM(salM,currency)}/mês)</label>}
+            </div>
+            <div style={{display:"flex",gap:14,flexWrap:"wrap",fontSize:11,color:D.text3,marginBottom:4}}>
+              <span>hoje <b style={{color:D.text}}>{fmtM(saldoHojeReal,currency)}</b></span>
+              <span>30d <b style={{color:proj.d30>=0?D.green:D.red}}>{fmtM(proj.d30,currency)}</b></span>
+              <span>60d <b style={{color:proj.d60>=0?D.green:D.red}}>{fmtM(proj.d60,currency)}</b></span>
+              <span>90d <b style={{color:proj.d90>=0?D.green:D.red}}>{fmtM(proj.d90,currency)}</b></span>
+            </div>
+            {proj.minimo.saldo<0&&<p style={{fontSize:11,color:D.gold,margin:"0 0 4px"}}>⚠️ Pode ficar negativo por volta de {proj.minimo.data.split("-").reverse().slice(0,2).join("/")} (mín. {fmtM(proj.minimo.saldo,currency)})</p>}
+            <LineChart data={pts} currency={currency}/>
+            {incluirSal&&temRecReceita&&<p style={{fontSize:10,color:D.gold,margin:"4px 0 0"}}>⚠️ Você tem recorrência de receita E o salário ligado — confira se não está contando a mesma renda 2x.</p>}
+          </Card>;
+        })()}
         {data.orcamentos?.length>0&&(()=>{
           const sal=data.salario;
           const salMensal=sal?salarioMensal(sal.valor,sal.freq):0; // testado em calc.mjs
