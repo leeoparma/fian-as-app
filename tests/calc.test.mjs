@@ -12,7 +12,7 @@ import {
   totaisTransacoes,saldoBanco,parcelaValor,parcelaData,
   calcSaldos,calcDividas,totaisPorPessoa,
   salarioMensal,converteMoeda,taxaMensalSim,simularJuros,
-  semFotos,mesclarFotos,projetarFluxo,ocorrenciasRecorrencia,addDias,
+  semFotos,mesclarFotos,projetarFluxo,ocorrenciasRecorrencia,addDias,marcarDuplicatas,
 } from "../src/calc.mjs";
 
 const aprox=(a,b,tol=0.01)=>assert.ok(Math.abs(a-b)<=tol,`esperado ~${b}, veio ${a}`);
@@ -302,4 +302,31 @@ test("recorrência semanal: ~13 ocorrências em 90 dias", ()=>{
 test("recorrência mensal dia 31: clampa fevereiro", ()=>{
   const oc=ocorrenciasRecorrencia({frequencia:"mensal",dia:31},"2026-01-15",60);
   assert.ok(oc.includes("2026-01-31")&&oc.includes("2026-02-28"),oc.join(","));
+});
+
+// ── Importação: duplicatas ───────────────────────────────────────────────────
+test("import: duplicata exata (data+valor+tipo, mesmo banco) é marcada", ()=>{
+  const r=marcarDuplicatas([{data:"2026-07-01",tipo:"despesa",valor:45.27}],[{data:"2026-07-01",tipo:"despesa",valor:45.27,bancoId:"b1"}],"b1");
+  assert.equal(r[0].dup,true);
+});
+test("import: mesmo dia/valor mas tipo diferente NÃO é duplicata", ()=>{
+  const r=marcarDuplicatas([{data:"2026-07-01",tipo:"receita",valor:45.27}],[{data:"2026-07-01",tipo:"despesa",valor:45.27,bancoId:"b1"}],"b1");
+  assert.equal(r[0].dup,false);
+});
+test("import: consumo por contagem — 2 pedágios iguais, 1 já lançado → 1 dup + 1 novo", ()=>{
+  const cands=[{data:"2026-07-01",tipo:"despesa",valor:8.9},{data:"2026-07-01",tipo:"despesa",valor:8.9}];
+  const r=marcarDuplicatas(cands,[{data:"2026-07-01",tipo:"despesa",valor:8.9,bancoId:"b1"}],"b1");
+  assert.deepEqual(r.map(x=>x.dup).sort(),[false,true]);
+});
+test("import: lançamento igual em OUTRO banco não bloqueia", ()=>{
+  const r=marcarDuplicatas([{data:"2026-07-01",tipo:"despesa",valor:45.27}],[{data:"2026-07-01",tipo:"despesa",valor:45.27,bancoId:"mastercard"}],"commbank");
+  assert.equal(r[0].dup,false);
+});
+test("import: lançamento manual SEM banco conta como duplicata (conservador)", ()=>{
+  const r=marcarDuplicatas([{data:"2026-07-01",tipo:"despesa",valor:45.27}],[{data:"2026-07-01",tipo:"despesa",valor:45.27,bancoId:null}],"commbank");
+  assert.equal(r[0].dup,true);
+});
+test("import: centavos — 45.271 e 45.27 casam (arredonda a centavo)", ()=>{
+  const r=marcarDuplicatas([{data:"2026-07-01",tipo:"despesa",valor:45.271}],[{data:"2026-07-01",tipo:"despesa",valor:45.27,bancoId:"b1"}],"b1");
+  assert.equal(r[0].dup,true);
 });
