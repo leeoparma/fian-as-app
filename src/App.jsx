@@ -3829,7 +3829,6 @@ function AppInner(){
           return <Card>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6,marginBottom:6}}>
               <Tip text="🔮 Projeta o saldo em caixa dos próximos 90 dias a partir do saldo REAL de hoje, somando: parcelas e lançamentos futuros já registrados (nas datas deles), recorrências (sem contar 2x as já lançadas) e, se ligado, o salário declarado pingando por dia. É projeção, não garantia — imprevistos não entram."><p style={{fontSize:14,fontWeight:700,color:D.text}}>🔮 Projeção de caixa <span style={{fontSize:10,color:D.text3,fontWeight:400}}>90 dias</span></p></Tip>
-              {salM>0&&<label style={{fontSize:10,color:D.text3,display:"flex",alignItems:"center",gap:5,cursor:"pointer"}}><input type="checkbox" checked={incluirSal} onChange={e=>{const nv={...projSal,[profileId]:e.target.checked};setProjSal(nv);lsSet("proj_sal",nv);}}/>incluir salário ({fmtM(salM,currency)}/mês)</label>}
             </div>
             <div style={{display:"flex",gap:14,flexWrap:"wrap",fontSize:11,color:D.text3,marginBottom:4}}>
               <span>hoje <b style={{color:D.text}}>{fmtM(saldoHojeReal,currency)}</b></span>
@@ -3837,6 +3836,7 @@ function AppInner(){
               <span>60d <b style={{color:proj.d60>=0?D.green:D.red}}>{fmtM(proj.d60,currency)}</b></span>
               <span>90d <b style={{color:proj.d90>=0?D.green:D.red}}>{fmtM(proj.d90,currency)}</b></span>
             </div>
+            {salM>0&&<label style={{fontSize:10,color:D.text3,display:"flex",alignItems:"center",gap:6,margin:"0 0 6px",cursor:"pointer"}}><input type="checkbox" style={{margin:0,flexShrink:0}} checked={incluirSal} onChange={e=>{const nv={...projSal,[profileId]:e.target.checked};setProjSal(nv);lsSet("proj_sal",nv);}}/><span>incluir salário ({fmtM(salM,currency)}/mês) na projeção</span></label>}
             {proj.minimo.saldo<0&&<p style={{fontSize:11,color:D.gold,margin:"0 0 4px"}}>⚠️ Pode ficar negativo por volta de {proj.minimo.data.split("-").reverse().slice(0,2).join("/")} (mín. {fmtM(proj.minimo.saldo,currency)})</p>}
             <LineChart data={pts} currency={currency}/>
             {incluirSal&&temRecReceita&&<p style={{fontSize:10,color:D.gold,margin:"4px 0 0"}}>⚠️ Você tem recorrência de receita E o salário ligado — confira se não está contando a mesma renda 2x.</p>}
