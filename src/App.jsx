@@ -8,7 +8,7 @@ import {
   totaisTransacoes, saldoBanco as saldoBancoCalc, parcelaValor, parcelaData,
   calcSaldos as calcSaldosPure, calcDividas as calcDividasPure, totaisPorPessoa as totaisPorPessoaPure,
   salarioMensal, converteMoeda, taxaMensalSim, simularJuros,
-  semFotos, mesclarFotos, projetarFluxo, addDias,
+  semFotos, mesclarFotos, projetarFluxo, addDias, marcarDuplicatas,
 } from "./calc.mjs";
 
 const SUPA_URL="https://llpzdrqgvkpxjnecttkb.supabase.co";
@@ -958,14 +958,13 @@ ${paginas}
         const isOFX=/\.ofx$/i.test(file.name)||/<STMTTRN>|<OFX>/i.test(txt);
         let parsed=isOFX?parseOFX(txt):parseCSV(txt);
         if(!parsed.length){alert("Não encontrei lançamentos nesse arquivo. Verifique se é um extrato OFX ou CSV do seu banco.");e.target.value="";return;}
-        // Detecta duplicados: mesma data + mesmo valor + mesmo tipo já existente
-        const existentes=data.transacoes;
-        const itens=parsed.map(p=>{
-          const dup=existentes.some(t=>t.data===p.data&&Math.abs(t.valor-p.valor)<0.01&&t.tipo===p.tipo);
+        // Duplicatas via calc.mjs (testado): escopo do banco de destino + consumo por contagem
+        const bancoIni=data.bancos[0]?.id||"";
+        const itens=marcarDuplicatas(parsed,data.transacoes,bancoIni).map(p=>{
           const catSugerida=categorizar(p.descricao,p.tipo);
-          return {...p,dup,incluir:!dup,categoria:catSugerida||(p.tipo==="receita"?catR[0]:catD[0]),autoCat:!!catSugerida};
+          return {...p,incluir:!p.dup,categoria:catSugerida||(p.tipo==="receita"?catR[0]:catD[0]),autoCat:!!catSugerida};
         });
-        setImpBanco(data.bancos[0]?.id||"");
+        setImpBanco(bancoIni);
         setImpItens(itens);
       }catch(err){alert("Erro ao ler o arquivo. Tente exportar novamente do banco em formato OFX.");}
       e.target.value="";
@@ -1023,7 +1022,7 @@ ${paginas}
           {semCat.length>0&&<p style={{fontSize:12,color:D.gold,marginBottom:8}}>⚠️ {semCat.length} sem categoria automática — revise abaixo.</p>}
           <div style={{marginBottom:10}}>
             <label style={{fontSize:11,color:D.text3,display:"block",marginBottom:4}}>Banco / conta destes lançamentos:</label>
-            <select value={impBanco} onChange={e=>setImpBanco(e.target.value)} style={{width:"100%",padding:"7px 8px",fontSize:12}}>
+            <select value={impBanco} onChange={e=>{const v=e.target.value;setImpBanco(v);setImpItens(prev=>prev?marcarDuplicatas(prev,data.transacoes,v).map(i=>({...i,incluir:!i.dup})):prev);}} style={{width:"100%",padding:"7px 8px",fontSize:12}}>
               {data.bancos.map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}
             </select>
           </div>
