@@ -177,3 +177,53 @@ export function mesclarFotos(backup,atual){
   }
   return out;
 }
+
+// ── Projeção de fluxo de caixa ───────────────────────────────────────────────
+export function addDias(dataStr,n){const[y,m,d]=dataStr.split("-").map(Number);const dt=new Date(y,m-1,d+n);return _ymdC(dt);}
+// Datas futuras (1..dias a partir de hoje) em que uma recorrência ocorre
+export function ocorrenciasRecorrencia(rec,hojeStr,dias){
+  const out=[];const[hy,hm,hd]=hojeStr.split("-").map(Number);const hojeD=new Date(hy,hm-1,hd);
+  if((rec.frequencia||"mensal")==="semanal"){
+    const alvo=rec.diaSemana!=null?rec.diaSemana:1;
+    for(let n=1;n<=dias;n++){const dt=new Date(hy,hm-1,hd+n);if(dt.getDay()===alvo)out.push(_ymdC(dt));}
+  }else{
+    for(let k=0;k<=Math.ceil(dias/28)+1;k++){
+      const s=_ymdC(_clampDia(hy,hm-1+k,rec.dia||1));
+      const off=diasAte(s,hojeD);
+      if(off>=1&&off<=dias)out.push(s);
+    }
+  }
+  return out;
+}
+// Projeta o saldo em caixa dia a dia:
+//  saldoHoje + transações FUTURAS já lançadas (parcelas etc.) + recorrências
+//  (puladas se a transação daquela data já existe — evita contar 2x) +
+//  salário declarado distribuído por dia (mensal×12÷365).
+export function projetarFluxo({saldoHoje,hojeStr,dias=90,txs=[],recorrencias=[],salarioMes=0}){
+  const[hy,hm,hd]=hojeStr.split("-").map(Number);const hojeD=new Date(hy,hm-1,hd);
+  const deltas=new Array(dias+1).fill(0);
+  const jaLancada=new Set();
+  for(const t of txs){
+    if(!t||!t.data)continue;
+    if(t.recorrenciaId)jaLancada.add(`${t.recorrenciaId}|${t.data}`);
+    const off=diasAte(t.data,hojeD);
+    if(off==null||off<1||off>dias)continue;
+    deltas[off]+=(t.tipo==="receita"?1:-1)*(t.valor||0);
+  }
+  for(const rec of(recorrencias||[])){
+    for(const dstr of ocorrenciasRecorrencia(rec,hojeStr,dias)){
+      if(jaLancada.has(`${rec.id}|${dstr}`))continue;
+      const off=diasAte(dstr,hojeD);
+      if(off>=1&&off<=dias)deltas[off]+=(rec.tipo==="receita"?1:-1)*(rec.valor||0);
+    }
+  }
+  const salDia=salarioMes>0?salarioMes*12/365:0;
+  let saldo=saldoHoje;const diario=[{off:0,saldo}];let minimo={off:0,saldo};
+  for(let n=1;n<=dias;n++){
+    saldo+=deltas[n]+salDia;
+    diario.push({off:n,saldo});
+    if(saldo<minimo.saldo)minimo={off:n,saldo};
+  }
+  const em=n=>diario[Math.min(n,dias)].saldo;
+  return{diario,minimo:{...minimo,data:addDias(hojeStr,minimo.off)},d30:em(30),d60:em(60),d90:em(90)};
+}
