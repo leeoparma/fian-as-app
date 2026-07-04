@@ -8,6 +8,7 @@ import {
   totaisTransacoes, saldoBanco as saldoBancoCalc, parcelaValor, parcelaData,
   calcSaldos as calcSaldosPure, calcDividas as calcDividasPure, totaisPorPessoa as totaisPorPessoaPure,
   salarioMensal, converteMoeda, taxaMensalSim, simularJuros,
+  semFotos, mesclarFotos,
 } from "./calc.mjs";
 
 const SUPA_URL="https://llpzdrqgvkpxjnecttkb.supabase.co";
@@ -29,6 +30,11 @@ const supa={
     return r?.[0]?.data||null; // array vazio = conta realmente nova
   },
   async save(t,id,d){const resp=await fetch(`${SUPA_URL}/rest/v1/profiles`,{method:"POST",headers:{...supa.ah(t),"Prefer":"resolution=merge-duplicates"},body:JSON.stringify({id,data:d,updated_at:new Date().toISOString()})});if(!resp.ok){const e=new Error("Supabase save HTTP "+resp.status);e.status=resp.status;throw e;}},
+  // Backups automáticos (tabela public.backups — ver backups.sql)
+  async backupInsert(t,data){const resp=await fetch(`${SUPA_URL}/rest/v1/backups`,{method:"POST",headers:supa.ah(t),body:JSON.stringify({data})});if(!resp.ok){const e=new Error("backup insert HTTP "+resp.status);e.status=resp.status;throw e;}},
+  async backupList(t){const resp=await fetch(`${SUPA_URL}/rest/v1/backups?select=id,created_at&order=created_at.desc`,{headers:supa.ah(t)});if(!resp.ok){const e=new Error("backup list HTTP "+resp.status);e.status=resp.status;throw e;}return resp.json();},
+  async backupGet(t,id){const resp=await fetch(`${SUPA_URL}/rest/v1/backups?id=eq.${id}&select=data`,{headers:supa.ah(t)});if(!resp.ok){const e=new Error("backup get HTTP "+resp.status);e.status=resp.status;throw e;}const r=await resp.json();return r?.[0]?.data||null;},
+  async backupDelete(t,ids){if(!ids.length)return;const resp=await fetch(`${SUPA_URL}/rest/v1/backups?id=in.(${ids.join(",")})`,{method:"DELETE",headers:supa.ah(t)});if(!resp.ok){const e=new Error("backup delete HTTP "+resp.status);e.status=resp.status;throw e;}},
   async loadShared(codigo){const r=await fetch(`${SUPA_URL}/rest/v1/rpc/load_shared`,{method:"POST",headers:supa.h,body:JSON.stringify({p_codigo:codigo})});if(!r.ok)return null;const d=await r.json();return d||null;},
   async saveShared(codigo,d){await fetch(`${SUPA_URL}/rest/v1/rpc/save_shared`,{method:"POST",headers:supa.h,body:JSON.stringify({p_codigo:codigo,p_data:d})});},
 };
@@ -68,6 +74,30 @@ async function salvarComRetry(id,dados){
       await supa.save(ns.token,id,dados);
     }else throw e;
   }
+}
+
+// Executa uma chamada autenticada, renovando a sessão e repetindo 1x se tomar 401
+async function com401(fn){
+  const t=lsGet("session")?.token;
+  if(!t)throw new Error("sem sessão");
+  try{return await fn(t);}
+  catch(e){
+    if(e?.status===401){const ns=await renovarSessao();if(!ns)throw e;return await fn(ns.token);}
+    throw e;
+  }
+}
+// Backup automático: 1×/dia ao abrir o app, sem fotos de NF, guarda os últimos 14.
+// NUNCA pode quebrar o app: qualquer falha é silenciosa (ex.: tabela ainda não criada).
+async function backupAutomatico(all){
+  try{
+    const last=lsGet("last_backup_at");
+    if(last&&(Date.now()-new Date(last).getTime())<24*60*60*1000)return;
+    await com401(t=>supa.backupInsert(t,semFotos(all)));
+    lsSet("last_backup_at",new Date().toISOString());
+    const lista=await com401(t=>supa.backupList(t));
+    const velhos=(lista||[]).slice(14).map(b=>b.id);
+    if(velhos.length)await com401(t=>supa.backupDelete(t,velhos));
+  }catch{}
 }
 
 const PROFILES=[{id:"br",label:"🇧🇷 Brasil",currency:"R$",market:"brazil",locale:"pt-BR"},{id:"au",label:"🇦🇺 Austrália",currency:"A$",market:"australia",locale:"en-AU"},{id:"us",label:"🇺🇸 EUA",currency:"US$",market:"usa",locale:"en-US"}];
@@ -3446,6 +3476,7 @@ function AppInner(){
   const [grafico,setGrafico]=useState("barras");
   const [modalSal,setModalSal]=useState(false);const [salForm,setSalForm]=useState({});
   const [modalTransf,setModalTransf]=useState(false);const [transfForm,setTransfForm]=useState({});
+  const [modalBk,setModalBk]=useState(null); // null | {loading} | {lista} | {erro}
   const [catDet,setCatDet]=useState(null); // {cat,tipo} aberto no gráfico de pizza
   const saveTimer=useRef(null);
   const importRef=useRef(null);
@@ -3511,6 +3542,7 @@ function AppInner(){
           setAllData(r);
           lsSet("all_profiles",r);
           loadOk.current=true;
+          backupAutomatico(r); // 1×/dia, silencioso
         }else{
           // load retornou null = conta sem dados na nuvem.
           // Se há dados locais com conteúdo real, faz um "upload" inicial seguro
@@ -3520,6 +3552,7 @@ function AppInner(){
           loadOk.current=true;
           if(temConteudo){
             try{await salvarComRetry(session.user.id,local);}catch{}
+            backupAutomatico(local);
           }
         }
       }catch{
@@ -3531,6 +3564,28 @@ function AppInner(){
       setSyncing(false);
     })();
   },[session?.token]);
+
+  async function abrirBackups(){
+    setModalBk({loading:true});
+    try{const lista=await com401(t=>supa.backupList(t));setModalBk({lista:lista||[]});}
+    catch{setModalBk({erro:true});}
+  }
+  async function restaurarBackup(b){
+    const quando=new Date(b.created_at).toLocaleString("pt-BR");
+    if(!window.confirm(`Restaurar o backup de ${quando}?\n\nOs dados atuais serão substituídos (um backup de segurança do estado atual é criado antes). As fotos de NF atuais são preservadas.`))return;
+    try{
+      const bkp=await com401(t=>supa.backupGet(t,b.id));
+      if(!bkp){alert("Este backup está vazio ou não pôde ser lido.");return;}
+      try{await com401(t=>supa.backupInsert(t,semFotos(allData)));}catch{}
+      const restaurado=mesclarFotos(bkp,allData);
+      setAllData(restaurado);
+      lsSet("all_profiles",restaurado);
+      loadOk.current=true;
+      if(session){clearTimeout(saveTimer.current);saveTimer.current=setTimeout(()=>salvarComRetry(session.user.id,restaurado).catch(()=>{}),1500);}
+      setModalBk(null);
+      alert("✅ Backup restaurado.");
+    }catch{alert("Erro ao restaurar. Tente novamente.");}
+  }
 
   // Transferência entre países: cria as duas pernas (e a taxa) de uma vez,
   // nos DOIS perfis, com a mesma proteção do setData (loadOk + save debounced).
@@ -3666,6 +3721,7 @@ function AppInner(){
           <div style={{width:1,height:20,background:D.border}}/>
           <button onClick={exportar} style={{padding:"5px 10px",borderRadius:16,fontSize:11,cursor:"pointer",background:"transparent",border:`1px solid ${D.border}`,color:D.text3}}>⬇️</button>
           <button onClick={()=>importRef.current.click()} style={{padding:"5px 10px",borderRadius:16,fontSize:11,cursor:"pointer",background:"transparent",border:`1px solid ${D.border}`,color:D.text3}}>⬆️</button>
+          <button onClick={abrirBackups} title="Backups automáticos" style={{padding:"5px 10px",borderRadius:16,fontSize:11,cursor:"pointer",background:"transparent",border:`1px solid ${D.border}`,color:D.text3}}>🕒</button>
           <input ref={importRef} type="file" accept=".json" onChange={importar} style={{display:"none"}}/>
           <button onClick={handleLogout} style={{padding:"5px 10px",borderRadius:16,fontSize:11,cursor:"pointer",background:D.red+"22",border:`1px solid ${D.red}44`,color:D.red}}>Sair</button>
         </div>
@@ -3798,6 +3854,16 @@ function AppInner(){
       {tab===6&&<AnaliseTab data={data} setData={setData} investimentos={data.investimentos} profileId={profileId} market={profileId} currency={currency}/>}
       {tab===7&&<SplitwiseTab currency={currency} userEmail={session?.user?.email}/>}
       {tab===8&&<RelatoriosTab data={data} setData={setData} currency={currency}/>}
+      {modalBk&&<Modal title="🕒 Backups automáticos" onClose={()=>setModalBk(null)}>
+        <p style={{fontSize:11,color:D.text3,marginTop:0,lineHeight:1.6}}>O app guarda 1 cópia por dia (ao abrir), até 14 cópias, na nuvem. As fotos de NF ficam fora do backup — ao restaurar, as fotos atuais são preservadas.</p>
+        {modalBk.loading&&<p style={{fontSize:12,color:D.text2}}>Carregando…</p>}
+        {modalBk.erro&&<p style={{fontSize:12,color:D.red}}>Não consegui listar os backups. Verifique se a tabela foi criada (backups.sql) e tente de novo.</p>}
+        {modalBk.lista&&modalBk.lista.length===0&&<p style={{fontSize:12,color:D.text2}}>Nenhum backup ainda. O primeiro é criado automaticamente ao abrir o app (1×/dia).</p>}
+        {modalBk.lista&&modalBk.lista.map(b=><div key={b.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderTop:`1px solid ${D.border}`}}>
+          <span style={{fontSize:12,color:D.text2}}>{new Date(b.created_at).toLocaleString("pt-BR")}</span>
+          <Btn sm outline color={D.gold} onClick={()=>restaurarBackup(b)}>Restaurar</Btn>
+        </div>)}
+      </Modal>}
       {modalTransf&&(()=>{
         const de=transfForm.de,para=transfForm.para;
         const curDe=PROFILES.find(p=>p.id===de)?.currency||"";
