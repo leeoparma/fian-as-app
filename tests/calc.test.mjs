@@ -12,7 +12,7 @@ import {
   totaisTransacoes,saldoBanco,parcelaValor,parcelaData,
   calcSaldos,calcDividas,totaisPorPessoa,
   salarioMensal,converteMoeda,taxaMensalSim,simularJuros,
-  semFotos,mesclarFotos,
+  semFotos,mesclarFotos,projetarFluxo,ocorrenciasRecorrencia,addDias,
 } from "../src/calc.mjs";
 
 const aprox=(a,b,tol=0.01)=>assert.ok(Math.abs(a-b)<=tol,`esperado ~${b}, veio ${a}`);
@@ -261,4 +261,45 @@ test("backup: transação que só existe no backup fica sem foto (sem inventar)"
   const backup={br:{transacoes:[{id:"tX",valor:10,nfImg:null}]}};
   const r=mesclarFotos(backup,dadosComFoto);
   assert.equal(r.br.transacoes[0].nfImg,null);
+});
+
+// ── Projeção de fluxo de caixa ───────────────────────────────────────────────
+test("projeção: sem eventos o saldo fica constante", ()=>{
+  const p=projetarFluxo({saldoHoje:1000,hojeStr:"2026-07-04",dias:90});
+  aprox(p.d90,1000);aprox(p.minimo.saldo,1000);
+});
+test("projeção: tx futura entra na data; passada e além do horizonte não", ()=>{
+  const txs=[
+    {tipo:"despesa",valor:100,data:"2026-07-14"},   // +10d
+    {tipo:"despesa",valor:999,data:"2026-07-01"},   // passado
+    {tipo:"despesa",valor:999,data:"2026-12-01"},   // além de 90d
+  ];
+  const p=projetarFluxo({saldoHoje:1000,hojeStr:"2026-07-04",dias:90,txs});
+  aprox(p.d30,900);aprox(p.d90,900);
+});
+test("projeção: recorrência mensal ocorre ~3x em 90 dias", ()=>{
+  const p=projetarFluxo({saldoHoje:0,hojeStr:"2026-07-04",dias:90,recorrencias:[{id:"r1",tipo:"despesa",valor:100,frequencia:"mensal",dia:10}]});
+  aprox(p.d90,-300);
+});
+test("projeção: recorrência já lançada naquela data não conta 2x", ()=>{
+  const txs=[{tipo:"despesa",valor:100,data:"2026-07-10",recorrenciaId:"r1"}];
+  const p=projetarFluxo({saldoHoje:0,hojeStr:"2026-07-04",dias:90,txs,recorrencias:[{id:"r1",tipo:"despesa",valor:100,frequencia:"mensal",dia:10}]});
+  aprox(p.d90,-300); // 1 lançada + 2 projetadas (ago, set) — não 4
+});
+test("projeção: salário distribui o mensal por dia (×12÷365)", ()=>{
+  const p=projetarFluxo({saldoHoje:0,hojeStr:"2026-07-04",dias:30,salarioMes:3650});
+  aprox(p.d30,3650*12/365*30,0.01);
+});
+test("projeção: detecta o vale (mínimo) mesmo com recuperação depois", ()=>{
+  const txs=[{tipo:"despesa",valor:500,data:"2026-07-10"},{tipo:"receita",valor:800,data:"2026-07-20"}];
+  const p=projetarFluxo({saldoHoje:100,hojeStr:"2026-07-04",dias:90,txs});
+  aprox(p.minimo.saldo,-400);assert.equal(p.minimo.data,"2026-07-10");aprox(p.d90,400);
+});
+test("recorrência semanal: ~13 ocorrências em 90 dias", ()=>{
+  const oc=ocorrenciasRecorrencia({frequencia:"semanal",diaSemana:5},"2026-07-04",90);
+  assert.ok(oc.length===12||oc.length===13,`veio ${oc.length}`);
+});
+test("recorrência mensal dia 31: clampa fevereiro", ()=>{
+  const oc=ocorrenciasRecorrencia({frequencia:"mensal",dia:31},"2026-01-15",60);
+  assert.ok(oc.includes("2026-01-31")&&oc.includes("2026-02-28"),oc.join(","));
 });
