@@ -12,6 +12,7 @@ import {
   totaisTransacoes,saldoBanco,parcelaValor,parcelaData,
   calcSaldos,calcDividas,totaisPorPessoa,
   salarioMensal,converteMoeda,taxaMensalSim,simularJuros,
+  semFotos,mesclarFotos,
 } from "../src/calc.mjs";
 
 const aprox=(a,b,tol=0.01)=>assert.ok(Math.abs(a-b)<=tol,`esperado ~${b}, veio ${a}`);
@@ -239,4 +240,25 @@ test("simulador: último ponto do gráfico é o mês final", ()=>{
 test("taxa mensal: fixa 1% → 0.01; 102% CDI vira taxa mensal equivalente", ()=>{
   aprox(taxaMensalSim("fixo","1"),0.01);
   aprox(taxaMensalSim("pct",null,"CDI","102"),Math.pow(1+10.71/100,1/12)-1,0.0001);
+});
+
+// ── Backup: fotos fora do snapshot, de volta ao restaurar ────────────────────
+const dadosComFoto={br:{transacoes:[{id:"t1",valor:50,nfImg:"data:image/jpeg;base64,AAAA"},{id:"t2",valor:30}],bancos:[{id:"b1"}]},au:{transacoes:[]}};
+test("backup semFotos: remove nfImg mas preserva valores e estrutura", ()=>{
+  const s=semFotos(dadosComFoto);
+  assert.equal(s.br.transacoes[0].nfImg,null);
+  assert.equal(s.br.transacoes[0].valor,50);
+  assert.equal(s.br.bancos.length,1);
+  // não muta o original
+  assert.equal(dadosComFoto.br.transacoes[0].nfImg,"data:image/jpeg;base64,AAAA");
+});
+test("backup mesclarFotos: devolve a foto pela transação (id) ao restaurar", ()=>{
+  const restaurado=mesclarFotos(semFotos(dadosComFoto),dadosComFoto);
+  assert.equal(restaurado.br.transacoes[0].nfImg,"data:image/jpeg;base64,AAAA");
+  assert.equal(restaurado.br.transacoes[1].nfImg,undefined);
+});
+test("backup: transação que só existe no backup fica sem foto (sem inventar)", ()=>{
+  const backup={br:{transacoes:[{id:"tX",valor:10,nfImg:null}]}};
+  const r=mesclarFotos(backup,dadosComFoto);
+  assert.equal(r.br.transacoes[0].nfImg,null);
 });
