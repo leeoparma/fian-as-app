@@ -8,8 +8,12 @@ import {
   totaisTransacoes, saldoBanco as saldoBancoCalc, parcelaValor, parcelaData,
   calcSaldos as calcSaldosPure, calcDividas as calcDividasPure, totaisPorPessoa as totaisPorPessoaPure,
   salarioMensal, converteMoeda, taxaMensalSim, simularJuros,
-  semFotos, mesclarFotos, projetarFluxo, addDias, marcarDuplicatas,
+  semFotos, mesclarFotos, projetarFluxo, addDias, marcarDuplicatas, montarAgendaPush,
 } from "./calc.mjs";
+
+// Chave pública VAPID (par gerado para este app; a privada é secret no Cloudflare)
+const VAPID_PUBLIC="BPG9T3yvnIUJjBeIhAJz28UPwa8qSRuRFqlu-R4tnHcXqHQ20-4BwnZ4IFCSBB_k87dD5pxpgWS1E-eHjx8W6JI";
+const _b64uToU8=s=>{const p="=".repeat((4-s.length%4)%4);const b=atob((s+p).replace(/-/g,"+").replace(/_/g,"/"));return Uint8Array.from(b,c=>c.charCodeAt(0));};
 
 const SUPA_URL="https://llpzdrqgvkpxjnecttkb.supabase.co";
 const SUPA_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxscHpkcnFndmtweGpuZWN0dGtiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3MDA2MjAsImV4cCI6MjA5NjI3NjYyMH0.X3DDKVRppRO-NiC5a2Cc0JrpFAaf5J-hymFHv6vNQ6Q";
@@ -97,6 +101,20 @@ async function backupAutomatico(all){
     const lista=await com401(t=>supa.backupList(t));
     const velhos=(lista||[]).slice(14).map(b=>b.id);
     if(velhos.length)await com401(t=>supa.backupDelete(t,velhos));
+  }catch{}
+}
+// Push: recalcula e regrava a agenda de avisos (só se o usuário ativou o sino)
+async function sincronizarAgendaPush(all){
+  try{
+    if(!lsGet("push_on"))return;
+    const h=new Date();const hs=`${h.getFullYear()}-${String(h.getMonth()+1).padStart(2,"0")}-${String(h.getDate()).padStart(2,"0")}`;
+    const eventos=[];
+    for(const pid of Object.keys(all||{})){
+      const p=all[pid];if(!p||typeof p!=="object")continue;
+      eventos.push(...montarAgendaPush({proventosAgendados:p.proventosAgendados||[],recorrencias:p.recorrencias||[],hojeStr:hs,dias:7}));
+    }
+    await com401(t=>fetch(`${SUPA_URL}/rest/v1/push_agenda?enviado=eq.false`,{method:"DELETE",headers:supa.ah(t)}).then(r=>{if(!r.ok){const e=new Error("agenda del "+r.status);e.status=r.status;throw e;}}));
+    if(eventos.length)await com401(t=>fetch(`${SUPA_URL}/rest/v1/push_agenda`,{method:"POST",headers:supa.ah(t),body:JSON.stringify(eventos)}).then(r=>{if(!r.ok){const e=new Error("agenda ins "+r.status);e.status=r.status;throw e;}}));
   }catch{}
 }
 
@@ -3476,6 +3494,7 @@ function AppInner(){
   const [modalSal,setModalSal]=useState(false);const [salForm,setSalForm]=useState({});
   const [modalTransf,setModalTransf]=useState(false);const [transfForm,setTransfForm]=useState({});
   const [modalBk,setModalBk]=useState(null); // null | {loading} | {lista} | {erro}
+  const [modalPush,setModalPush]=useState(false);const [pushBusy,setPushBusy]=useState(false);
   const [projSal,setProjSal]=useState(()=>lsGet("proj_sal")||{}); // por perfil: incluir salário na projeção?
   const [catDet,setCatDet]=useState(null); // {cat,tipo} aberto no gráfico de pizza
   const saveTimer=useRef(null);
@@ -3543,6 +3562,7 @@ function AppInner(){
           lsSet("all_profiles",r);
           loadOk.current=true;
           backupAutomatico(r); // 1×/dia, silencioso
+          sincronizarAgendaPush(r); // push: agenda dos próximos 7 dias
         }else{
           // load retornou null = conta sem dados na nuvem.
           // Se há dados locais com conteúdo real, faz um "upload" inicial seguro
@@ -3564,6 +3584,34 @@ function AppInner(){
       setSyncing(false);
     })();
   },[session?.token]);
+
+  async function ativarPush(){
+    setPushBusy(true);
+    try{
+      if(!("serviceWorker" in navigator)||!("PushManager" in window)){alert("Este navegador não suporta push. No iPhone: instale o app na Tela de Início (Compartilhar → Adicionar à Tela de Início) e abra por lá (iOS 16.4+)." );return;}
+      const reg=await navigator.serviceWorker.register("/sw.js");
+      const perm=await Notification.requestPermission();
+      if(perm!=="granted"){alert("Permissão negada. Ative nas Ajustes/Configurações do navegador.");return;}
+      const sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:_b64uToU8(VAPID_PUBLIC)});
+      const j=sub.toJSON();
+      await com401(t=>fetch(`${SUPA_URL}/rest/v1/push_subscriptions`,{method:"POST",headers:{...supa.ah(t),"Prefer":"resolution=merge-duplicates"},body:JSON.stringify({endpoint:j.endpoint,p256dh:j.keys?.p256dh||null,auth:j.keys?.auth||null})}).then(r=>{if(!r.ok){const e=new Error("sub "+r.status);e.status=r.status;throw e;}}));
+      lsSet("push_on",true);
+      sincronizarAgendaPush(allData);
+      alert("🔔 Notificações ativadas neste aparelho!");
+    }catch(e){alert("Não consegui ativar: "+(e?.message||e));}
+    finally{setPushBusy(false);}
+  }
+  async function testarPush(){
+    setPushBusy(true);
+    try{
+      const t=lsGet("session")?.token;
+      const r=await fetch(`${WORKER}/push-test`,{method:"POST",headers:{"Authorization":`Bearer ${t}`}});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok)throw new Error(d?.error?.message||("HTTP "+r.status));
+      alert(`Enviado para ${d.enviados??"?"} aparelho(s). A notificação deve chegar em segundos — se o app estiver aberto em primeiro plano, alguns sistemas não a exibem: bloqueie a tela e aguarde.`);
+    }catch(e){alert("Teste falhou: "+(e?.message||e));}
+    finally{setPushBusy(false);}
+  }
 
   async function abrirBackups(){
     setModalBk({loading:true});
@@ -3722,6 +3770,7 @@ function AppInner(){
           <button onClick={exportar} style={{padding:"5px 10px",borderRadius:16,fontSize:11,cursor:"pointer",background:"transparent",border:`1px solid ${D.border}`,color:D.text3}}>⬇️</button>
           <button onClick={()=>importRef.current.click()} style={{padding:"5px 10px",borderRadius:16,fontSize:11,cursor:"pointer",background:"transparent",border:`1px solid ${D.border}`,color:D.text3}}>⬆️</button>
           <button onClick={abrirBackups} title="Backups automáticos" style={{padding:"5px 10px",borderRadius:16,fontSize:11,cursor:"pointer",background:"transparent",border:`1px solid ${D.border}`,color:D.text3}}>🕒</button>
+          <button onClick={()=>setModalPush(true)} title="Notificações" style={{padding:"5px 10px",borderRadius:16,fontSize:11,cursor:"pointer",background:"transparent",border:`1px solid ${D.border}`,color:D.text3}}>🔔</button>
           <input ref={importRef} type="file" accept=".json" onChange={importar} style={{display:"none"}}/>
           <button onClick={handleLogout} style={{padding:"5px 10px",borderRadius:16,fontSize:11,cursor:"pointer",background:D.red+"22",border:`1px solid ${D.red}44`,color:D.red}}>Sair</button>
         </div>
@@ -3878,6 +3927,15 @@ function AppInner(){
       {tab===6&&<AnaliseTab data={data} setData={setData} investimentos={data.investimentos} profileId={profileId} market={profileId} currency={currency}/>}
       {tab===7&&<SplitwiseTab currency={currency} userEmail={session?.user?.email}/>}
       {tab===8&&<RelatoriosTab data={data} setData={setData} currency={currency}/>}
+      {modalPush&&<Modal title="🔔 Notificações" onClose={()=>setModalPush(false)}>
+        <p style={{fontSize:12,color:D.text2,marginTop:0,lineHeight:1.6}}>Receba um aviso na manhã do dia em que houver <b>provento a receber</b> ou <b>conta recorrente</b>. Ative em cada aparelho que quiser avisar.</p>
+        <p style={{fontSize:11,color:D.text3,lineHeight:1.6}}>📱 iPhone: só funciona com o app instalado na <b>Tela de Início</b> e aberto por lá (iOS 16.4+). A notificação é enviada ~7h (Sydney).</p>
+        <p style={{fontSize:11,color:lsGet("push_on")?D.green:D.text3}}>{lsGet("push_on")?"✅ Ativado neste aparelho":"○ Ainda não ativado neste aparelho"}</p>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}>
+          {lsGet("push_on")&&<Btn outline color={D.blue} onClick={testarPush} disabled={pushBusy}>Testar</Btn>}
+          <Btn color={D.green} onClick={ativarPush} disabled={pushBusy}>{lsGet("push_on")?"Reativar":"Ativar notificações"}</Btn>
+        </div>
+      </Modal>}
       {modalBk&&<Modal title="🕒 Backups automáticos" onClose={()=>setModalBk(null)}>
         <p style={{fontSize:11,color:D.text3,marginTop:0,lineHeight:1.6}}>O app guarda 1 cópia por dia (ao abrir), até 14 cópias, na nuvem. As fotos de NF ficam fora do backup — ao restaurar, as fotos atuais são preservadas.</p>
         {modalBk.loading&&<p style={{fontSize:12,color:D.text2}}>Carregando…</p>}
