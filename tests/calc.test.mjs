@@ -12,7 +12,7 @@ import {
   totaisTransacoes,saldoBanco,parcelaValor,parcelaData,
   calcSaldos,calcDividas,totaisPorPessoa,
   salarioMensal,converteMoeda,taxaMensalSim,simularJuros,
-  semFotos,mesclarFotos,projetarFluxo,ocorrenciasRecorrencia,addDias,marcarDuplicatas,
+  semFotos,mesclarFotos,projetarFluxo,ocorrenciasRecorrencia,addDias,marcarDuplicatas,montarAgendaPush,
 } from "../src/calc.mjs";
 
 const aprox=(a,b,tol=0.01)=>assert.ok(Math.abs(a-b)<=tol,`esperado ~${b}, veio ${a}`);
@@ -329,4 +329,30 @@ test("import: lançamento manual SEM banco conta como duplicata (conservador)", 
 test("import: centavos — 45.271 e 45.27 casam (arredonda a centavo)", ()=>{
   const r=marcarDuplicatas([{data:"2026-07-01",tipo:"despesa",valor:45.271}],[{data:"2026-07-01",tipo:"despesa",valor:45.27,bancoId:"b1"}],"b1");
   assert.equal(r[0].dup,true);
+});
+
+// ── Push: agenda de avisos ───────────────────────────────────────────────────
+test("agenda push: provento hoje e em 5 dias entram; em 20 dias não (janela 7)", ()=>{
+  const ev=montarAgendaPush({hojeStr:"2026-07-04",proventosAgendados:[
+    {ticker:"ITUB4",dataPagamento:"2026-07-04"},
+    {ticker:"NAB",dataPagamento:"2026-07-09"},
+    {ticker:"BBAS3",dataPagamento:"2026-07-24"},
+  ]});
+  assert.deepEqual(ev.map(e=>e.notify_on),["2026-07-04","2026-07-09"]);
+  assert.ok(ev[0].titulo.includes("ITUB4"));
+});
+test("agenda push: recorrência de DESPESA na janela entra; RECEITA não notifica", ()=>{
+  const ev=montarAgendaPush({hojeStr:"2026-07-04",recorrencias:[
+    {id:"r1",tipo:"despesa",descricao:"Aluguel",frequencia:"mensal",dia:8},
+    {id:"r2",tipo:"receita",descricao:"Salário",frequencia:"mensal",dia:8},
+  ]});
+  assert.equal(ev.length,1);
+  assert.equal(ev[0].notify_on,"2026-07-08");
+  assert.ok(ev[0].titulo.includes("Aluguel"));
+});
+test("agenda push: ordena por data (provento + recorrente misturados)", ()=>{
+  const ev=montarAgendaPush({hojeStr:"2026-07-04",
+    proventosAgendados:[{ticker:"X",dataPagamento:"2026-07-10"}],
+    recorrencias:[{id:"r1",tipo:"despesa",descricao:"Luz",frequencia:"mensal",dia:6}]});
+  assert.deepEqual(ev.map(e=>e.notify_on),["2026-07-06","2026-07-10"]);
 });
