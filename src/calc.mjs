@@ -246,3 +246,24 @@ export function marcarDuplicatas(candidatas,existentes,bancoId){
     return {...c,dup:false};
   });
 }
+
+// ── Push: agenda de avisos (próximos N dias) ─────────────────────────────────
+// Gera as linhas que o app grava em push_agenda: proventos agendados e contas
+// recorrentes (despesas) que ocorrem na janela. O cron do worker envia o push
+// na manhã do dia (notify_on <= hoje e ainda não enviado).
+export function montarAgendaPush({proventosAgendados=[],recorrencias=[],hojeStr,dias=7}){
+  const[y,m,d]=hojeStr.split("-").map(Number);const hojeD=new Date(y,m-1,d);
+  const ev=[];
+  for(const a of (proventosAgendados||[])){
+    if(!a||!a.dataPagamento)continue;
+    const off=diasAte(a.dataPagamento,hojeD);
+    if(off!=null&&off>=0&&off<=dias)ev.push({notify_on:a.dataPagamento,titulo:`💰 Provento: ${a.ticker||"ativo"}`});
+  }
+  for(const rec of (recorrencias||[])){
+    if(!rec||rec.tipo!=="despesa")continue;
+    for(const dstr of ocorrenciasRecorrencia(rec,hojeStr,dias)){
+      ev.push({notify_on:dstr,titulo:`📅 ${rec.descricao||"Conta recorrente"}`});
+    }
+  }
+  return ev.sort((a,b)=>a.notify_on.localeCompare(b.notify_on));
+}
