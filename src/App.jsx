@@ -1727,7 +1727,16 @@ function SplitwiseTab({currency,userEmail}){
   async function loadSW(cod){
     setLoading(true);
     try{const local=lsGet(`sw_${cod}`);if(local)setSwData(normalizaSW(local));}catch{}
-    try{const remoto=await supa.loadShared(cod);if(remoto){const n=normalizaSW(remoto);setSwData(n);lsSet(`sw_${cod}`,n);}}catch{}
+    try{const remoto=await supa.loadShared(cod);if(remoto){
+      const n=normalizaSW(remoto);
+      // Auto-cura: membros adicionados à mão nascem SEM e-mail (e sem e-mail não
+      // recebem push). Quando o dono do membro abre o grupo logado, completa.
+      if(userEmail&&nomeUser){
+        const eu=n.membros?.find(m=>m.nome===nomeUser);
+        if(eu&&(!eu.email||eu.email===eu.nome)){eu.email=userEmail;lsSet(`sw_${cod}`,n);supa.saveShared(cod,n).catch(()=>{});}
+      }
+      setSwData(n);lsSet(`sw_${cod}`,n);
+    }}catch{}
     setLoading(false);
   }
 
@@ -1789,7 +1798,9 @@ function SplitwiseTab({currency,userEmail}){
     if(!grupo){grupo=lsGet(`sw_${cod}`);}
     if(grupo){
       const g=normalizaSW(grupo);
-      if(!g.membros.find(m=>m.nome===nome)){g.membros.push({nome,email:userEmail||nome});}
+      const ex=g.membros.find(m=>m.nome===nome);
+      if(!ex){g.membros.push({nome,email:userEmail||nome});}
+      else if(userEmail&&(!ex.email||ex.email===ex.nome)){ex.email=userEmail;} // completa e-mail de membro criado à mão
       lsSet(`sw_${cod}`,g);supa.saveShared(cod,g).catch(()=>{});
     }else{
       const d={codigo:cod,nome:cod,membros:[{nome,email:userEmail||nome}],despesas:[],pagamentos:[]};
@@ -3500,6 +3511,12 @@ function AppInner(){
     const iv=setInterval(async()=>{const ns=await renovarSessao();if(ns)setSession(ns);},45*60*1000);
     return ()=>clearInterval(iv);
   },[session?.refresh]);
+  // Push: registra e BUSCA ATUALIZAÇÃO do service worker a cada abertura
+  // (sem isto, uma versão nova do sw.js pode demorar dias para chegar ao aparelho)
+  useEffect(()=>{
+    if(!("serviceWorker" in navigator))return;
+    navigator.serviceWorker.register("/sw.js").then(r=>{try{r.update();}catch{}}).catch(()=>{});
+  },[]);
   const [allData,setAllData]=useState(()=>lsGet("all_profiles")||EMPTY_ALL);
   const [syncing,setSyncing]=useState(false);
   const [profileId,setProfileId]=useState(()=>lsGet("active_profile")||"br");
