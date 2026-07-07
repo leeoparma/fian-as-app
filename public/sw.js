@@ -1,6 +1,11 @@
 // Service worker do Controle Financeiro — SOMENTE push.
 // Sem handler de fetch e sem cache: este arquivo NÃO intercepta a rede,
 // então nunca serve versão velha do app.
+// Versão nova assume IMEDIATAMENTE (sem isto, a atualização fica "waiting"
+// para sempre no iOS e os pushes continuam indo para o SW antigo)
+self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (e) => e.waitUntil(clients.claim()));
+
 self.addEventListener("push", (e) => {
   let title = "🔔 Avisos de hoje"; // o iOS já anexa "from Finanças" — não repetir a marca
   let body = "Você tem avisos para hoje — proventos a receber ou contas. Toque para abrir.";
