@@ -1819,6 +1819,15 @@ function SplitwiseTab({currency,userEmail}){
     saveSW({...swData,membros:swData.membros.filter(m=>m.nome!==nome)});
   }
 
+  // Push com conteúdo para os OUTROS membros do grupo (fire-and-forget, nunca quebra o app)
+  function notificarGrupo(msgs){
+    try{
+      if(!msgs||!msgs.length)return;
+      fetch(`${WORKER}/push-send`,{method:"POST",headers:{"Content-Type":"application/json",...authHdr()},body:JSON.stringify({msgs})}).catch(()=>{});
+    }catch{}
+  }
+  const outrosMembros=()=>(swData?.membros||[]).filter(m=>m.email&&m.email.toLowerCase()!==(userEmail||"").toLowerCase());
+
   function addDespesa(){
     if(!form.descricao||!form.valor||!form.pagoPor)return;
     const membros=swData.membros.map(m=>m.nome);
@@ -1826,6 +1835,10 @@ function SplitwiseTab({currency,userEmail}){
     const porPessoa=parseFloat(form.valor)/selecionados.length;
     const d={id:uid(),descricao:form.descricao,valor:parseFloat(form.valor),pagoPor:form.pagoPor,data:form.data||hoje.toISOString().slice(0,10),categoria:form.categoria||"Outros",divisao:selecionados.map(nome=>({nome,valor:porPessoa})),criadoPor:nomeUser,historico:[]};
     saveSW({...swData,despesas:[...swData.despesas,d]});setModal(null);setForm({});
+    notificarGrupo(outrosMembros().map(m=>{
+      const parte=(d.divisao.find(x=>x.nome===m.nome)?.valor)||0;
+      return {email:m.email,title:"💸 Novo lançamento no Splitwise",body:`${nomeUser||d.pagoPor} lançou ${d.descricao} ${fmtM(d.valor,currency)}${parte>0?` — sua parte: ${fmtM(parte,currency)}`:""}`,tag:`sw-${d.id}`};
+    }));
   }
 
   function editarDespesa(){
@@ -1851,12 +1864,14 @@ function SplitwiseTab({currency,userEmail}){
     if(!form.de||!form.para||!form.valor)return;
     const p={id:uid(),de:form.de,para:form.para,valor:parseFloat(form.valor),data:form.data||hoje.toISOString().slice(0,10),mesRef:form.mesRef||mesSel,quem:nomeUser};
     saveSW({...swData,pagamentos:[...swData.pagamentos,p]});setModal(null);setForm({});
+    notificarGrupo(outrosMembros().map(m=>({email:m.email,title:"✅ Pagamento no Splitwise",body:`${nomeUser||p.de} registrou pagamento de ${fmtM(p.valor,currency)} (${p.de} → ${p.para})`,tag:`sw-${p.id}`})));
   }
 
   // Quita uma dívida do acerto de contas com 1 clique (registra o pagamento exato)
   function quitarDivida(de,para,valor){
     const p={id:uid(),de,para,valor:Math.round(valor*100)/100,data:hoje.toISOString().slice(0,10),mesRef:mesSel,quem:nomeUser,settle:true};
     saveSW({...swData,pagamentos:[...swData.pagamentos,p]});
+    notificarGrupo(outrosMembros().map(m=>({email:m.email,title:"✅ Pagamento no Splitwise",body:`${nomeUser||p.de} quitou ${fmtM(p.valor,currency)} (${p.de} → ${p.para})`,tag:`sw-${p.id}`})));
   }
 
   function desfazerPagamento(id){
