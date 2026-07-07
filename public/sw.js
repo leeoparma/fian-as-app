@@ -2,7 +2,7 @@
 // Sem handler de fetch e sem cache: este arquivo NÃO intercepta a rede,
 // então nunca serve versão velha do app.
 self.addEventListener("push", (e) => {
-  let title = "Controle Financeiro";
+  let title = "🔔 Avisos de hoje"; // o iOS já anexa "from Finanças" — não repetir a marca
   let body = "Você tem avisos para hoje — proventos a receber ou contas. Toque para abrir.";
   let tag = "cf-avisos";
   try {
