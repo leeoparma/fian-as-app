@@ -2,12 +2,23 @@
 // Sem handler de fetch e sem cache: este arquivo NÃO intercepta a rede,
 // então nunca serve versão velha do app.
 self.addEventListener("push", (e) => {
+  let title = "Controle Financeiro";
+  let body = "Você tem avisos para hoje — proventos a receber ou contas. Toque para abrir.";
+  let tag = "cf-avisos";
+  try {
+    if (e.data) {
+      const d = e.data.json();
+      if (d && d.title) title = d.title;
+      if (d && d.body) body = d.body;
+      if (d && d.tag) tag = d.tag;
+    }
+  } catch {}
   e.waitUntil(
-    self.registration.showNotification("Controle Financeiro", {
-      body: "Você tem avisos para hoje — proventos a receber ou contas. Toque para abrir.",
+    self.registration.showNotification(title, {
+      body,
       icon: "/icon-192.png",
       badge: "/icon-192.png",
-      tag: "cf-avisos",
+      tag,
     })
   );
 });
