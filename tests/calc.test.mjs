@@ -12,7 +12,7 @@ import {
   totaisTransacoes,saldoBanco,parcelaValor,parcelaData,
   calcSaldos,calcDividas,totaisPorPessoa,
   salarioMensal,converteMoeda,taxaMensalSim,simularJuros,
-  semFotos,mesclarFotos,projetarFluxo,ocorrenciasRecorrencia,addDias,marcarDuplicatas,montarAgendaPush,
+  semFotos,mesclarFotos,projetarFluxo,ocorrenciasRecorrencia,addDias,marcarDuplicatas,montarAgendaPush,compraAcao,vendaAcao,
 } from "../src/calc.mjs";
 
 const aprox=(a,b,tol=0.01)=>assert.ok(Math.abs(a-b)<=tol,`esperado ~${b}, veio ${a}`);
@@ -355,4 +355,30 @@ test("agenda push: ordena por data (provento + recorrente misturados)", ()=>{
     proventosAgendados:[{ticker:"X",dataPagamento:"2026-07-10"}],
     recorrencias:[{id:"r1",tipo:"despesa",descricao:"Luz",frequencia:"mensal",dia:6}]});
   assert.deepEqual(ev.map(e=>e.notify_on),["2026-07-06","2026-07-10"]);
+});
+
+// ── Compra/venda com corretagem (números REAIS das notas de 08/07/2026) ─────
+test("compra real (NAB): 9 × $39,585 + $3 corretagem = $359,27 saindo da conta", ()=>{
+  const r=compraAcao(0,0,9,39.585,3);
+  aprox(r.totalPago,359.27,0.01);
+  aprox(r.pmNovo,359.265/9,0.001); // corretagem entra no preço médio (custo real)
+});
+test("venda real (BRE): 95 × $4,09 − $3 = $385,55 recebidos; posição zera", ()=>{
+  const r=vendaAcao(95,4.30,95,4.09,3);
+  aprox(r.recebido,385.55);
+  assert.equal(r.vendeuTudo,true);
+  aprox(r.resultado,385.55-95*4.30); // resultado realizado vs preço médio
+});
+test("venda parcial: PM inalterado, quantidade cai, resultado certo", ()=>{
+  const r=vendaAcao(20,10,5,12,1);
+  aprox(r.qtdRestante,15);aprox(r.recebido,59);aprox(r.resultado,9);
+  assert.equal(r.vendeuTudo,false);
+});
+test("compra sem corretagem = preço médio clássico (compatível com aporteMedio)", ()=>{
+  const a=compraAcao(10,10,10,20,0),b=aporteMedio(10,10,10,20);
+  aprox(a.pmNovo,b.pmNovo);aprox(a.custoTotal,b.custoTotal);
+});
+test("venda maior que a posição: vende só o que existe", ()=>{
+  const r=vendaAcao(5,10,99,10,0);
+  aprox(r.qtdRestante,0);aprox(r.recebido,50);
 });
