@@ -267,3 +267,20 @@ export function montarAgendaPush({proventosAgendados=[],recorrencias=[],hojeStr,
   }
   return ev.sort((a,b)=>a.notify_on.localeCompare(b.notify_on));
 }
+
+// ── Compra e venda de ações com corretagem ───────────────────────────────────
+// Igual à nota da corretora: a corretagem ENTRA no custo da compra (e no preço
+// médio) e SAI do valor recebido na venda. Na venda parcial o PM não muda.
+export function compraAcao(qtdAntiga,pmAntigo,qtdNova,preco,corretagem){
+  const custoOperacao=qtdNova*preco+(corretagem||0);
+  const custoAntigo=(pmAntigo||0)*(qtdAntiga||0);
+  const qtdTotal=(qtdAntiga||0)+qtdNova;
+  const pmNovo=qtdTotal>0?(custoAntigo+custoOperacao)/qtdTotal:0;
+  return {qtdTotal,pmNovo,custoTotal:custoAntigo+custoOperacao,totalPago:custoOperacao};
+}
+export function vendaAcao(qtdAtual,pm,qtdVendida,preco,corretagem){
+  const q=Math.min(qtdVendida||0,qtdAtual||0);
+  const recebido=q*preco-(corretagem||0);
+  const custoVendido=(pm||0)*q;
+  return {qtdRestante:(qtdAtual||0)-q,recebido,custoVendido,resultado:recebido-custoVendido,vendeuTudo:((qtdAtual||0)-q)<=1e-9};
+}
