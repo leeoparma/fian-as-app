@@ -39,8 +39,8 @@ const supa={
   async backupList(t){const resp=await fetch(`${SUPA_URL}/rest/v1/backups?select=id,created_at&order=created_at.desc`,{headers:supa.ah(t)});if(!resp.ok){const e=new Error("backup list HTTP "+resp.status);e.status=resp.status;throw e;}return resp.json();},
   async backupGet(t,id){const resp=await fetch(`${SUPA_URL}/rest/v1/backups?id=eq.${id}&select=data`,{headers:supa.ah(t)});if(!resp.ok){const e=new Error("backup get HTTP "+resp.status);e.status=resp.status;throw e;}const r=await resp.json();return r?.[0]?.data||null;},
   async backupDelete(t,ids){if(!ids.length)return;const resp=await fetch(`${SUPA_URL}/rest/v1/backups?id=in.(${ids.join(",")})`,{method:"DELETE",headers:supa.ah(t)});if(!resp.ok){const e=new Error("backup delete HTTP "+resp.status);e.status=resp.status;throw e;}},
-  async loadShared(codigo){const r=await fetch(`${SUPA_URL}/rest/v1/rpc/load_shared`,{method:"POST",headers:supa.h,body:JSON.stringify({p_codigo:codigo})});if(!r.ok)return null;const d=await r.json();return d||null;},
-  async saveShared(codigo,d){await fetch(`${SUPA_URL}/rest/v1/rpc/save_shared`,{method:"POST",headers:supa.h,body:JSON.stringify({p_codigo:codigo,p_data:d})});},
+  async loadShared(codigo){const r=await com401(t=>fetch(`${SUPA_URL}/rest/v1/rpc/load_shared`,{method:"POST",headers:supa.ah(t),body:JSON.stringify({p_codigo:codigo})}).then(x=>{if(x.status===401){const e=new Error("401");e.status=401;throw e;}return x;})).catch(()=>null);if(!r||!r.ok)return null;const d=await r.json();return d||null;},
+  async saveShared(codigo,d){await com401(async t=>{const r=await fetch(`${SUPA_URL}/rest/v1/rpc/save_shared`,{method:"POST",headers:supa.ah(t),body:JSON.stringify({p_codigo:codigo,p_data:d})});if(!r.ok){const e=new Error("save_shared HTTP "+r.status);e.status=r.status;throw e;}});},
 };
 
 const D={bg:"#0a0e1a",bg2:"#0f1629",bg3:"#151d35",card:"#111827",card2:"#1a2235",border:"#1e2d4a",border2:"#253352",green:"#00d084",red:"#ff4757",blue:"#3b82f6",gold:"#f59e0b",purple:"#8b5cf6",text:"#f1f5f9",text2:"#94a3b8",text3:"#64748b"};
@@ -1694,6 +1694,10 @@ function SplitwiseTab({currency,userEmail}){
   const [modal,setModal]=useState(null);
   const [form,setForm]=useState({});
   const [inputCod,setInputCod]=useState("");
+  const [solicitado,setSolicitado]=useState(()=>lsGet("sw_solicitado")||null);
+  // Se existe solicitação pendente, verifica em silêncio a cada abertura:
+  // quando o admin aprovar, o grupo entra sozinho.
+  useEffect(()=>{if(solicitado&&!ativo)entrarGrupo(solicitado,true);},[]);
   const [setupNome,setSetupNome]=useState("");
   const [saldosGrupos,setSaldosGrupos]=useState({});
   const [mesSel,setMesSel]=useState(()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;}); // "AAAA-MM" recorte do mês (data local)
@@ -1721,7 +1725,7 @@ function SplitwiseTab({currency,userEmail}){
 
   function normalizaSW(d){
     if(!d||typeof d!=="object")return null;
-    return {codigo:d.codigo||ativo,nome:d.nome||d.codigo||ativo,membros:Array.isArray(d.membros)?d.membros.filter(m=>m&&m.nome):[],despesas:Array.isArray(d.despesas)?d.despesas:[],pagamentos:Array.isArray(d.pagamentos)?d.pagamentos:[]};
+    return {codigo:d.codigo||ativo,nome:d.nome||d.codigo||ativo,membros:Array.isArray(d.membros)?d.membros.filter(m=>m&&m.nome):[],pendentes:Array.isArray(d.pendentes)?d.pendentes.filter(p=>p&&p.email):[],admin:d.admin||(Array.isArray(d.membros)&&d.membros[0]?.email)||null,despesas:Array.isArray(d.despesas)?d.despesas:[],pagamentos:Array.isArray(d.pagamentos)?d.pagamentos:[]};
   }
 
   async function loadSW(cod){
@@ -1782,30 +1786,39 @@ function SplitwiseTab({currency,userEmail}){
     const nome=setupNome.trim();
     const cod=(form.nomeGrupo.trim().toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,12)||"GRUPO")+"-"+Math.random().toString(36).slice(2,6).toUpperCase();
     if(!nomeUser){lsSet("sw_nome",nome);setNomeUser(nome);}
-    const d={codigo:cod,nome:form.nomeGrupo.trim(),membros:[{nome,email:userEmail||nome}],despesas:[],pagamentos:[]};
+    const d={codigo:cod,nome:form.nomeGrupo.trim(),membros:[{nome,email:userEmail||nome}],pendentes:[],admin:userEmail||null,despesas:[],pagamentos:[]};
     lsSet(`sw_${cod}`,normalizaSW(d));supa.saveShared(cod,normalizaSW(d)).catch(()=>{});
     const ng=[...new Set([...grupos,cod])];setGrupos(ng);lsSet("sw_grupos",JSON.stringify(ng));
     lsSet("sw_ativo",cod);setAtivo(cod);
     setForm({});setSetupNome("");setModal(null);
   }
 
-  async function entrarGrupo(){
-    if(!inputCod.trim()||!(nomeUser||setupNome.trim()))return;
-    const cod=inputCod.trim().toUpperCase(),nome=(nomeUser||setupNome.trim());
+  async function entrarGrupo(codArg,silencioso){
+    const bruto=(typeof codArg==="string"?codArg:inputCod).trim();
+    if(!bruto||!(nomeUser||setupNome.trim()))return;
+    const cod=bruto.toUpperCase(),nome=(nomeUser||setupNome.trim());
     if(!nomeUser){lsSet("sw_nome",nome);setNomeUser(nome);}
-    let grupo=null;
-    try{grupo=await supa.loadShared(cod);}catch{}
-    if(!grupo){grupo=lsGet(`sw_${cod}`);}
-    if(grupo){
-      const g=normalizaSW(grupo);
-      const ex=g.membros.find(m=>m.nome===nome);
-      if(!ex){g.membros.push({nome,email:userEmail||nome});}
-      else if(userEmail&&(!ex.email||ex.email===ex.nome)){ex.email=userEmail;} // completa e-mail de membro criado à mão
-      lsSet(`sw_${cod}`,g);supa.saveShared(cod,g).catch(()=>{});
-    }else{
-      const d={codigo:cod,nome:cod,membros:[{nome,email:userEmail||nome}],despesas:[],pagamentos:[]};
-      lsSet(`sw_${cod}`,d);supa.saveShared(cod,d).catch(()=>{});
+    let st=null;
+    try{
+      st=await com401(async t=>{
+        const r=await fetch(`${SUPA_URL}/rest/v1/rpc/solicitar_entrada`,{method:"POST",headers:supa.ah(t),body:JSON.stringify({p_codigo:cod,p_nome:nome})});
+        if(!r.ok){const e=new Error("HTTP "+r.status);e.status=r.status;throw e;}
+        return await r.json();
+      });
+    }catch{if(!silencioso)alert("Não consegui falar com o servidor — tente de novo.");return;}
+    if(st==="nao_existe"){
+      lsSet("sw_solicitado","");setSolicitado(null);
+      if(!silencioso)alert("Grupo não encontrado — confira o código (ou crie um novo grupo).");
+      return;
     }
+    if(st==="pendente"){
+      lsSet("sw_solicitado",cod);setSolicitado(cod);
+      if(!silencioso)alert("📨 Solicitação enviada! O administrador do grupo precisa aprovar sua entrada. Ao abrir o app, eu verifico sozinho — quando aprovar, o grupo aparece.");
+      setInputCod("");setSetupNome("");setModal(null);
+      return;
+    }
+    // 'membro' — entrada liberada
+    lsSet("sw_solicitado","");setSolicitado(null);
     const ng=[...new Set([...grupos,cod])];setGrupos(ng);lsSet("sw_grupos",JSON.stringify(ng));
     lsSet("sw_ativo",cod);setAtivo(cod);
     setInputCod("");setSetupNome("");setModal(null);
@@ -1979,6 +1992,24 @@ function SplitwiseTab({currency,userEmail}){
 
   return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
     <button onClick={voltarLista} style={{border:"none",background:"none",cursor:"pointer",color:D.green,fontSize:13,textAlign:"left",padding:0}}>← Meus grupos</button>
+      {(()=>{ // 🔑 Aprovação de entrada (só o admin vê)
+        const adminEmail=String(swData.admin||swData.membros?.[0]?.email||"").toLowerCase();
+        const souAdmin=!!adminEmail&&adminEmail===(userEmail||"").toLowerCase();
+        const pend=swData.pendentes||[];
+        if(!souAdmin||!pend.length)return null;
+        return <Card style={{border:`1px solid ${D.gold}66`,background:D.gold+"10",marginBottom:10}}>
+          <p style={{margin:"0 0 4px",fontSize:13,fontWeight:700,color:D.gold}}>🔑 Solicitações de entrada ({pend.length})</p>
+          {pend.map((p,i)=><div key={p.email||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderTop:`1px solid ${D.border}`,gap:8}}>
+            <div style={{minWidth:0}}>
+              <p style={{margin:0,fontSize:13,color:D.text}}>{p.nome||p.email}</p>
+              <p style={{margin:0,fontSize:10,color:D.text3}}>{p.email}{p.data?` · pediu em ${p.data.split("-").reverse().join("/")}`:""}</p>
+            </div>
+            <div style={{display:"flex",gap:6,flexShrink:0}}>
+              <Btn sm color={D.green} onClick={()=>saveSW({...swData,membros:[...swData.membros,{nome:p.nome||p.email,email:p.email}],pendentes:(swData.pendentes||[]).filter(x=>x.email!==p.email),admin:swData.admin||adminEmail})}>Aprovar</Btn>
+              <Btn sm outline color={D.red} onClick={()=>{if(window.confirm(`Recusar a entrada de ${p.nome||p.email}?`))saveSW({...swData,pendentes:(swData.pendentes||[]).filter(x=>x.email!==p.email)});}}>Recusar</Btn>
+            </div>
+          </div>)}
+        </Card>;})()}
     <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16}}>
       <button onClick={()=>passoMes(-1)} style={{border:`1px solid ${D.border}`,background:D.bg3,color:D.text,cursor:"pointer",borderRadius:8,padding:"4px 12px",fontSize:14}}>◀</button>
       <span style={{fontSize:15,fontWeight:700,color:D.text,minWidth:120,textAlign:"center"}}>{labelMes}</span>
