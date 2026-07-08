@@ -9,6 +9,7 @@ import {
   calcSaldos as calcSaldosPure, calcDividas as calcDividasPure, totaisPorPessoa as totaisPorPessoaPure,
   salarioMensal, converteMoeda, taxaMensalSim, simularJuros,
   semFotos, mesclarFotos, projetarFluxo, addDias, marcarDuplicatas, montarAgendaPush,
+  compraAcao, vendaAcao,
 } from "./calc.mjs";
 
 // Chave pública VAPID (par gerado para este app; a privada é secret no Cloudflare)
@@ -1261,6 +1262,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
   const [aporteInput,setAporteInput]=useState(()=>String(data.aporteMensal||""));
   const [modalAporte,setModalAporte]=useState(null);const [aporteForm,setAporteForm]=useState({});
   const [modalResgate,setModalResgate]=useState(null);const [resgateForm,setResgateForm]=useState({});
+  const [modalVenda,setModalVenda]=useState(null);const [vendaForm,setVendaForm]=useState({});
 
   // Aporta mais unidades numa ação existente e RECALCULA o preço médio
   function aportar(){
@@ -1268,16 +1270,41 @@ function InvestimentosTab({data,setData,currency,profileId}){
     if(!inv)return;
     const qtdNova=parseFloat(aporteForm.quantidade);
     const precoNovo=parseFloat(aporteForm.preco);
+    const corretagem=parseFloat(aporteForm.corretagem)||0;
     if(!qtdNova||qtdNova<=0||!precoNovo||precoNovo<=0)return;
-    const {qtdTotal,pmNovo,custoTotal:viNovo}=aporteMedio(inv.quantidade||0,inv.precoMedio||0,qtdNova,precoNovo); // testado em calc.mjs
-    // Mantém o preço atual de mercado se existir, recalcula valor atual
+    const {qtdTotal,pmNovo,custoTotal:viNovo,totalPago}=compraAcao(inv.quantidade||0,inv.precoMedio||0,qtdNova,precoNovo,corretagem); // testado em calc.mjs (corretagem entra no PM)
     const precoAtual=inv.preco_atual||pmNovo;
     const valorAtual=precoAtual*qtdTotal;
-    // Registra o aporte no histórico da posição
-    const histAporte={data:aporteForm.data||hoje.toISOString().slice(0,10),quantidade:qtdNova,preco:precoNovo};
+    const dt=aporteForm.data||hoje.toISOString().slice(0,10);
+    const histAporte={data:dt,quantidade:qtdNova,preco:precoNovo,...(corretagem>0?{corretagem}:{})};
     const atualizado={...inv,quantidade:qtdTotal,precoMedio:Math.round(pmNovo*100)/100,valorInvestido:Math.round(viNovo*100)/100,valor:Math.round(viNovo*100)/100,valorAtual:Math.round(valorAtual*100)/100,lucro:Math.round((valorAtual-viNovo)*100)/100,aportes:[...(inv.aportes||[]),histAporte]};
-    setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?atualizado:x)}));
+    // Débito na conta: usa o banco escolhido no modal (default = banco do ativo)
+    const bid=aporteForm.bancoId!==undefined?aporteForm.bancoId:(inv.bancoId||"");
+    setData(d=>({...d,
+      investimentos:d.investimentos.map(x=>x.id===inv.id?atualizado:x),
+      transacoes:bid?[...d.transacoes,{id:uid(),tipo:"despesa",descricao:`Aporte: ${qtdNova} ${inv.ticker||inv.descricao||""}`.trim(),valor:Math.round(totalPago*100)/100,categoria:"Aplicação",data:dt,bancoId:bid}]:d.transacoes
+    }));
     setModalAporte(null);setAporteForm({});
+  }
+
+  function vender(){
+    const inv=data.investimentos.find(x=>x.id===modalVenda);
+    if(!inv)return;
+    const q=parseFloat(vendaForm.quantidade),p=parseFloat(vendaForm.preco),c=parseFloat(vendaForm.corretagem)||0;
+    if(!q||q<=0||!p||p<=0)return;
+    if(q>(inv.quantidade||0)+1e-9){alert(`Você tem ${inv.quantidade||0} unidades — não dá para vender ${q}.`);return;}
+    const r=vendaAcao(inv.quantidade||0,inv.precoMedio||0,q,p,c); // testado em calc.mjs
+    const dt=hoje.toISOString().slice(0,10);
+    const bid=vendaForm.bancoId||"";
+    const pmX=inv.precoMedio||0;
+    const desc=`Venda: ${q} ${inv.ticker||inv.descricao||""} (${r.resultado>=0?"lucro":"prejuízo"} ${fmtM(Math.abs(r.resultado),currency)})`;
+    setData(d=>({...d,
+      investimentos:r.vendeuTudo
+        ?d.investimentos.filter(x=>x.id!==inv.id)
+        :d.investimentos.map(x=>x.id!==inv.id?x:{...x,quantidade:r.qtdRestante,valorInvestido:Math.round(pmX*r.qtdRestante*100)/100,valor:Math.round(pmX*r.qtdRestante*100)/100,valorAtual:Math.round((x.preco_atual||pmX)*r.qtdRestante*100)/100,lucro:Math.round(((x.preco_atual||pmX)-pmX)*r.qtdRestante*100)/100,vendas:[...(x.vendas||[]),{data:dt,quantidade:q,preco:p,...(c>0?{corretagem:c}:{}),resultado:Math.round(r.resultado*100)/100}]}),
+      transacoes:(bid&&r.recebido>0)?[...d.transacoes,{id:uid(),tipo:"receita",descricao:desc,valor:Math.round(r.recebido*100)/100,categoria:"Resgate",data:dt,bancoId:bid}]:d.transacoes
+    }));
+    setModalVenda(null);setVendaForm({});
   }
 
   const isBR=profileId==="br";
@@ -1413,6 +1440,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
               </div>
               <button onClick={()=>buscarDados(inv)} disabled={loadingId===inv.id} style={{border:"none",background:"none",cursor:"pointer",fontSize:15,opacity:loadingId===inv.id?0.4:1,color:D.green,flexShrink:0}}>{loadingId===inv.id?"⏳":"🔄"}</button>
               {!isRFItem&&<button onClick={()=>{setModalAporte(inv.id);setAporteForm({});}} title="Aportar mais (recalcula preço médio)" style={{border:"none",background:"none",cursor:"pointer",fontSize:14,color:D.blue}}>➕</button>}
+              {!isRFItem&&<button onClick={()=>{setModalVenda(inv.id);setVendaForm({preco:inv.preco_atual?String(inv.preco_atual):"",bancoId:inv.bancoId||""});}} title="Vender (parcial ou total)" style={{border:"none",background:"none",cursor:"pointer",fontSize:14,color:D.gold}}>➖</button>}
               <button onClick={()=>{setModalResgate(inv.id);setResgateForm({valor:String(inv.valorAtual||inv.valorInvestido||inv.valor||0),bancoId:inv.bancoId||""});}} title="Resgatar (devolver à conta)" style={{border:"none",background:"none",cursor:"pointer",fontSize:14,color:D.green}}>💵</button>
               <button onClick={()=>{setModal(true);setForm({...inv,editId:inv.id});}} style={{border:"none",background:"none",cursor:"pointer",fontSize:12,color:D.text3}}>✏️</button>
               <button onClick={()=>setData(d=>({...d,investimentos:d.investimentos.filter(x=>x.id!==inv.id),transacoes:inv.aplicacaoTxId?d.transacoes.filter(t=>t.id!==inv.aplicacaoTxId):d.transacoes}))} style={{border:"none",background:"none",cursor:"pointer",fontSize:12,color:D.red}}>🗑</button>
@@ -1595,9 +1623,10 @@ function InvestimentosTab({data,setData,currency,profileId}){
       </Modal>;
     })()}
     {modalAporte&&(()=>{const inv=data.investimentos.find(x=>x.id===modalAporte);if(!inv)return null;
-      const qN=parseFloat(aporteForm.quantidade)||0,pN=parseFloat(aporteForm.preco)||0;
+      const qN=parseFloat(aporteForm.quantidade)||0,pN=parseFloat(aporteForm.preco)||0,cN=parseFloat(aporteForm.corretagem)||0;
       const qA=inv.quantidade||0,pmA=inv.precoMedio||0;
-      const qT=qA+qN,pmNovo=qT>0?((pmA*qA)+(pN*qN))/qT:0;
+      const prev=compraAcao(qA,pmA,qN,pN,cN); // testado em calc.mjs
+      const qT=prev.qtdTotal,pmNovo=prev.pmNovo;
       return <Modal title={`Aportar em ${inv.ticker||inv.descricao}`} onClose={()=>{setModalAporte(null);setAporteForm({});}}>
         <div style={{background:D.bg3,borderRadius:8,padding:"10px 12px",marginBottom:10}}>
           <p style={{fontSize:11,color:D.text3,margin:0}}>Posição atual</p>
@@ -1613,15 +1642,37 @@ function InvestimentosTab({data,setData,currency,profileId}){
           </div>
         </div>}
         <label style={{fontSize:12,color:D.text3}}>Quantidade comprada agora<input type="number" autoFocus value={aporteForm.quantidade||""} onChange={e=>setAporteForm(f=>({...f,quantidade:e.target.value}))} placeholder="Ex: 5" style={{marginTop:4}}/></label>
-        <label style={{fontSize:12,color:D.text3}}>Preço pago por unidade ({currency})<input type="number" value={aporteForm.preco||""} onChange={e=>setAporteForm(f=>({...f,preco:e.target.value}))} placeholder="Ex: 185.50" style={{marginTop:4}}/></label>
+        <label style={{fontSize:12,color:D.text3}}>Preço pago por unidade ({currency})<input type="number" step="0.001" value={aporteForm.preco||""} onChange={e=>setAporteForm(f=>({...f,preco:e.target.value}))} placeholder="Ex: 39.585" style={{marginTop:4}}/></label>
+        <label style={{fontSize:12,color:D.text3}}>Corretagem/taxas ({currency}, opcional)<input type="number" step="0.01" value={aporteForm.corretagem||""} onChange={e=>setAporteForm(f=>({...f,corretagem:e.target.value}))} placeholder="Ex: 3.00" style={{marginTop:4}}/></label>
         <label style={{fontSize:12,color:D.text3}}>Data<input type="date" value={aporteForm.data||hoje.toISOString().slice(0,10)} onChange={e=>setAporteForm(f=>({...f,data:e.target.value}))} style={{marginTop:4}}/></label>
+        {data.bancos.length>0&&<label style={{fontSize:12,color:D.text3}}>Debitar da conta<select value={aporteForm.bancoId!==undefined?aporteForm.bancoId:(inv.bancoId||"")} onChange={e=>setAporteForm(f=>({...f,bancoId:e.target.value}))} style={{marginTop:4}}><option value="">— não debitar —</option>{data.bancos.map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}</select></label>}
         {qN>0&&pN>0&&<div style={{background:D.blue+"15",border:`1px solid ${D.blue}44`,borderRadius:8,padding:"10px 12px",marginTop:10}}>
           <p style={{fontSize:11,color:D.text3,margin:0}}>Depois do aporte</p>
           <div style={{display:"flex",justifyContent:"space-between",marginTop:4}}><span style={{fontSize:12,color:D.text2}}>Quantidade</span><span style={{fontSize:13,fontWeight:600,color:D.text}}>{qA} → {qT} un</span></div>
           <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}><span style={{fontSize:12,color:D.text2}}>Preço médio</span><span style={{fontSize:13,fontWeight:700,color:D.blue}}>{fmtM(pmA,currency)} → {fmtM(pmNovo,currency)}</span></div>
-          <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}><span style={{fontSize:12,color:D.text2}}>Total investido</span><span style={{fontSize:13,fontWeight:600,color:D.text}}>{fmtM(pmA*qA+pN*qN,currency)}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}><span style={{fontSize:12,color:D.text2}}>Sai da conta agora</span><span style={{fontSize:13,fontWeight:700,color:D.red}}>{fmtM(prev.totalPago,currency)}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}><span style={{fontSize:12,color:D.text2}}>Total investido</span><span style={{fontSize:13,fontWeight:600,color:D.text}}>{fmtM(prev.custoTotal,currency)}</span></div>
         </div>}
         <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:10}}><Btn outline color={D.text3} onClick={()=>{setModalAporte(null);setAporteForm({});}}>Cancelar</Btn><Btn color={D.blue} onClick={aportar}>Confirmar aporte</Btn></div>
+      </Modal>;})()}
+    {modalVenda&&(()=>{const inv=data.investimentos.find(x=>x.id===modalVenda);if(!inv)return null;
+      const qV=parseFloat(vendaForm.quantidade)||0,pV=parseFloat(vendaForm.preco)||0,cV=parseFloat(vendaForm.corretagem)||0;
+      const prev=vendaAcao(inv.quantidade||0,inv.precoMedio||0,qV,pV,cV); // testado em calc.mjs
+      return <Modal title={`➖ Vender ${inv.ticker||inv.descricao}`} onClose={()=>{setModalVenda(null);setVendaForm({});}}>
+        <div style={{background:D.bg3,borderRadius:8,padding:"10px 12px",marginBottom:10}}>
+          <p style={{fontSize:11,color:D.text3,margin:0}}>Posição atual</p>
+          <p style={{fontSize:13,color:D.text,margin:"2px 0 0"}}>{inv.quantidade||0} un · PM {fmtM(inv.precoMedio||0,currency)}</p>
+        </div>
+        <label style={{fontSize:12,color:D.text3}}>Quantidade vendida<input type="number" autoFocus value={vendaForm.quantidade||""} onChange={e=>setVendaForm(f=>({...f,quantidade:e.target.value}))} placeholder={`Máx: ${inv.quantidade||0}`} style={{marginTop:4}}/></label>
+        <label style={{fontSize:12,color:D.text3}}>Preço de venda por unidade ({currency})<input type="number" step="0.001" value={vendaForm.preco||""} onChange={e=>setVendaForm(f=>({...f,preco:e.target.value}))} placeholder="Ex: 4.09" style={{marginTop:4}}/></label>
+        <label style={{fontSize:12,color:D.text3}}>Corretagem/taxas ({currency}, opcional)<input type="number" step="0.01" value={vendaForm.corretagem||""} onChange={e=>setVendaForm(f=>({...f,corretagem:e.target.value}))} placeholder="Ex: 3.00" style={{marginTop:4}}/></label>
+        {data.bancos.length>0&&<label style={{fontSize:12,color:D.text3}}>Creditar na conta<select value={vendaForm.bancoId||""} onChange={e=>setVendaForm(f=>({...f,bancoId:e.target.value}))} style={{marginTop:4}}><option value="">— não creditar —</option>{data.bancos.map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}</select></label>}
+        {qV>0&&pV>0&&<div style={{background:D.gold+"12",border:`1px solid ${D.gold}44`,borderRadius:8,padding:"10px 12px",marginTop:10}}>
+          <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:12,color:D.text2}}>Você recebe (líquido)</span><span style={{fontSize:13,fontWeight:700,color:D.gold}}>{fmtM(prev.recebido,currency)}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}><span style={{fontSize:12,color:D.text2}}>Resultado realizado</span><span style={{fontSize:13,fontWeight:700,color:prev.resultado>=0?D.green:D.red}}>{prev.resultado>=0?"+":""}{fmtM(prev.resultado,currency)}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}><span style={{fontSize:12,color:D.text2}}>Posição depois</span><span style={{fontSize:13,color:D.text}}>{prev.vendeuTudo?"zerada — ativo sai da carteira":`${Math.round(prev.qtdRestante*10000)/10000} un · PM mantido`}</span></div>
+        </div>}
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:10}}><Btn outline color={D.text3} onClick={()=>{setModalVenda(null);setVendaForm({});}}>Cancelar</Btn><Btn color={D.gold} onClick={vender}>Confirmar venda</Btn></div>
       </Modal>;})()}
     {modalDiv&&<Modal title="Registrar provento" onClose={()=>setModalDiv(false)}>
       <label style={{fontSize:12,color:D.text3}}>Ticker<input value={divForm.ticker||""} onChange={e=>setDivForm(f=>({...f,ticker:e.target.value.toUpperCase()}))} style={{marginTop:4}}/></label>
