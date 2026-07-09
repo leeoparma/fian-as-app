@@ -41,6 +41,7 @@ const supa={
   async backupGet(t,id){const resp=await fetch(`${SUPA_URL}/rest/v1/backups?id=eq.${id}&select=data`,{headers:supa.ah(t)});if(!resp.ok){const e=new Error("backup get HTTP "+resp.status);e.status=resp.status;throw e;}const r=await resp.json();return r?.[0]?.data||null;},
   async backupDelete(t,ids){if(!ids.length)return;const resp=await fetch(`${SUPA_URL}/rest/v1/backups?id=in.(${ids.join(",")})`,{method:"DELETE",headers:supa.ah(t)});if(!resp.ok){const e=new Error("backup delete HTTP "+resp.status);e.status=resp.status;throw e;}},
   async loadShared(codigo){const r=await com401(t=>fetch(`${SUPA_URL}/rest/v1/rpc/load_shared`,{method:"POST",headers:supa.ah(t),body:JSON.stringify({p_codigo:codigo})}).then(x=>{if(x.status===401){const e=new Error("401");e.status=401;throw e;}return x;})).catch(()=>null);if(!r||!r.ok)return null;const d=await r.json();return d||null;},
+  async rpcGrupo(fn,codigo){return com401(async t=>{const r=await fetch(`${SUPA_URL}/rest/v1/rpc/${fn}`,{method:"POST",headers:supa.ah(t),body:JSON.stringify({p_codigo:codigo})});if(!r.ok){const e=new Error(`${fn} HTTP ${r.status}`);e.status=r.status;throw e;}return r.json();});},
   async saveShared(codigo,d){await com401(async t=>{const r=await fetch(`${SUPA_URL}/rest/v1/rpc/save_shared`,{method:"POST",headers:supa.ah(t),body:JSON.stringify({p_codigo:codigo,p_data:d})});if(!r.ok){const e=new Error("save_shared HTTP "+r.status);e.status=r.status;throw e;}});},
 };
 
@@ -1838,16 +1839,41 @@ function SplitwiseTab({currency,userEmail}){
     setSaldosGrupos(res);
   }
 
-  function criarGrupo(){
-    if(!setupNome.trim()||!form.nomeGrupo?.trim())return;
-    const nome=setupNome.trim();
+  async function criarGrupo(){
+    // Usa o nome já salvo (o campo "seu nome" só aparece na primeira vez).
+    const nome=(nomeUser||setupNome.trim()).trim();
+    if(!nome){alert("Informe seu nome.");return;}
+    if(!form.nomeGrupo?.trim()){alert("Dê um nome ao grupo.");return;}
     const cod=(form.nomeGrupo.trim().toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,12)||"GRUPO")+"-"+Math.random().toString(36).slice(2,6).toUpperCase();
     if(!nomeUser){lsSet("sw_nome",nome);setNomeUser(nome);}
     const d={codigo:cod,nome:form.nomeGrupo.trim(),membros:[{nome,email:userEmail||nome}],pendentes:[],admin:userEmail||null,despesas:[],pagamentos:[]};
-    lsSet(`sw_${cod}`,normalizaSW(d));supa.saveShared(cod,normalizaSW(d)).catch(()=>{});
+    const dn=normalizaSW(d);
+    try{await supa.saveShared(cod,dn);}                      // erro deixa de ser silencioso
+    catch(e){alert("Não consegui criar o grupo na nuvem: "+(e?.message||e));return;}
+    lsSet(`sw_${cod}`,dn);
     const ng=[...new Set([...grupos,cod])];setGrupos(ng);lsSet("sw_grupos",JSON.stringify(ng));
     lsSet("sw_ativo",cod);setAtivo(cod);
     setForm({});setSetupNome("");setModal(null);
+  }
+
+  // Apagar de vez (só admin) ou sair do grupo — decidido pelo banco, não pela tela
+  async function excluirGrupo(cod){
+    if(!window.confirm(`Excluir o grupo ${cod} para TODOS os membros?\n\nEssa ação apaga despesas e pagamentos e não pode ser desfeita.`))return;
+    try{
+      const r=await supa.rpcGrupo("excluir_grupo",cod);
+      if(r==="nao_autorizado"){alert("Só o administrador (quem criou o grupo) pode excluir. Use \"Sair do grupo\".");return;}
+      sairDaLista(cod);
+      alert(r==="excluido"?"Grupo excluído.":"Grupo não encontrado — removido da sua lista.");
+    }catch(e){alert("Erro ao excluir: "+(e?.message||e));}
+  }
+  async function sairGrupo(cod){
+    if(!window.confirm(`Sair do grupo ${cod}?\n\nVocê deixa de ver e receber avisos desse grupo. O histórico continua para os outros membros.`))return;
+    try{
+      await supa.rpcGrupo("sair_grupo",cod);
+      lsSet("sw_solicitado","");setSolicitado(null);
+      sairDaLista(cod);
+      alert("Você saiu do grupo.");
+    }catch(e){alert("Erro ao sair: "+(e?.message||e));}
   }
 
   async function entrarGrupo(codArg,silencioso){
@@ -2017,7 +2043,14 @@ function SplitwiseTab({currency,userEmail}){
             </div>
           </div>
           <div style={{display:"flex",justifyContent:"flex-end",marginTop:8}}>
-            <button onClick={()=>sairDaLista(cod)} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:11}}>remover da lista</button>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+              <button onClick={()=>sairDaLista(cod)} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:11}}>remover da lista</button>
+              <button onClick={()=>sairGrupo(cod)} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:11}}>sair do grupo</button>
+              {(()=>{const g=lsGet(`sw_${cod}`);const adm=String(g?.admin||g?.membros?.[0]?.email||"").toLowerCase();
+                return adm&&adm===(userEmail||"").toLowerCase()
+                  ?<button onClick={()=>excluirGrupo(cod)} style={{border:"none",background:"none",cursor:"pointer",color:D.red,fontSize:11}}>🗑 excluir grupo</button>
+                  :null;})()}
+            </div>
           </div>
         </Card>;
       })}
