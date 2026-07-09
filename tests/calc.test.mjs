@@ -358,20 +358,28 @@ test("agenda push: ordena por data (provento + recorrente misturados)", ()=>{
 });
 
 // ── Compra/venda com corretagem (números REAIS das notas de 08/07/2026) ─────
-test("compra real (NAB): 9 × $39,585 + $3 corretagem = $359,27 saindo da conta", ()=>{
+// Convenção da corretora: PM = média de EXECUÇÃO; corretagem vira despesa à parte.
+test("compra real (NAB): PM fica $39,585 (igual à corretora); $359,27 saem da conta", ()=>{
   const r=compraAcao(0,0,9,39.585,3);
-  aprox(r.totalPago,359.27,0.01);
-  aprox(r.pmNovo,359.265/9,0.001); // corretagem entra no preço médio (custo real)
+  aprox(r.pmNovo,39.585,0.0001);   // corretagem NÃO entra no PM
+  aprox(r.investido,356.27,0.01);  // vai para a posição (Aplicação)
+  aprox(r.totalPago,359.27,0.01);  // débito real na conta
 });
-test("venda real (BRE): 95 × $4,09 − $3 = $385,55 recebidos; posição zera", ()=>{
+test("aporte real (NAB): 15@37,89 + 9@39,585 → PM $38,53 (média de execução)", ()=>{
+  const r=compraAcao(15,37.890,9,39.585,3);
+  aprox(r.qtdTotal,24);
+  aprox(r.pmNovo,(15*37.890+9*39.585)/24,0.0001);
+});
+test("venda real (BRE): bruto $388,55 vira Resgate; líquido $385,55 entra na conta", ()=>{
   const r=vendaAcao(95,4.30,95,4.09,3);
-  aprox(r.recebido,385.55);
+  aprox(r.recebidoBruto,388.55);
+  aprox(r.recebidoLiquido,385.55);
   assert.equal(r.vendeuTudo,true);
-  aprox(r.resultado,385.55-95*4.30); // resultado realizado vs preço médio
+  aprox(r.resultado,388.55-95*4.30); // resultado de execução vs PM
 });
 test("venda parcial: PM inalterado, quantidade cai, resultado certo", ()=>{
   const r=vendaAcao(20,10,5,12,1);
-  aprox(r.qtdRestante,15);aprox(r.recebido,59);aprox(r.resultado,9);
+  aprox(r.qtdRestante,15);aprox(r.recebidoBruto,60);aprox(r.recebidoLiquido,59);aprox(r.resultado,10);
   assert.equal(r.vendeuTudo,false);
 });
 test("compra sem corretagem = preço médio clássico (compatível com aporteMedio)", ()=>{
@@ -380,5 +388,5 @@ test("compra sem corretagem = preço médio clássico (compatível com aporteMed
 });
 test("venda maior que a posição: vende só o que existe", ()=>{
   const r=vendaAcao(5,10,99,10,0);
-  aprox(r.qtdRestante,0);aprox(r.recebido,50);
+  aprox(r.qtdRestante,0);aprox(r.recebidoBruto,50);
 });
