@@ -1272,7 +1272,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
     const precoNovo=parseFloat(aporteForm.preco);
     const corretagem=parseFloat(aporteForm.corretagem)||0;
     if(!qtdNova||qtdNova<=0||!precoNovo||precoNovo<=0)return;
-    const {qtdTotal,pmNovo,custoTotal:viNovo,totalPago}=compraAcao(inv.quantidade||0,inv.precoMedio||0,qtdNova,precoNovo,corretagem); // testado em calc.mjs (corretagem entra no PM)
+    const {qtdTotal,pmNovo,custoTotal:viNovo,investido,totalPago}=compraAcao(inv.quantidade||0,inv.precoMedio||0,qtdNova,precoNovo,corretagem); // testado em calc.mjs (PM = média de execução, igual à corretora)
     const precoAtual=inv.preco_atual||pmNovo;
     const valorAtual=precoAtual*qtdTotal;
     const dt=aporteForm.data||hoje.toISOString().slice(0,10);
@@ -1282,7 +1282,10 @@ function InvestimentosTab({data,setData,currency,profileId}){
     const bid=aporteForm.bancoId!==undefined?aporteForm.bancoId:(inv.bancoId||"");
     setData(d=>({...d,
       investimentos:d.investimentos.map(x=>x.id===inv.id?atualizado:x),
-      transacoes:bid?[...d.transacoes,{id:uid(),tipo:"despesa",descricao:`Aporte: ${qtdNova} ${inv.ticker||inv.descricao||""}`.trim(),valor:Math.round(totalPago*100)/100,categoria:"Aplicação",data:dt,bancoId:bid}]:d.transacoes
+      transacoes:bid?[...d.transacoes,
+        {id:uid(),tipo:"despesa",descricao:`Aporte: ${qtdNova} ${inv.ticker||inv.descricao||""}`.trim(),valor:Math.round(investido*100)/100,categoria:"Aplicação",data:dt,bancoId:bid},
+        ...(corretagem>0?[{id:uid(),tipo:"despesa",descricao:`Corretagem: aporte ${inv.ticker||inv.descricao||""}`.trim(),valor:Math.round(corretagem*100)/100,categoria:"Corretagem",data:dt,bancoId:bid}]:[])
+      ]:d.transacoes
     }));
     setModalAporte(null);setAporteForm({});
   }
@@ -1302,7 +1305,10 @@ function InvestimentosTab({data,setData,currency,profileId}){
       investimentos:r.vendeuTudo
         ?d.investimentos.filter(x=>x.id!==inv.id)
         :d.investimentos.map(x=>x.id!==inv.id?x:{...x,quantidade:r.qtdRestante,valorInvestido:Math.round(pmX*r.qtdRestante*100)/100,valor:Math.round(pmX*r.qtdRestante*100)/100,valorAtual:Math.round((x.preco_atual||pmX)*r.qtdRestante*100)/100,lucro:Math.round(((x.preco_atual||pmX)-pmX)*r.qtdRestante*100)/100,vendas:[...(x.vendas||[]),{data:dt,quantidade:q,preco:p,...(c>0?{corretagem:c}:{}),resultado:Math.round(r.resultado*100)/100}]}),
-      transacoes:(bid&&r.recebido>0)?[...d.transacoes,{id:uid(),tipo:"receita",descricao:desc,valor:Math.round(r.recebido*100)/100,categoria:"Resgate",data:dt,bancoId:bid}]:d.transacoes
+      transacoes:(bid&&r.recebidoBruto>0)?[...d.transacoes,
+        {id:uid(),tipo:"receita",descricao:desc,valor:Math.round(r.recebidoBruto*100)/100,categoria:"Resgate",data:dt,bancoId:bid},
+        ...(c>0?[{id:uid(),tipo:"despesa",descricao:`Corretagem: venda ${inv.ticker||inv.descricao||""}`.trim(),valor:Math.round(c*100)/100,categoria:"Corretagem",data:dt,bancoId:bid}]:[])
+      ]:d.transacoes
     }));
     setModalVenda(null);setVendaForm({});
   }
@@ -1668,7 +1674,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
         <label style={{fontSize:12,color:D.text3}}>Corretagem/taxas ({currency}, opcional)<input type="number" step="0.01" value={vendaForm.corretagem||""} onChange={e=>setVendaForm(f=>({...f,corretagem:e.target.value}))} placeholder="Ex: 3.00" style={{marginTop:4}}/></label>
         {data.bancos.length>0&&<label style={{fontSize:12,color:D.text3}}>Creditar na conta<select value={vendaForm.bancoId||""} onChange={e=>setVendaForm(f=>({...f,bancoId:e.target.value}))} style={{marginTop:4}}><option value="">— não creditar —</option>{data.bancos.map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}</select></label>}
         {qV>0&&pV>0&&<div style={{background:D.gold+"12",border:`1px solid ${D.gold}44`,borderRadius:8,padding:"10px 12px",marginTop:10}}>
-          <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:12,color:D.text2}}>Você recebe (líquido)</span><span style={{fontSize:13,fontWeight:700,color:D.gold}}>{fmtM(prev.recebido,currency)}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:12,color:D.text2}}>Você recebe (líquido)</span><span style={{fontSize:13,fontWeight:700,color:D.gold}}>{fmtM(prev.recebidoLiquido,currency)}</span></div>
           <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}><span style={{fontSize:12,color:D.text2}}>Resultado realizado</span><span style={{fontSize:13,fontWeight:700,color:prev.resultado>=0?D.green:D.red}}>{prev.resultado>=0?"+":""}{fmtM(prev.resultado,currency)}</span></div>
           <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}><span style={{fontSize:12,color:D.text2}}>Posição depois</span><span style={{fontSize:13,color:D.text}}>{prev.vendeuTudo?"zerada — ativo sai da carteira":`${Math.round(prev.qtdRestante*10000)/10000} un · PM mantido`}</span></div>
         </div>}
