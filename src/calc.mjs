@@ -371,7 +371,12 @@ export function relatorioMensal({mesKey,transacoes=[],investimentos=[],snapIni=n
   const gastos=txs.filter(t=>t.tipo==="despesa"&&!CAT_INTERNAS.includes(t.categoria));
   const porCat={};
   for(const t of gastos){const c=t.categoria||"Outros";porCat[c]=(porCat[c]||0)+(t.valor||0);}
-  const topCategorias=Object.entries(porCat).map(([categoria,total])=>({categoria,total,pct:despesas>0?total/despesas*100:0})).sort((a,b)=>b.total-a.total).slice(0,5);
+  const todasCategorias=Object.entries(porCat).map(([categoria,total])=>({categoria,total,pct:despesas>0?total/despesas*100:0})).sort((a,b)=>b.total-a.total);
+  const topCategorias=todasCategorias.slice(0,5);
+  // Fixos (lançados por recorrência) vs variáveis — a parte do gasto que você controla
+  const fixos=gastos.filter(t=>t.recorrenciaId).reduce((a,t)=>a+(t.valor||0),0);
+  const variaveis=despesas-fixos;
+  const poupancaPct=receitas>0?(receitas-despesas)/receitas*100:null;
   const topLancamentos=[...gastos].sort((a,b)=>(b.valor||0)-(a.valor||0)).slice(0,5).map(t=>({descricao:t.descricao,valor:t.valor,data:t.data,categoria:t.categoria}));
   const [y,m]=mesKey.split("-").map(Number);
   const fimD=new Date(y,m,0), iniD=new Date(y,m-1,0);   // último dia do mês / do anterior
@@ -398,5 +403,20 @@ export function relatorioMensal({mesKey,transacoes=[],investimentos=[],snapIni=n
     acoes.sort((a,b)=>Math.abs(b.ganho||0)-Math.abs(a.ganho||0));
   }
   const acoesTotalGanho=acoes.reduce((a,x)=>a+(x.ganho||0),0);
-  return {receitas,despesas,saldoMes:receitas-despesas,topCategorias,topLancamentos,rf,rfTotalMes,acoes,acoesTotalGanho,temBaseAcoes};
+  return {receitas,despesas,saldoMes:receitas-despesas,topCategorias,todasCategorias,topLancamentos,fixos,variaveis,poupancaPct,rf,rfTotalMes,acoes,acoesTotalGanho,temBaseAcoes};
+}
+
+// Compara dois relatórios mensais (atual vs anterior) — deltas e percentuais.
+// pct é null quando não há base de comparação (anterior zero/ausente).
+export function compararMeses(atual,anterior){
+  const d=(a,b)=>({delta:a-(b||0),pct:(b>0)?((a-b)/b*100):null});
+  const antCat={};
+  for(const c of (anterior?.todasCategorias||[]))antCat[c.categoria]=c.total;
+  return {
+    temBase:!!anterior&&((anterior.receitas||0)>0||(anterior.despesas||0)>0),
+    receitas:d(atual.receitas,anterior?.receitas),
+    despesas:d(atual.despesas,anterior?.despesas),
+    saldo:{delta:atual.saldoMes-(anterior?.saldoMes||0),pct:null},
+    categorias:Object.fromEntries((atual.todasCategorias||[]).map(c=>[c.categoria,d(c.total,antCat[c.categoria])])),
+  };
 }
