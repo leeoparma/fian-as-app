@@ -9,7 +9,7 @@ import {
   calcSaldos as calcSaldosPure, calcDividas as calcDividasPure, totaisPorPessoa as totaisPorPessoaPure,
   salarioMensal, converteMoeda, taxaMensalSim, simularJuros,
   semFotos, mesclarFotos, projetarFluxo, addDias, marcarDuplicatas, montarAgendaPush,
-  compraAcao, vendaAcao,
+  compraAcao, vendaAcao, pendentesRecorrenciaSW,
 } from "./calc.mjs";
 
 // Chave pública VAPID (par gerado para este app; a privada é secret no Cloudflare)
@@ -1801,7 +1801,24 @@ function SplitwiseTab({currency,userEmail}){
 
   function normalizaSW(d){
     if(!d||typeof d!=="object")return null;
-    return {codigo:d.codigo||ativo,nome:d.nome||d.codigo||ativo,membros:Array.isArray(d.membros)?d.membros.filter(m=>m&&m.nome):[],pendentes:Array.isArray(d.pendentes)?d.pendentes.filter(p=>p&&p.email):[],admin:d.admin||(Array.isArray(d.membros)&&d.membros[0]?.email)||null,despesas:Array.isArray(d.despesas)?d.despesas:[],pagamentos:Array.isArray(d.pagamentos)?d.pagamentos:[]};
+    return {codigo:d.codigo||ativo,nome:d.nome||d.codigo||ativo,membros:Array.isArray(d.membros)?d.membros.filter(m=>m&&m.nome):[],pendentes:Array.isArray(d.pendentes)?d.pendentes.filter(p=>p&&p.email):[],recorrencias:Array.isArray(d.recorrencias)?d.recorrencias:[],admin:d.admin||(Array.isArray(d.membros)&&d.membros[0]?.email)||null,despesas:Array.isArray(d.despesas)?d.despesas:[],pagamentos:Array.isArray(d.pagamentos)?d.pagamentos:[]};
+  }
+
+  // Materializa as recorrências vencidas. A trava anti-duplicata é a chave
+  // recorrenciaId|data: se outra pessoa já lançou, esta abertura não repete.
+  function materializarRecorrencias(g,hojeStr){
+    const recs=g.recorrencias||[];
+    if(!recs.length)return {mudou:false,novo:g};
+    const feitas=new Set((g.despesas||[]).filter(d=>d&&d.recorrenciaId&&d.data).map(d=>`${d.recorrenciaId}|${d.data}`));
+    const novas=[];
+    for(const r of recs){
+      for(const dt of pendentesRecorrenciaSW(r,hojeStr,feitas)){ // testado em calc.mjs
+        novas.push({id:uid(),descricao:r.descricao,valor:r.valor,pagoPor:r.pagoPor,divisao:r.divisao,categoria:r.categoria||"Outros",data:dt,recorrenciaId:r.id});
+        feitas.add(`${r.id}|${dt}`);
+      }
+    }
+    if(!novas.length)return {mudou:false,novo:g};
+    return {mudou:true,novo:{...g,despesas:[...(g.despesas||[]),...novas]},qtd:novas.length};
   }
 
   async function loadSW(cod){
@@ -1815,7 +1832,10 @@ function SplitwiseTab({currency,userEmail}){
         const eu=n.membros?.find(m=>m.nome===nomeUser);
         if(eu&&(!eu.email||eu.email===eu.nome)){eu.email=userEmail;lsSet(`sw_${cod}`,n);supa.saveShared(cod,n).catch(()=>{});}
       }
-      setSwData(n);lsSet(`sw_${cod}`,n);
+      const hs=`${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,"0")}-${String(hoje.getDate()).padStart(2,"0")}`;
+      const mat=materializarRecorrencias(n,hs);
+      if(mat.mudou){setSwData(mat.novo);lsSet(`sw_${cod}`,mat.novo);supa.saveShared(cod,mat.novo).catch(()=>{});}
+      else{setSwData(n);lsSet(`sw_${cod}`,n);}
     }}catch{}
     setLoading(false);
   }
@@ -2155,6 +2175,7 @@ function SplitwiseTab({currency,userEmail}){
 
     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
       <Btn onClick={()=>{setModal("despesa");setForm({pagoPor:nomeUser,divisao:swData.membros.map(m=>m.nome),categoria:"Outros"});}} color={D.green}>+ Nova despesa</Btn>
+      <Btn onClick={()=>{setModal("recorrentes");setForm({});}} color={D.purple} outline sm>🔁 Recorrentes{(swData.recorrencias||[]).length>0?` (${swData.recorrencias.length})`:""}</Btn>
       <Btn onClick={()=>{setModal("pagamento");setForm({de:nomeUser});}} color={D.blue} outline>✓ Pagamento</Btn>
       <Btn onClick={()=>loadSW(ativo)} color={D.purple} outline sm>🔄 Atualizar</Btn>
     </div>
@@ -2244,6 +2265,62 @@ function SplitwiseTab({currency,userEmail}){
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn color={D.green} onClick={addMembro}>+ Adicionar</Btn><Btn outline color={D.text3} onClick={()=>setModal(null)}>Fechar</Btn></div>
     </Modal>}
 
+    {modal==="recorrentes"&&(()=>{
+      const hs=`${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,"0")}-${String(hoje.getDate()).padStart(2,"0")}`;
+      const recs=swData.recorrencias||[];
+      const salvar=()=>{
+        const v=parseFloat(form.valor)||0;
+        const desc=(form.descricao||"").trim();
+        const quem=form.divisao||swData.membros.map(m=>m.nome);
+        if(!desc||v<=0){alert("Preencha descrição e valor.");return;}
+        if(!quem.length){alert("Escolha ao menos uma pessoa na divisão.");return;}
+        const rec={id:uid(),descricao:desc,valor:v,pagoPor:form.pagoPor||nomeUser,frequencia:form.frequencia||"mensal",inicio:form.inicio||hs,categoria:form.categoria||"Outros",
+          divisao:quem.map(n=>({nome:n,valor:Math.round((v/quem.length)*100)/100}))};
+        const g={...swData,recorrencias:[...recs,rec]};
+        const mat=materializarRecorrencias(g,hs); // já lança as vencidas desde a data escolhida
+        saveSW(mat.mudou?mat.novo:g);
+        setForm({});
+        alert(mat.mudou?`Recorrência criada — ${mat.qtd} lançamento(s) já gerado(s) desde ${rec.inicio.split("-").reverse().join("/")}.`:"Recorrência criada. O primeiro lançamento entra na data escolhida.");
+      };
+      const excluir=(id)=>{
+        if(!window.confirm("Excluir esta recorrência?\n\nAs despesas já lançadas continuam no grupo (apague-as à mão se quiser)."))return;
+        saveSW({...swData,recorrencias:recs.filter(r=>r.id!==id)});
+      };
+      const pausar=(id)=>saveSW({...swData,recorrencias:recs.map(r=>r.id===id?{...r,pausada:!r.pausada}:r)});
+      return <Modal title="🔁 Despesas recorrentes" onClose={()=>{setModal(null);setForm({});}}>
+        <p style={{fontSize:11,color:D.text3,marginTop:0,lineHeight:1.6}}>Contas que se repetem com o mesmo valor. O lançamento é criado sozinho quando alguém abre o grupo — sem duplicar, mesmo que os dois abram juntos.</p>
+        {recs.length>0&&<div style={{marginBottom:12}}>
+          {recs.map(r=><div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"8px 0",borderTop:`1px solid ${D.border}`}}>
+            <div style={{minWidth:0}}>
+              <p style={{margin:0,fontSize:13,color:r.pausada?D.text3:D.text}}>{r.pausada?"⏸ ":""}{r.descricao} · {fmtM(r.valor,currency)}</p>
+              <p style={{margin:0,fontSize:10,color:D.text3}}>{({mensal:"mensal",semanal:"semanal",quinzenal:"quinzenal"})[r.frequencia||"mensal"]} · desde {(r.inicio||"").split("-").reverse().join("/")} · pago por {r.pagoPor}</p>
+            </div>
+            <div style={{display:"flex",gap:6,flexShrink:0}}>
+              <Btn sm outline color={D.text3} onClick={()=>pausar(r.id)}>{r.pausada?"Retomar":"Pausar"}</Btn>
+              <Btn sm outline color={D.red} onClick={()=>excluir(r.id)}>Excluir</Btn>
+            </div>
+          </div>)}
+        </div>}
+        <p style={{fontSize:12,fontWeight:700,color:D.text,margin:"0 0 6px"}}>Nova recorrência</p>
+        <label style={{fontSize:12,color:D.text3}}>Descrição<input value={form.descricao||""} onChange={e=>setForm(f=>({...f,descricao:e.target.value}))} placeholder="Ex: Netflix, academia" style={{marginTop:4}}/></label>
+        <label style={{fontSize:12,color:D.text3}}>Valor ({currency})<input type="number" step="0.01" value={form.valor||""} onChange={e=>setForm(f=>({...f,valor:e.target.value}))} style={{marginTop:4}}/></label>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <label style={{fontSize:12,color:D.text3}}>Frequência<select value={form.frequencia||"mensal"} onChange={e=>setForm(f=>({...f,frequencia:e.target.value}))} style={{marginTop:4}}><option value="mensal">Mensal</option><option value="quinzenal">Quinzenal (14 dias)</option><option value="semanal">Semanal</option></select></label>
+          <label style={{fontSize:12,color:D.text3}}>Primeira parcela<input type="date" value={form.inicio||hs} onChange={e=>setForm(f=>({...f,inicio:e.target.value}))} style={{marginTop:4}}/></label>
+          <label style={{fontSize:12,color:D.text3}}>Pago por<select value={form.pagoPor||nomeUser} onChange={e=>setForm(f=>({...f,pagoPor:e.target.value}))} style={{marginTop:4}}>{swData.membros.map(m=><option key={m.nome} value={m.nome}>{m.nome}</option>)}</select></label>
+          <label style={{fontSize:12,color:D.text3}}>Categoria<input value={form.categoria||""} onChange={e=>setForm(f=>({...f,categoria:e.target.value}))} placeholder="Outros" style={{marginTop:4}}/></label>
+        </div>
+        <p style={{fontSize:12,color:D.text3,margin:"10px 0 4px"}}>Dividir entre</p>
+        <div style={{display:"flex",flexWrap:"wrap",gap:10}}>
+          {swData.membros.map(m=>{const sel=(form.divisao||swData.membros.map(x=>x.nome)).includes(m.nome);
+            return <label key={m.nome} style={{fontSize:12,color:D.text2,display:"flex",alignItems:"center",gap:5,cursor:"pointer"}}>
+              <input type="checkbox" style={{width:16,height:16,margin:0,padding:0,flexShrink:0}} checked={sel} onChange={()=>{const base=form.divisao||swData.membros.map(x=>x.nome);setForm(f=>({...f,divisao:sel?base.filter(n=>n!==m.nome):[...base,m.nome]}));}}/>{m.nome}
+            </label>;})}
+        </div>
+        {(parseFloat(form.valor)>0)&&<p style={{fontSize:11,color:D.text3,marginTop:8}}>Cada pessoa fica com {fmtM((parseFloat(form.valor)||0)/Math.max(1,(form.divisao||swData.membros.map(x=>x.nome)).length),currency)} por lançamento.</p>}
+        {form.inicio&&form.inicio<hs&&<p style={{fontSize:11,color:D.gold,marginTop:6}}>⚠️ A data escolhida já passou — as parcelas vencidas serão lançadas de uma vez ao salvar.</p>}
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:12}}><Btn outline color={D.text3} onClick={()=>{setModal(null);setForm({});}}>Fechar</Btn><Btn color={D.purple} onClick={salvar}>Criar recorrência</Btn></div>
+      </Modal>;})()}
     {modal==="despesa"&&<Modal title="Nova despesa" onClose={()=>setModal(null)}>
       <label style={{fontSize:12,color:D.text3}}>Descrição<input value={form.descricao||""} onChange={e=>setForm(f=>({...f,descricao:e.target.value}))} style={{marginTop:4}}/></label>
       <label style={{fontSize:12,color:D.text3}}>Valor ({currency})<input type="number" value={form.valor||""} onChange={e=>setForm(f=>({...f,valor:e.target.value}))} style={{marginTop:4}}/></label>
