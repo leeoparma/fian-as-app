@@ -9,7 +9,7 @@ import {
   calcSaldos as calcSaldosPure, calcDividas as calcDividasPure, totaisPorPessoa as totaisPorPessoaPure,
   salarioMensal, converteMoeda, taxaMensalSim, simularJuros,
   semFotos, mesclarFotos, projetarFluxo, addDias, marcarDuplicatas, montarAgendaPush,
-  compraAcao, vendaAcao, pendentesRecorrenciaSW, relatorioMensal,
+  compraAcao, vendaAcao, pendentesRecorrenciaSW, relatorioMensal, compararMeses,
 } from "./calc.mjs";
 
 // Chave pública VAPID (par gerado para este app; a privada é secret no Cloudflare)
@@ -3477,6 +3477,7 @@ function RelatoriosTab({data,setData,currency}){
   const [dDe,setDDe]=useState("");const [dAte,setDAte]=useState("");  // intervalo de datas
   const [aiResult,setAiResult]=useState(null);
   const [relMes,setRelMes]=useState("");
+  const [relAi,setRelAi]=useState(null);const [relAiBusy,setRelAiBusy]=useState(false);
   const [aiLoading,setAiLoading]=useState(false);
   const [aiErro,setAiErro]=useState("");
 
@@ -3612,7 +3613,35 @@ tbody tr:nth-child(even){background:#fafbfc}
       const snapFim=hist.find(h=>h.mes===mk)?.ativos||null;
       const snapIni=hist.find(h=>h.mes===prevKey)?.ativos||null;
       const R=relatorioMensal({mesKey:mk,transacoes:data.transacoes,investimentos:data.investimentos,snapIni,snapFim});
-      const temAlgo=R.receitas>0||R.despesas>0||R.rf.length>0||R.acoes.length>0;
+      const Rprev=relatorioMensal({mesKey:prevKey,transacoes:data.transacoes,investimentos:data.investimentos});
+      const cmp=compararMeses(R,Rprev); // testado em calc.mjs
+      const patFim=hist.find(h=>h.mes===mk)?.patrimonio;
+      const patIni=hist.find(h=>h.mes===prevKey)?.patrimonio;
+      const seta=(v,invertido)=>{ // invertido: p/ gasto, subir é ruim (vermelho)
+        if(v==null)return null;
+        const bom=invertido?v<0:v>0;
+        return <span style={{fontSize:10,fontWeight:700,color:v===0?D.text3:(bom?D.green:D.red)}}>{v>0?"▲":v<0?"▼":"•"} {Math.abs(v).toFixed(0)}%</span>;
+      };
+      const analisarMesIA=async()=>{
+        setRelAiBusy(true);setRelAi(null);
+        try{
+          const linhas=[
+            `Mês: ${MESES[rm-1]} ${ry} (moeda ${currency})`,
+            `Recebido: ${R.receitas.toFixed(2)}${cmp.temBase?` (${cmp.receitas.pct==null?"sem base":cmp.receitas.pct.toFixed(0)+"% vs mês anterior"})`:""}`,
+            `Gasto: ${R.despesas.toFixed(2)}${cmp.temBase&&cmp.despesas.pct!=null?` (${cmp.despesas.pct.toFixed(0)}% vs mês anterior)`:""}`,
+            `Saldo do mês: ${R.saldoMes.toFixed(2)} · Taxa de poupança: ${R.poupancaPct==null?"n/d":R.poupancaPct.toFixed(0)+"%"}`,
+            `Gastos fixos (recorrentes): ${R.fixos.toFixed(2)} · Variáveis: ${R.variaveis.toFixed(2)}`,
+            `Top categorias: ${R.topCategorias.map(c=>`${c.categoria} ${c.total.toFixed(0)} (${c.pct.toFixed(0)}%)`).join("; ")}`,
+            R.rf.length?`Renda fixa no mês: ${R.rfTotalMes.toFixed(2)}`:"",
+            R.temBaseAcoes&&R.acoes.some(a=>a.ganho!=null)?`Ações no mês: ${R.acoesTotalGanho.toFixed(2)}`:"",
+            (patFim!=null&&patIni!=null)?`Patrimônio: ${patIni.toFixed(0)} → ${patFim.toFixed(0)}`:"",
+          ].filter(Boolean).join("\n");
+          const prompt=`Você é um analista financeiro pessoal direto e honesto. Com base APENAS nos números abaixo (sem inventar nada), escreva 3 a 5 frases em português analisando o mês: o que foi bem, o que merece atenção e uma sugestão prática. Sem saudações, sem repetir os números todos, sem markdown.\n\n${linhas}`;
+          const txt=await askClaude(prompt,400);
+          setRelAi(txt||"Não veio resposta — tente de novo.");
+        }catch(e){setRelAi("Erro na análise: "+(e?.message||e));}
+        finally{setRelAiBusy(false);}
+      };
       return <Card>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:8}}>
           <Tip text="📊 O fechamento do mês: quanto entrou e saiu, seus maiores gastos, o rendimento da renda fixa (do mês e desde o início de cada aplicação) e a variação real das ações — já descontando aportes e somando vendas do período. A comparação de ações usa a foto de fim de mês da carteira; o primeiro mês cria a base."><p style={{fontSize:14,fontWeight:700,color:D.text,margin:0}}>📊 Relatório mensal</p></Tip>
@@ -3620,14 +3649,19 @@ tbody tr:nth-child(even){background:#fafbfc}
         </div>
         {!temAlgo&&<p style={{fontSize:12,color:D.text3}}>Sem movimentações registradas neste mês.</p>}
         {temAlgo&&<>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:8,marginBottom:10}}>
-          <div style={{background:D.bg3,borderRadius:8,padding:"8px 10px"}}><p style={{fontSize:10,color:D.text3,margin:0}}>RECEBIDO</p><p style={{fontSize:15,fontWeight:700,color:D.green,margin:"2px 0 0"}}>{fmtM(R.receitas,currency)}</p></div>
-          <div style={{background:D.bg3,borderRadius:8,padding:"8px 10px"}}><p style={{fontSize:10,color:D.text3,margin:0}}>GASTO</p><p style={{fontSize:15,fontWeight:700,color:D.red,margin:"2px 0 0"}}>{fmtM(R.despesas,currency)}</p></div>
-          <div style={{background:D.bg3,borderRadius:8,padding:"8px 10px"}}><p style={{fontSize:10,color:D.text3,margin:0}}>SALDO DO MÊS</p><p style={{fontSize:15,fontWeight:700,color:R.saldoMes>=0?D.green:D.red,margin:"2px 0 0"}}>{R.saldoMes>=0?"+":""}{fmtM(R.saldoMes,currency)}</p></div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:8,marginBottom:8}}>
+          <div style={{background:D.bg3,borderRadius:8,padding:"8px 10px"}}><p style={{fontSize:10,color:D.text3,margin:0}}>RECEBIDO</p><p style={{fontSize:15,fontWeight:700,color:D.green,margin:"2px 0 0"}}>{fmtM(R.receitas,currency)}</p>{cmp.temBase&&seta(cmp.receitas.pct,false)}</div>
+          <div style={{background:D.bg3,borderRadius:8,padding:"8px 10px"}}><p style={{fontSize:10,color:D.text3,margin:0}}>GASTO</p><p style={{fontSize:15,fontWeight:700,color:D.red,margin:"2px 0 0"}}>{fmtM(R.despesas,currency)}</p>{cmp.temBase&&seta(cmp.despesas.pct,true)}</div>
+          <div style={{background:D.bg3,borderRadius:8,padding:"8px 10px"}}><p style={{fontSize:10,color:D.text3,margin:0}}>SALDO DO MÊS</p><p style={{fontSize:15,fontWeight:700,color:R.saldoMes>=0?D.green:D.red,margin:"2px 0 0"}}>{R.saldoMes>=0?"+":""}{fmtM(R.saldoMes,currency)}</p>{R.poupancaPct!=null&&<span style={{fontSize:10,color:D.text3}}>guardou {R.poupancaPct.toFixed(0)}%</span>}</div>
+          {(patFim!=null&&patIni!=null)&&<div style={{background:D.bg3,borderRadius:8,padding:"8px 10px"}}><p style={{fontSize:10,color:D.text3,margin:0}}>PATRIMÔNIO</p><p style={{fontSize:15,fontWeight:700,color:(patFim-patIni)>=0?D.green:D.red,margin:"2px 0 0"}}>{(patFim-patIni)>=0?"+":""}{fmtM(patFim-patIni,currency)}</p><span style={{fontSize:10,color:D.text3}}>total {fmtM(patFim,currency)}</span></div>}
         </div>
+        {(R.fixos>0||R.variaveis>0)&&<div style={{display:"flex",gap:0,borderRadius:8,overflow:"hidden",marginBottom:10,border:`1px solid ${D.border}`}}>
+          <div style={{flex:Math.max(R.fixos,0.001),background:D.purple+"33",padding:"6px 10px",minWidth:90}}><p style={{fontSize:9,color:D.text3,margin:0}}>FIXOS (recorrentes)</p><p style={{fontSize:12,fontWeight:700,color:D.text,margin:0}}>{fmtM(R.fixos,currency)}</p></div>
+          <div style={{flex:Math.max(R.variaveis,0.001),background:D.blue+"22",padding:"6px 10px",minWidth:90}}><p style={{fontSize:9,color:D.text3,margin:0}}>VARIÁVEIS</p><p style={{fontSize:12,fontWeight:700,color:D.text,margin:0}}>{fmtM(R.variaveis,currency)}</p></div>
+        </div>}
         {R.topCategorias.length>0&&<div style={{marginBottom:10}}>
           <p style={{fontSize:11,fontWeight:700,color:D.text2,margin:"0 0 4px"}}>MAIORES GASTOS POR CATEGORIA</p>
-          {R.topCategorias.map(c=><div key={c.categoria} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0"}}><span style={{color:D.text2}}>{c.categoria} <span style={{color:D.text3,fontSize:10}}>{c.pct.toFixed(0)}%</span></span><span style={{color:D.text,fontWeight:600}}>{fmtM(c.total,currency)}</span></div>)}
+          {R.topCategorias.map(c=><div key={c.categoria} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0"}}><span style={{color:D.text2}}>{c.categoria} <span style={{color:D.text3,fontSize:10}}>{c.pct.toFixed(0)}%</span></span><span style={{color:D.text,fontWeight:600}}>{fmtM(c.total,currency)} {cmp.temBase&&seta(cmp.categorias[c.categoria]?.pct,true)}</span></div>)}
         </div>}
         {R.topLancamentos.length>0&&<div style={{marginBottom:10}}>
           <p style={{fontSize:11,fontWeight:700,color:D.text2,margin:"0 0 4px"}}>MAIORES LANÇAMENTOS</p>
@@ -3642,6 +3676,10 @@ tbody tr:nth-child(even){background:#fafbfc}
           {!R.temBaseAcoes&&<p style={{fontSize:11,color:D.text3,margin:0}}>Primeira base sendo criada — a variação mensal das ações aparece a partir do próximo mês fechado.</p>}
           {R.acoes.slice(0,8).map((a,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0"}}><span style={{color:D.text2}}>{a.nome}{a.novo?<span style={{color:D.text3,fontSize:10}}> · novo no mês</span>:null}</span>{a.ganho==null?<span style={{color:D.text3,fontSize:11}}>{fmtM(a.valorFim,currency)}</span>:<span style={{fontWeight:600,color:a.ganho>=0?D.green:D.red}}>{a.ganho>=0?"+":""}{fmtM(a.ganho,currency)}</span>}</div>)}
         </div>}
+        <div style={{marginTop:10}}>
+          <Btn color={D.purple} outline sm onClick={analisarMesIA} disabled={relAiBusy}>{relAiBusy?"Analisando…":"🤖 Analisar meu mês"}</Btn>
+          {relAi&&<div style={{marginTop:8,padding:"10px 12px",background:D.bg3,borderRadius:8,border:`1px solid ${D.purple}44`}}><p style={{fontSize:12,color:D.text2,margin:0,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{relAi}</p></div>}
+        </div>
         </>}
       </Card>;})()}
     <Card>
