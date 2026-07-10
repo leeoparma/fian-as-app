@@ -183,9 +183,35 @@ export function addDias(dataStr,n){const[y,m,d]=dataStr.split("-").map(Number);c
 // Datas futuras (1..dias a partir de hoje) em que uma recorrência ocorre
 export function ocorrenciasRecorrencia(rec,hojeStr,dias){
   const out=[];const[hy,hm,hd]=hojeStr.split("-").map(Number);const hojeD=new Date(hy,hm-1,hd);
-  if((rec.frequencia||"mensal")==="semanal"){
+  const freq=rec.frequencia||"mensal";
+  // Com "primeira parcela" (inicio): a âncora é exata para qualquer frequência
+  if(rec.inicio){
+    const fim=addDias(hojeStr,dias);
+    const passo=freq==="quinzenal"?14:freq==="semanal"?7:0;
+    if(passo>0){
+      let cur=rec.inicio;
+      for(let k=0;k<600;k++){if(cur>fim)break;if(cur>hojeStr)out.push(cur);cur=addDias(cur,passo);}
+    }else{
+      const[iy,im,id]=rec.inicio.split("-").map(Number);
+      for(let k=0;k<Math.ceil(dias/28)+14;k++){
+        const s=_ymdC(_clampDia(iy,im-1+k,id));
+        if(s>fim)break;
+        if(s>hojeStr)out.push(s);
+      }
+    }
+    return out;
+  }
+  if(freq==="semanal"||freq==="quinzenal"){
     const alvo=rec.diaSemana!=null?rec.diaSemana:1;
-    for(let n=1;n<=dias;n++){const dt=new Date(hy,hm-1,hd+n);if(dt.getDay()===alvo)out.push(_ymdC(dt));}
+    const passoDias=freq==="quinzenal"?14:7;
+    let ultimo=null;
+    for(let n=1;n<=dias;n++){
+      const dt=new Date(hy,hm-1,hd+n);
+      if(dt.getDay()!==alvo)continue;
+      const s=_ymdC(dt);
+      if(ultimo&&diasAte(s,new Date(ultimo+"T00:00:00"))<passoDias)continue; // quinzenal sem âncora: fase aproximada
+      out.push(s);ultimo=s;
+    }
   }else{
     for(let k=0;k<=Math.ceil(dias/28)+1;k++){
       const s=_ymdC(_clampDia(hy,hm-1+k,rec.dia||1));
