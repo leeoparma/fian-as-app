@@ -291,6 +291,16 @@ export function montarAgendaPush({proventosAgendados=[],recorrencias=[],hojeStr,
       ev.push({notify_on:dstr,titulo:`📅 ${rec.descricao||"Conta recorrente"}`});
     }
   }
+  // 📊 Relatório mensal: aviso na manhã do dia 1 (o do mês que fechou)
+  const[ay,am]=hojeStr.split("-").map(Number);
+  const cand=[];
+  if(hojeStr.endsWith("-01"))cand.push(hojeStr);
+  cand.push(_ymdC(new Date(ay,am,1))); // dia 1 do mês seguinte
+  for(const d1 of cand){
+    const off=diasAte(d1,new Date(ay,am-1,Number(hojeStr.slice(8,10))));
+    if(off!=null&&off>=0&&off<=dias&&!ev.some(e=>e.notify_on===d1&&e.titulo.startsWith("📊")))
+      ev.push({notify_on:d1,titulo:"📊 Relatório mensal pronto"});
+  }
   return ev.sort((a,b)=>a.notify_on.localeCompare(b.notify_on));
 }
 
@@ -349,4 +359,44 @@ export function pendentesRecorrenciaSW(rec,hojeStr,jaLancadas){
   const feitas=jaLancadas instanceof Set?jaLancadas:new Set(jaLancadas||[]);
   return ocorrenciasSWAte(rec.inicio,rec.frequencia||"mensal",hojeStr)
     .filter(d=>!feitas.has(`${rec.id}|${d}`));
+}
+
+// ── Relatório mensal ─────────────────────────────────────────────────────────
+// Fecha o mês: recebido/gasto, maiores gastos, renda fixa (rendimento do mês
+// por CÁLCULO — determinístico, sem snapshot) e ações (variação do mês via
+// snapshots de fim de mês, descontando aportes e somando vendas do período).
+export function relatorioMensal({mesKey,transacoes=[],investimentos=[],snapIni=null,snapFim=null}){
+  const txs=(transacoes||[]).filter(t=>t&&t.data&&t.data.startsWith(mesKey));
+  const {receitas,despesas}=totaisTransacoes(txs);
+  const gastos=txs.filter(t=>t.tipo==="despesa"&&!CAT_INTERNAS.includes(t.categoria));
+  const porCat={};
+  for(const t of gastos){const c=t.categoria||"Outros";porCat[c]=(porCat[c]||0)+(t.valor||0);}
+  const topCategorias=Object.entries(porCat).map(([categoria,total])=>({categoria,total,pct:despesas>0?total/despesas*100:0})).sort((a,b)=>b.total-a.total).slice(0,5);
+  const topLancamentos=[...gastos].sort((a,b)=>(b.valor||0)-(a.valor||0)).slice(0,5).map(t=>({descricao:t.descricao,valor:t.valor,data:t.data,categoria:t.categoria}));
+  const [y,m]=mesKey.split("-").map(Number);
+  const fimD=new Date(y,m,0), iniD=new Date(y,m-1,0);   // último dia do mês / do anterior
+  const fimStr=_ymdC(fimD);
+  const rf=(investimentos||[]).filter(i=>i&&((i.taxaRF!=null&&i.taxaRF!=="")||i.indice)&&i.data&&i.data<=fimStr).map(i=>{
+    const vFim=calcValorAtualRF(i,fimD), vIni=calcValorAtualRF(i,iniD);
+    const investido=(i.valorInvestido||i.valor||0);
+    return {descricao:i.descricao||i.ticker||"Renda fixa",rendMes:vFim-vIni,acumulado:vFim-investido,valorFim:vFim};
+  });
+  const rfTotalMes=rf.reduce((a,x)=>a+x.rendMes,0);
+  const temBaseAcoes=Array.isArray(snapIni)&&Array.isArray(snapFim);
+  const acoes=[];
+  if(temBaseAcoes){
+    for(const f of snapFim){
+      if(!f||!f.id||!(f.quantidade>0))continue;
+      const ini=snapIni.find(x=>x&&x.id===f.id);
+      const inv=(investimentos||[]).find(x=>x&&x.id===f.id);
+      const aportesMes=(inv?.aportes||[]).filter(a=>a&&a.data&&a.data.startsWith(mesKey)).reduce((s,a)=>s+(a.quantidade||0)*(a.preco||0),0);
+      const vendasMes=(inv?.vendas||[]).filter(v=>v&&v.data&&v.data.startsWith(mesKey)).reduce((s,v)=>s+(v.quantidade||0)*(v.preco||0),0);
+      const nome=f.ticker||f.descricao||"ativo";
+      if(!ini){acoes.push({nome,valorFim:f.valorAtual||0,ganho:null,novo:true});continue;}
+      acoes.push({nome,valorFim:f.valorAtual||0,ganho:(f.valorAtual||0)-(ini.valorAtual||0)-aportesMes+vendasMes});
+    }
+    acoes.sort((a,b)=>Math.abs(b.ganho||0)-Math.abs(a.ganho||0));
+  }
+  const acoesTotalGanho=acoes.reduce((a,x)=>a+(x.ganho||0),0);
+  return {receitas,despesas,saldoMes:receitas-despesas,topCategorias,topLancamentos,rf,rfTotalMes,acoes,acoesTotalGanho,temBaseAcoes};
 }
