@@ -1013,7 +1013,12 @@ ${paginas}
     });
     setOrcForm({});
   }
-  function saveRec(){const r={id:recForm.editId||uid(),tipo:recForm.tipo||"despesa",descricao:recForm.descricao||"",valor:parseFloat(recForm.valor)||0,categoria:recForm.categoria||catD[0],frequencia:recForm.frequencia||"mensal",dia:parseInt(recForm.dia)||1,diaSemana:recForm.diaSemana!=null?parseInt(recForm.diaSemana):1,bancoId:recForm.bancoId||null};setData(d=>({...d,recorrencias:recForm.editId?(d.recorrencias||[]).map(x=>x.id===recForm.editId?r:x):[...(d.recorrencias||[]),r]}));setModalRec(false);setRecForm({});}
+  function saveRec(){
+    const ini=recForm.inicio||null;
+    // Com "primeira parcela" escolhida, dia/dia-da-semana vêm DA DATA (fonte única)
+    const diaDeIni=ini?parseInt(ini.slice(8,10)):null;
+    const dsemDeIni=ini?new Date(ini+"T00:00:00").getDay():null;
+    const r={id:recForm.editId||uid(),tipo:recForm.tipo||"despesa",descricao:recForm.descricao||"",valor:parseFloat(recForm.valor)||0,categoria:recForm.categoria||catD[0],frequencia:recForm.frequencia||"mensal",dia:ini?diaDeIni:(parseInt(recForm.dia)||1),diaSemana:ini?dsemDeIni:(recForm.diaSemana!=null?parseInt(recForm.diaSemana):1),inicio:ini,bancoId:recForm.bancoId||null};setData(d=>({...d,recorrencias:recForm.editId?(d.recorrencias||[]).map(x=>x.id===recForm.editId?r:x):[...(d.recorrencias||[]),r]}));setModalRec(false);setRecForm({});}
   const nfsComNF=data.transacoes.filter(t=>t.nfImg||t.nfManual);
 
   const nfFileRef=useRef(null);
@@ -1149,7 +1154,7 @@ ${paginas}
       <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:8}}>🔄 Recorrentes</p>
       {data.recorrencias.map(r=><div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",background:D.bg3,borderRadius:8,fontSize:12,marginBottom:4}}>
         <span style={{color:D.text2}}>{r.descricao} <span style={{color:D.text3,fontSize:10}}>{r.frequencia==="semanal"?`toda ${["dom","seg","ter","qua","qui","sex","sáb"][r.diaSemana!=null?r.diaSemana:1]}`:r.frequencia==="quinzenal"?`a cada 2 sem · ${["dom","seg","ter","qua","qui","sex","sáb"][r.diaSemana!=null?r.diaSemana:1]}`:`dia ${r.dia}`}</span></span>
-        <div style={{display:"flex",gap:8,alignItems:"center"}}><span style={{fontWeight:700,color:r.tipo==="receita"?D.green:D.red}}>{r.tipo==="receita"?"+":"-"}{fmtM(r.valor,currency)}</span><button onClick={()=>{setRecForm({editId:r.id,tipo:r.tipo,descricao:r.descricao,valor:String(r.valor),categoria:r.categoria,frequencia:r.frequencia||"mensal",dia:r.dia,diaSemana:r.diaSemana,bancoId:r.bancoId});setModalRec(true);}} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:12}}>✏️</button><button onClick={()=>setData(d=>({...d,recorrencias:(d.recorrencias||[]).filter(x=>x.id!==r.id)}))} style={{border:"none",background:"none",cursor:"pointer",color:D.red,fontSize:12}}>🗑</button></div>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}><span style={{fontWeight:700,color:r.tipo==="receita"?D.green:D.red}}>{r.tipo==="receita"?"+":"-"}{fmtM(r.valor,currency)}</span><button onClick={()=>{setRecForm({editId:r.id,tipo:r.tipo,descricao:r.descricao,valor:String(r.valor),categoria:r.categoria,frequencia:r.frequencia||"mensal",dia:r.dia,diaSemana:r.diaSemana,inicio:r.inicio||"",bancoId:r.bancoId});setModalRec(true);}} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:12}}>✏️</button><button onClick={()=>setData(d=>({...d,recorrencias:(d.recorrencias||[]).filter(x=>x.id!==r.id)}))} style={{border:"none",background:"none",cursor:"pointer",color:D.red,fontSize:12}}>🗑</button></div>
       </div>)}
     </Card>}
 
@@ -1243,8 +1248,9 @@ ${paginas}
       <label style={{fontSize:12,color:D.text3}}>Valor ({currency})<input type="number" value={recForm.valor||""} onChange={e=>setRecForm(f=>({...f,valor:e.target.value}))} style={{marginTop:4}}/></label>
       <label style={{fontSize:12,color:D.text3}}>Categoria<select value={recForm.categoria||""} onChange={e=>setRecForm(f=>({...f,categoria:e.target.value}))} style={{marginTop:4}}>{(recForm.tipo==="receita"?catR:catD).map(c=><option key={c}>{c}</option>)}</select></label>
       <label style={{fontSize:12,color:D.text3}}>Frequência<select value={recForm.frequencia||"mensal"} onChange={e=>setRecForm(f=>({...f,frequencia:e.target.value}))} style={{marginTop:4}}><option value="mensal">Mensal</option><option value="semanal">Semanal</option><option value="quinzenal">Quinzenal (a cada 2 semanas)</option></select></label>
-      {(recForm.frequencia||"mensal")==="mensal"&&<label style={{fontSize:12,color:D.text3}}>Dia do mês<input type="number" min="1" max="31" value={recForm.dia||""} onChange={e=>setRecForm(f=>({...f,dia:e.target.value}))} style={{marginTop:4}}/></label>}
-      {(recForm.frequencia==="semanal"||recForm.frequencia==="quinzenal")&&<label style={{fontSize:12,color:D.text3}}>Dia da semana<select value={recForm.diaSemana!=null?recForm.diaSemana:1} onChange={e=>setRecForm(f=>({...f,diaSemana:e.target.value}))} style={{marginTop:4}}>{["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"].map((d,i)=><option key={i} value={i}>{d}</option>)}</select></label>}
+      <label style={{fontSize:12,color:D.text3}}>Primeira parcela (opcional)<input type="date" value={recForm.inicio||""} onChange={e=>setRecForm(f=>({...f,inicio:e.target.value}))} style={{marginTop:4}}/><span style={{fontSize:10,color:D.text3}}>Escolhendo a data, o dia da cobrança vem dela — e nada é lançado antes.</span></label>
+      {!recForm.inicio&&(recForm.frequencia||"mensal")==="mensal"&&<label style={{fontSize:12,color:D.text3}}>Dia do mês<input type="number" min="1" max="31" value={recForm.dia||""} onChange={e=>setRecForm(f=>({...f,dia:e.target.value}))} style={{marginTop:4}}/></label>}
+      {!recForm.inicio&&(recForm.frequencia==="semanal"||recForm.frequencia==="quinzenal")&&<label style={{fontSize:12,color:D.text3}}>Dia da semana<select value={recForm.diaSemana!=null?recForm.diaSemana:1} onChange={e=>setRecForm(f=>({...f,diaSemana:e.target.value}))} style={{marginTop:4}}>{["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"].map((d,i)=><option key={i} value={i}>{d}</option>)}</select></label>}
       {recForm.frequencia==="quinzenal"&&<p style={{fontSize:11,color:D.text3,marginTop:4,marginBottom:0}}>📅 A cada 2 semanas (uma sim, outra não), no dia escolhido. A 1ª ocorrência define o ritmo.</p>}
       {data.bancos.length>0&&<label style={{fontSize:12,color:D.text3}}>Banco<select value={recForm.bancoId||""} onChange={e=>setRecForm(f=>({...f,bancoId:e.target.value}))} style={{marginTop:4}}><option value="">Nenhum</option>{data.bancos.map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}</select></label>}
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn outline color={D.text3} onClick={()=>setModalRec(false)}>Cancelar</Btn><Btn color={D.purple} onClick={saveRec}>Salvar</Btn></div>
@@ -3944,7 +3950,8 @@ function AppInner(){
     prof.recorrencias.forEach(rec=>{
       const datasLancadas=(prof.transacoes||[]).filter(t=>t.recorrenciaId===rec.id).map(t=>t.data);
       const dataLanc=proximoLancamentoRec(rec,datasLancadas,hojeD);
-      if(dataLanc){setData(d=>({...d,transacoes:[...d.transacoes,{id:uid(),tipo:rec.tipo,descricao:rec.descricao,valor:rec.valor,categoria:rec.categoria,data:dataLanc,bancoId:rec.bancoId||null,recorrenciaId:rec.id}]}));}
+      // Respeita a "primeira parcela": nada é lançado antes de rec.inicio
+      if(dataLanc&&(!rec.inicio||dataLanc>=rec.inicio)){setData(d=>({...d,transacoes:[...d.transacoes,{id:uid(),tipo:rec.tipo,descricao:rec.descricao,valor:rec.valor,categoria:rec.categoria,data:dataLanc,bancoId:rec.bancoId||null,recorrenciaId:rec.id}]}));}
     });
   },[profileId,session]);
 
