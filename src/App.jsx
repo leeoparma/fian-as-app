@@ -9,7 +9,7 @@ import {
   calcSaldos as calcSaldosPure, calcDividas as calcDividasPure, totaisPorPessoa as totaisPorPessoaPure,
   salarioMensal, converteMoeda, taxaMensalSim, simularJuros,
   semFotos, mesclarFotos, projetarFluxo, addDias, marcarDuplicatas, montarAgendaPush,
-  compraAcao, vendaAcao, pendentesRecorrenciaSW,
+  compraAcao, vendaAcao, pendentesRecorrenciaSW, relatorioMensal,
 } from "./calc.mjs";
 
 // Chave pública VAPID (par gerado para este app; a privada é secret no Cloudflare)
@@ -3476,6 +3476,7 @@ function RelatoriosTab({data,setData,currency}){
   const [catFiltro,setCatFiltro]=useState("");             // "" = todas
   const [dDe,setDDe]=useState("");const [dAte,setDAte]=useState("");  // intervalo de datas
   const [aiResult,setAiResult]=useState(null);
+  const [relMes,setRelMes]=useState("");
   const [aiLoading,setAiLoading]=useState(false);
   const [aiErro,setAiErro]=useState("");
 
@@ -3600,6 +3601,49 @@ tbody tr:nth-child(even){background:#fafbfc}
   }
 
   return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
+    {(()=>{ // 📊 Relatório mensal — matemática em calc.mjs, testada
+      const hist=data.historico||[];
+      const hj=new Date();const atualKey=`${hj.getFullYear()}-${String(hj.getMonth()+1).padStart(2,"0")}`;
+      const opcoes=[...new Set([...hist.map(h=>h.mes),...((data.transacoes||[]).map(t=>(t.data||"").slice(0,7)))])].filter(mk=>mk&&mk<atualKey).sort().reverse().slice(0,12);
+      if(!opcoes.length)return null;
+      const mk=opcoes.includes(relMes)?relMes:opcoes[0];
+      const [ry,rm]=mk.split("-").map(Number);
+      const prevKey=`${rm===1?ry-1:ry}-${String(rm===1?12:rm-1).padStart(2,"0")}`;
+      const snapFim=hist.find(h=>h.mes===mk)?.ativos||null;
+      const snapIni=hist.find(h=>h.mes===prevKey)?.ativos||null;
+      const R=relatorioMensal({mesKey:mk,transacoes:data.transacoes,investimentos:data.investimentos,snapIni,snapFim});
+      const temAlgo=R.receitas>0||R.despesas>0||R.rf.length>0||R.acoes.length>0;
+      return <Card>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:8}}>
+          <Tip text="📊 O fechamento do mês: quanto entrou e saiu, seus maiores gastos, o rendimento da renda fixa (do mês e desde o início de cada aplicação) e a variação real das ações — já descontando aportes e somando vendas do período. A comparação de ações usa a foto de fim de mês da carteira; o primeiro mês cria a base."><p style={{fontSize:14,fontWeight:700,color:D.text,margin:0}}>📊 Relatório mensal</p></Tip>
+          <select value={mk} onChange={e=>setRelMes(e.target.value)} style={{width:"auto",padding:"5px 8px",fontSize:12}}>{opcoes.map(o=>{const[oy,om]=o.split("-").map(Number);return <option key={o} value={o}>{MESES[om-1]} {oy}</option>;})}</select>
+        </div>
+        {!temAlgo&&<p style={{fontSize:12,color:D.text3}}>Sem movimentações registradas neste mês.</p>}
+        {temAlgo&&<>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:8,marginBottom:10}}>
+          <div style={{background:D.bg3,borderRadius:8,padding:"8px 10px"}}><p style={{fontSize:10,color:D.text3,margin:0}}>RECEBIDO</p><p style={{fontSize:15,fontWeight:700,color:D.green,margin:"2px 0 0"}}>{fmtM(R.receitas,currency)}</p></div>
+          <div style={{background:D.bg3,borderRadius:8,padding:"8px 10px"}}><p style={{fontSize:10,color:D.text3,margin:0}}>GASTO</p><p style={{fontSize:15,fontWeight:700,color:D.red,margin:"2px 0 0"}}>{fmtM(R.despesas,currency)}</p></div>
+          <div style={{background:D.bg3,borderRadius:8,padding:"8px 10px"}}><p style={{fontSize:10,color:D.text3,margin:0}}>SALDO DO MÊS</p><p style={{fontSize:15,fontWeight:700,color:R.saldoMes>=0?D.green:D.red,margin:"2px 0 0"}}>{R.saldoMes>=0?"+":""}{fmtM(R.saldoMes,currency)}</p></div>
+        </div>
+        {R.topCategorias.length>0&&<div style={{marginBottom:10}}>
+          <p style={{fontSize:11,fontWeight:700,color:D.text2,margin:"0 0 4px"}}>MAIORES GASTOS POR CATEGORIA</p>
+          {R.topCategorias.map(c=><div key={c.categoria} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0"}}><span style={{color:D.text2}}>{c.categoria} <span style={{color:D.text3,fontSize:10}}>{c.pct.toFixed(0)}%</span></span><span style={{color:D.text,fontWeight:600}}>{fmtM(c.total,currency)}</span></div>)}
+        </div>}
+        {R.topLancamentos.length>0&&<div style={{marginBottom:10}}>
+          <p style={{fontSize:11,fontWeight:700,color:D.text2,margin:"0 0 4px"}}>MAIORES LANÇAMENTOS</p>
+          {R.topLancamentos.map((t,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0"}}><span style={{color:D.text2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"65%"}}>{t.descricao} <span style={{color:D.text3,fontSize:10}}>{(t.data||"").slice(8,10)}/{(t.data||"").slice(5,7)}</span></span><span style={{color:D.text,fontWeight:600}}>{fmtM(t.valor,currency)}</span></div>)}
+        </div>}
+        {R.rf.length>0&&<div style={{marginBottom:10}}>
+          <p style={{fontSize:11,fontWeight:700,color:D.text2,margin:"0 0 4px"}}>RENDA FIXA <span style={{color:R.rfTotalMes>=0?D.green:D.red}}>{R.rfTotalMes>=0?"+":""}{fmtM(R.rfTotalMes,currency)} no mês</span></p>
+          {R.rf.map((x,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0"}}><span style={{color:D.text2}}>{x.descricao}</span><span style={{color:D.text}}><b style={{color:D.green}}>+{fmtM(x.rendMes,currency)}</b> <span style={{color:D.text3,fontSize:10}}>· acum. {fmtM(x.acumulado,currency)}</span></span></div>)}
+        </div>}
+        {(R.acoes.length>0||!R.temBaseAcoes)&&<div>
+          <p style={{fontSize:11,fontWeight:700,color:D.text2,margin:"0 0 4px"}}>AÇÕES E FUNDOS {R.temBaseAcoes&&R.acoes.some(a=>a.ganho!=null)&&<span style={{color:R.acoesTotalGanho>=0?D.green:D.red}}>{R.acoesTotalGanho>=0?"+":""}{fmtM(R.acoesTotalGanho,currency)} no mês</span>}</p>
+          {!R.temBaseAcoes&&<p style={{fontSize:11,color:D.text3,margin:0}}>Primeira base sendo criada — a variação mensal das ações aparece a partir do próximo mês fechado.</p>}
+          {R.acoes.slice(0,8).map((a,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0"}}><span style={{color:D.text2}}>{a.nome}{a.novo?<span style={{color:D.text3,fontSize:10}}> · novo no mês</span>:null}</span>{a.ganho==null?<span style={{color:D.text3,fontSize:11}}>{fmtM(a.valorFim,currency)}</span>:<span style={{fontWeight:600,color:a.ganho>=0?D.green:D.red}}>{a.ganho>=0?"+":""}{fmtM(a.ganho,currency)}</span>}</div>)}
+        </div>}
+        </>}
+      </Card>;})()}
     <Card>
       <p style={{fontSize:14,fontWeight:700,color:D.text,marginBottom:10}}>📄 Relatórios</p>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8}}>
@@ -3973,8 +4017,8 @@ function AppInner(){
       const pat=Math.round((tB+tI)*100)/100;
       const hist=p.historico||[];
       const existente=hist.find(h=>h.mes===mesKey);
-      if(existente&&Math.abs((existente.patrimonio||0)-pat)<0.01){snapDone.current=true;return;}
-      const novoHist=[...hist.filter(h=>h.mes!==mesKey),{mes:mesKey,patrimonio:pat,bancos:Math.round(tB*100)/100,investimentos:Math.round(tI*100)/100}].sort((a,b)=>a.mes.localeCompare(b.mes)).slice(-24);
+      if(existente&&existente.ativos&&Math.abs((existente.patrimonio||0)-pat)<0.01){snapDone.current=true;return;}
+      const novoHist=[...hist.filter(h=>h.mes!==mesKey),{mes:mesKey,patrimonio:pat,bancos:Math.round(tB*100)/100,investimentos:Math.round(tI*100)/100,ativos:(p.investimentos||[]).map(i=>({id:i.id,ticker:i.ticker||null,descricao:i.descricao||null,quantidade:i.quantidade||null,valorAtual:Math.round((i.valorAtual||i.valorInvestido||i.valor||0)*100)/100}))}].sort((a,b)=>a.mes.localeCompare(b.mes)).slice(-24);
       setData(d=>({...d,historico:novoHist}));
       snapDone.current=true;
     },3000);
