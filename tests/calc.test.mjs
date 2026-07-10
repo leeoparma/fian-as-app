@@ -13,7 +13,7 @@ import {
   calcSaldos,calcDividas,totaisPorPessoa,
   salarioMensal,converteMoeda,taxaMensalSim,simularJuros,
   semFotos,mesclarFotos,projetarFluxo,ocorrenciasRecorrencia,addDias,marcarDuplicatas,montarAgendaPush,compraAcao,vendaAcao,
-  ocorrenciasSWAte,pendentesRecorrenciaSW,relatorioMensal,
+  ocorrenciasSWAte,pendentesRecorrenciaSW,relatorioMensal,compararMeses,
 } from "../src/calc.mjs";
 
 const aprox=(a,b,tol=0.01)=>assert.ok(Math.abs(a-b)<=tol,`esperado ~${b}, veio ${a}`);
@@ -495,4 +495,47 @@ test("agenda push: dia 1 do próximo mês entra na janela com o relatório", ()=
 test("agenda push: no próprio dia 1 o aviso do relatório sai hoje", ()=>{
   const ev=montarAgendaPush({hojeStr:"2026-08-01",dias:7});
   assert.ok(ev.some(e=>e.notify_on==="2026-08-01"&&e.titulo.includes("📊")));
+});
+
+// ── Relatório v2: fixos/variáveis, poupança e comparação mensal ─────────────
+test("relatório v2: fixos (recorrentes) vs variáveis e taxa de poupança", ()=>{
+  const txs=[
+    {tipo:"receita",valor:8000,categoria:"Salário",data:"2026-06-05"},
+    {tipo:"despesa",valor:1600,categoria:"Moradia",data:"2026-06-01",recorrenciaId:"r1"},
+    {tipo:"despesa",valor:700,categoria:"Mercado",data:"2026-06-10"},
+  ];
+  const R=relatorioMensal({mesKey:"2026-06",transacoes:txs});
+  aprox(R.fixos,1600);aprox(R.variaveis,700);
+  aprox(R.poupancaPct,(8000-2300)/8000*100,0.01);
+});
+test("relatório v2: sem receita, poupança é null (não divide por zero)", ()=>{
+  const R=relatorioMensal({mesKey:"2026-06",transacoes:[{tipo:"despesa",valor:100,categoria:"X",data:"2026-06-01"}]});
+  assert.equal(R.poupancaPct,null);
+});
+test("comparação mensal: deltas e percentuais certos", ()=>{
+  const jun=relatorioMensal({mesKey:"2026-06",transacoes:[
+    {tipo:"receita",valor:8000,categoria:"Salário",data:"2026-06-05"},
+    {tipo:"despesa",valor:2000,categoria:"Mercado",data:"2026-06-10"}]});
+  const jul=relatorioMensal({mesKey:"2026-07",transacoes:[
+    {tipo:"receita",valor:8800,categoria:"Salário",data:"2026-07-05"},
+    {tipo:"despesa",valor:1500,categoria:"Mercado",data:"2026-07-10"}]});
+  const c=compararMeses(jul,jun);
+  assert.equal(c.temBase,true);
+  aprox(c.receitas.delta,800);aprox(c.receitas.pct,10);
+  aprox(c.despesas.delta,-500);aprox(c.despesas.pct,-25);
+  aprox(c.categorias["Mercado"].pct,-25);
+});
+test("comparação mensal: categoria nova no mês fica sem percentual (pct null)", ()=>{
+  const ant=relatorioMensal({mesKey:"2026-06",transacoes:[{tipo:"despesa",valor:100,categoria:"A",data:"2026-06-01"}]});
+  const atu=relatorioMensal({mesKey:"2026-07",transacoes:[{tipo:"despesa",valor:50,categoria:"NOVA",data:"2026-07-01"}]});
+  const c=compararMeses(atu,ant);
+  assert.equal(c.categorias["NOVA"].pct,null);
+  aprox(c.categorias["NOVA"].delta,50);
+});
+test("comparação mensal: sem mês anterior, temBase é false e deltas contra zero", ()=>{
+  const atu=relatorioMensal({mesKey:"2026-07",transacoes:[{tipo:"receita",valor:100,categoria:"S",data:"2026-07-01"}]});
+  const c=compararMeses(atu,null);
+  assert.equal(c.temBase,false);
+  aprox(c.receitas.delta,100);
+  assert.equal(c.receitas.pct,null);
 });
