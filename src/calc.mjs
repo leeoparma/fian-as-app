@@ -289,3 +289,38 @@ export function vendaAcao(qtdAtual,pm,qtdVendida,preco,corretagem){
   const custoVendido=(pm||0)*q;
   return {qtdRestante:(qtdAtual||0)-q,recebidoBruto,recebidoLiquido,custoVendido,resultado:recebidoBruto-custoVendido,vendeuTudo:((qtdAtual||0)-q)<=1e-9};
 }
+
+// ── Splitwise: despesas recorrentes ──────────────────────────────────────────
+// Datas de ocorrência de uma recorrência, do início até hoje (inclusive).
+// semanal = a cada 7 dias · quinzenal = a cada 14 · mensal = mesmo dia (com
+// clamp de fim de mês: dia 31 vira 28/29/30 quando o mês não tem 31).
+export function ocorrenciasSWAte(inicio,freq,hojeStr,maxIter=600){
+  const out=[];
+  if(!inicio||!hojeStr||inicio>hojeStr)return out;
+  const [iy,im,id]=inicio.split("-").map(Number);
+  if(freq==="mensal"){
+    for(let k=0;k<maxIter;k++){
+      const d=_clampDia(iy,im-1+k,id);
+      const s=_ymdC(d);
+      if(s>hojeStr)break;
+      out.push(s);
+    }
+  }else{
+    const passo=freq==="quinzenal"?14:7;
+    let cur=inicio;
+    for(let k=0;k<maxIter;k++){
+      if(cur>hojeStr)break;
+      out.push(cur);
+      cur=addDias(cur,passo);
+    }
+  }
+  return out;
+}
+// Quais ocorrências ainda NÃO viraram despesa (chave: recorrenciaId|data).
+// É o que impede lançamento duplicado quando duas pessoas abrem o app.
+export function pendentesRecorrenciaSW(rec,hojeStr,jaLancadas){
+  if(!rec||!rec.id||rec.pausada)return [];
+  const feitas=jaLancadas instanceof Set?jaLancadas:new Set(jaLancadas||[]);
+  return ocorrenciasSWAte(rec.inicio,rec.frequencia||"mensal",hojeStr)
+    .filter(d=>!feitas.has(`${rec.id}|${d}`));
+}
