@@ -422,3 +422,21 @@ test("pendentes: sem nada lançado devolve todas as vencidas", ()=>{
   const rec={id:"r2",inicio:"2026-06-10",frequencia:"mensal"};
   assert.deepEqual(pendentesRecorrenciaSW(rec,"2026-08-09",new Set()),["2026-06-10","2026-07-10"]);
 });
+
+// ── Recorrência dos Lançamentos: primeira parcela (inicio) ───────────────────
+test("recorrência com início futuro: nada projetado antes da primeira parcela", ()=>{
+  const oc=ocorrenciasRecorrencia({frequencia:"mensal",inicio:"2026-08-15"},"2026-07-09",90);
+  assert.deepEqual(oc,["2026-08-15","2026-09-15"]);
+});
+test("recorrência quinzenal com âncora: exata de 14 em 14 a partir do início", ()=>{
+  const oc=ocorrenciasRecorrencia({frequencia:"quinzenal",inicio:"2026-07-10"},"2026-07-09",30);
+  assert.deepEqual(oc,["2026-07-10","2026-07-24","2026-08-07"]);
+});
+test("recorrência semanal com âncora: mantém o dia da semana do início", ()=>{
+  const oc=ocorrenciasRecorrencia({frequencia:"semanal",inicio:"2026-07-06"},"2026-07-09",14);
+  assert.deepEqual(oc,["2026-07-13","2026-07-20"]); // segundas
+});
+test("recorrência SEM início (legado): comportamento antigo preservado", ()=>{
+  const oc=ocorrenciasRecorrencia({frequencia:"mensal",dia:10},"2026-07-04",90);
+  assert.ok(oc.includes("2026-07-10")&&oc.includes("2026-08-10"));
+});
