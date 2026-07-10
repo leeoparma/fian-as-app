@@ -13,7 +13,7 @@ import {
   calcSaldos,calcDividas,totaisPorPessoa,
   salarioMensal,converteMoeda,taxaMensalSim,simularJuros,
   semFotos,mesclarFotos,projetarFluxo,ocorrenciasRecorrencia,addDias,marcarDuplicatas,montarAgendaPush,compraAcao,vendaAcao,
-  ocorrenciasSWAte,pendentesRecorrenciaSW,
+  ocorrenciasSWAte,pendentesRecorrenciaSW,relatorioMensal,
 } from "../src/calc.mjs";
 
 const aprox=(a,b,tol=0.01)=>assert.ok(Math.abs(a-b)<=tol,`esperado ~${b}, veio ${a}`);
@@ -439,4 +439,60 @@ test("recorrência semanal com âncora: mantém o dia da semana do início", ()=
 test("recorrência SEM início (legado): comportamento antigo preservado", ()=>{
   const oc=ocorrenciasRecorrencia({frequencia:"mensal",dia:10},"2026-07-04",90);
   assert.ok(oc.includes("2026-07-10")&&oc.includes("2026-08-10"));
+});
+
+// ── Relatório mensal ─────────────────────────────────────────────────────────
+const txsJun=[
+  {tipo:"receita",valor:8000,categoria:"Salário",data:"2026-06-05"},
+  {tipo:"despesa",valor:1600,categoria:"Moradia",descricao:"Aluguel",data:"2026-06-01"},
+  {tipo:"despesa",valor:400,categoria:"Mercado",descricao:"Woolworths",data:"2026-06-10"},
+  {tipo:"despesa",valor:300,categoria:"Mercado",descricao:"Coles",data:"2026-06-20"},
+  {tipo:"despesa",valor:500,categoria:"Transferência",descricao:"interna",data:"2026-06-15"},
+  {tipo:"despesa",valor:999,categoria:"Mercado",descricao:"fora do mês",data:"2026-07-02"},
+];
+test("relatório: totais do mês certos (internas e outros meses fora)", ()=>{
+  const R=relatorioMensal({mesKey:"2026-06",transacoes:txsJun});
+  aprox(R.receitas,8000);aprox(R.despesas,2300);aprox(R.saldoMes,5700);
+});
+test("relatório: top categorias ordenado com percentual", ()=>{
+  const R=relatorioMensal({mesKey:"2026-06",transacoes:txsJun});
+  assert.equal(R.topCategorias[0].categoria,"Moradia");
+  aprox(R.topCategorias[1].total,700); // Mercado somado
+  aprox(R.topCategorias[0].pct,1600/2300*100,0.01);
+  assert.equal(R.topLancamentos[0].descricao,"Aluguel");
+});
+test("relatório RF: rendimento do mês + acumulado (prefixado, determinístico)", ()=>{
+  const inv={indice:"Prefixado",taxaRF:"12",valorInvestido:10000,data:"2026-01-01",descricao:"CDB"};
+  const R=relatorioMensal({mesKey:"2026-06",transacoes:[],investimentos:[inv]});
+  const vIni=calcValorAtualRF(inv,new Date(2026,4,31)), vFim=calcValorAtualRF(inv,new Date(2026,5,30));
+  aprox(R.rf[0].rendMes,vFim-vIni,0.01);
+  aprox(R.rf[0].acumulado,vFim-10000,0.01);
+  assert.ok(R.rf[0].rendMes>90&&R.rf[0].rendMes<105); // ~12%a.a. ≈ ~0,95%/mês
+});
+test("relatório ações: ganho do mês desconta aporte e soma venda", ()=>{
+  const inv={id:"a1",ticker:"NAB",aportes:[{data:"2026-06-10",quantidade:5,preco:40}],vendas:[{data:"2026-06-20",quantidade:2,preco:42}]};
+  const R=relatorioMensal({mesKey:"2026-06",investimentos:[inv],
+    snapIni:[{id:"a1",ticker:"NAB",quantidade:20,valorAtual:800}],
+    snapFim:[{id:"a1",ticker:"NAB",quantidade:23,valorAtual:966}]});
+  // 966 − 800 − 200(aporte) + 84(venda) = 50 de valorização real
+  aprox(R.acoes[0].ganho,50);
+  assert.equal(R.temBaseAcoes,true);
+});
+test("relatório ações: ativo novo no mês fica sem base (ganho null)", ()=>{
+  const R=relatorioMensal({mesKey:"2026-06",investimentos:[],snapIni:[],snapFim:[{id:"n1",ticker:"BHP",quantidade:10,valorAtual:400}]});
+  assert.equal(R.acoes[0].ganho,null);
+  assert.equal(R.acoes[0].novo,true);
+});
+test("relatório: sem snapshots, seção de ações fica vazia e sinalizada", ()=>{
+  const R=relatorioMensal({mesKey:"2026-06",transacoes:txsJun});
+  assert.equal(R.temBaseAcoes,false);
+  assert.equal(R.acoes.length,0);
+});
+test("agenda push: dia 1 do próximo mês entra na janela com o relatório", ()=>{
+  const ev=montarAgendaPush({hojeStr:"2026-07-28",dias:7});
+  assert.ok(ev.some(e=>e.notify_on==="2026-08-01"&&e.titulo.includes("📊")));
+});
+test("agenda push: no próprio dia 1 o aviso do relatório sai hoje", ()=>{
+  const ev=montarAgendaPush({hojeStr:"2026-08-01",dias:7});
+  assert.ok(ev.some(e=>e.notify_on==="2026-08-01"&&e.titulo.includes("📊")));
 });
