@@ -3617,6 +3617,7 @@ tbody tr:nth-child(even){background:#fafbfc}
       const cmp=compararMeses(R,Rprev); // testado em calc.mjs
       const patFim=hist.find(h=>h.mes===mk)?.patrimonio;
       const patIni=hist.find(h=>h.mes===prevKey)?.patrimonio;
+      const temAlgo=R.receitas>0||R.despesas>0||R.rf.length>0||R.acoes.length>0;
       const seta=(v,invertido)=>{ // invertido: p/ gasto, subir é ruim (vermelho)
         if(v==null)return null;
         const bom=invertido?v<0:v>0;
