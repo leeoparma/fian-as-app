@@ -13,6 +13,7 @@ import {
   calcSaldos,calcDividas,totaisPorPessoa,
   salarioMensal,converteMoeda,taxaMensalSim,simularJuros,
   semFotos,mesclarFotos,projetarFluxo,ocorrenciasRecorrencia,addDias,marcarDuplicatas,montarAgendaPush,compraAcao,vendaAcao,
+  ocorrenciasSWAte,pendentesRecorrenciaSW,
 } from "../src/calc.mjs";
 
 const aprox=(a,b,tol=0.01)=>assert.ok(Math.abs(a-b)<=tol,`esperado ~${b}, veio ${a}`);
@@ -389,4 +390,35 @@ test("compra sem corretagem = preço médio clássico (compatível com aporteMed
 test("venda maior que a posição: vende só o que existe", ()=>{
   const r=vendaAcao(5,10,99,10,0);
   aprox(r.qtdRestante,0);aprox(r.recebidoBruto,50);
+});
+
+// ── Splitwise recorrente ─────────────────────────────────────────────────────
+test("recorrência SW semanal: do início até hoje, de 7 em 7", ()=>{
+  const d=ocorrenciasSWAte("2026-07-01","semanal","2026-07-22");
+  assert.deepEqual(d,["2026-07-01","2026-07-08","2026-07-15","2026-07-22"]);
+});
+test("recorrência SW quinzenal: de 14 em 14 dias", ()=>{
+  const d=ocorrenciasSWAte("2026-07-01","quinzenal","2026-08-01");
+  assert.deepEqual(d,["2026-07-01","2026-07-15","2026-07-29"]);
+});
+test("recorrência SW mensal: mesmo dia, vira o ano", ()=>{
+  const d=ocorrenciasSWAte("2026-11-05","mensal","2027-01-10");
+  assert.deepEqual(d,["2026-11-05","2026-12-05","2027-01-05"]);
+});
+test("recorrência SW mensal dia 31: clampa fevereiro (não pula o mês)", ()=>{
+  const d=ocorrenciasSWAte("2026-01-31","mensal","2026-03-31");
+  assert.deepEqual(d,["2026-01-31","2026-02-28","2026-03-31"]);
+});
+test("recorrência SW: início no futuro não gera nada", ()=>{
+  assert.deepEqual(ocorrenciasSWAte("2026-08-01","mensal","2026-07-09"),[]);
+});
+test("pendentes: pula as já lançadas (anti-duplicata) e respeita pausada", ()=>{
+  const rec={id:"r1",inicio:"2026-07-01",frequencia:"semanal"};
+  const feitas=new Set(["r1|2026-07-01","r1|2026-07-08"]);
+  assert.deepEqual(pendentesRecorrenciaSW(rec,"2026-07-15",feitas),["2026-07-15"]);
+  assert.deepEqual(pendentesRecorrenciaSW({...rec,pausada:true},"2026-07-15",new Set()),[]);
+});
+test("pendentes: sem nada lançado devolve todas as vencidas", ()=>{
+  const rec={id:"r2",inicio:"2026-06-10",frequencia:"mensal"};
+  assert.deepEqual(pendentesRecorrenciaSW(rec,"2026-08-09",new Set()),["2026-06-10","2026-07-10"]);
 });
