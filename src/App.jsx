@@ -899,6 +899,7 @@ function BancosTab({data,setData,currency}){
 }
 
 // ── Lançamentos Tab ───────────────────────────────────────────────────────────
+const ordCat=a=>[...a].sort((x,y)=>x.localeCompare(y,"pt-BR"));
 function LancamentosTab({data,setData,currency,mes,profileId}){
   const [modal,setModal]=useState(null);const [form,setForm]=useState({});
   const [showNF,setShowNF]=useState(false);const [showExtratoNF,setShowExtratoNF]=useState(false);
@@ -909,6 +910,7 @@ function LancamentosTab({data,setData,currency,mes,profileId}){
   const [quickOrigem,setQuickOrigem]=useState("Conta Corrente");
   const [quickCat,setQuickCat]=useState("Outros");
   const [quickTipo,setQuickTipo]=useState("despesa");
+  const [quickDesc,setQuickDesc]=useState("");const [quickBanco,setQuickBanco]=useState("");
   const [impItens,setImpItens]=useState(null);
   const [impBanco,setImpBanco]=useState("");
   const [nfView,setNfView]=useState(null);
@@ -959,13 +961,13 @@ ${paginas}
   function saveQuick(){
     const v=parseFloat(quickValor);if(!v)return;
     if(data.bancos.length===0){alert("Cadastre um banco primeiro!");return;}
-    const banco=data.bancos[0];
-    const t={id:uid(),tipo:quickTipo,descricao:`${quickOrigem}`,valor:v,
+    const banco=data.bancos.find(b=>b.id===quickBanco)||data.bancos[0];
+    const t={id:uid(),tipo:quickTipo,descricao:(quickDesc.trim()||`${quickOrigem}`),valor:v,
       categoria:quickCat||(quickTipo==="receita"?catR[0]:catD[0]),
       data:hoje.toISOString().slice(0,10),bancoId:banco.id,
       nfImg:null,nfManual:false};
     setData(d=>({...d,transacoes:[...d.transacoes,t]}));
-    setQuickValor("");
+    setQuickValor("");setQuickDesc("");
   }
 
   function saveT(){
@@ -1127,12 +1129,18 @@ ${paginas}
           </select>
         </label>
       </div>
+      <label style={{fontSize:12,color:D.text3,display:"block",marginBottom:8}}>Descrição (opcional)
+        <input value={quickDesc} onChange={e=>setQuickDesc(e.target.value)} onKeyDown={e=>e.key==="Enter"&&saveQuick()} placeholder="Ex: Woolworths, Uber…" style={{marginTop:4}}/>
+      </label>
       <label style={{fontSize:12,color:D.text3,display:"block",marginBottom:8}}>Categoria
         <select value={quickCat} onChange={e=>setQuickCat(e.target.value)} style={{marginTop:4}}>
-          {(quickTipo==="receita"?catR:catD).map(c=><option key={c}>{c}</option>)}
+          {ordCat(quickTipo==="receita"?catR:catD).map(c=><option key={c}>{c}</option>)}
         </select>
       </label>
-      {data.bancos.length>0&&<p style={{fontSize:10,color:D.text3,marginBottom:6}}>→ Lançado em: <strong style={{color:D.blue}}>{data.bancos[0].nome}</strong> · {hoje.toLocaleDateString("pt-BR")}</p>}
+      {data.bancos.length>0&&<label style={{fontSize:12,color:D.text3,display:"block",marginBottom:8}}>Banco
+        <select value={quickBanco||data.bancos[0].id} onChange={e=>setQuickBanco(e.target.value)} style={{marginTop:4}}>{data.bancos.map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}</select>
+        <span style={{fontSize:10,color:D.text3}}>data de hoje: {hoje.toLocaleDateString("pt-BR")}</span>
+      </label>}
       <Btn onClick={saveQuick} color={D.gold} style={{width:"100%"}}>Lançar agora</Btn>
     </Card>
 
@@ -1247,7 +1255,7 @@ ${paginas}
       <label style={{fontSize:12,color:D.text3}}>Tipo<select value={form.tipo||"despesa"} onChange={e=>setForm(f=>({...f,tipo:e.target.value}))} style={{marginTop:4}}><option value="despesa">Despesa</option><option value="receita">Receita</option></select></label>
       <label style={{fontSize:12,color:D.text3}}>Descrição<input value={form.descricao||""} onChange={e=>setForm(f=>({...f,descricao:e.target.value}))} style={{marginTop:4}}/></label>
       <label style={{fontSize:12,color:D.text3}}>Valor ({currency})<input type="number" value={form.valor||""} onChange={e=>setForm(f=>({...f,valor:e.target.value}))} style={{marginTop:4}}/></label>
-      <label style={{fontSize:12,color:D.text3}}>Categoria<select value={form.categoria||""} onChange={e=>setForm(f=>({...f,categoria:e.target.value}))} style={{marginTop:4}}>{(form.tipo==="receita"?catR:catD).map(c=><option key={c}>{c}</option>)}</select></label>
+      <label style={{fontSize:12,color:D.text3}}>Categoria<select value={form.categoria||""} onChange={e=>setForm(f=>({...f,categoria:e.target.value}))} style={{marginTop:4}}>{ordCat(form.tipo==="receita"?catR:catD).map(c=><option key={c}>{c}</option>)}</select></label>
       <div style={{display:"flex",gap:6}}><input placeholder="Nova categoria..." value={form.tipo==="receita"?newCatR:newCatD} onChange={e=>form.tipo==="receita"?setNewCatR(e.target.value):setNewCatD(e.target.value)} style={{flex:1}}/><Btn sm onClick={()=>{addCat(form.tipo==="receita"?"R":"D",form.tipo==="receita"?newCatR:newCatD);form.tipo==="receita"?setNewCatR(""):setNewCatD("");}}>+ Add</Btn></div>
       <label style={{fontSize:12,color:D.text3}}>Data<input type="date" value={form.data||hoje.toISOString().slice(0,10)} onChange={e=>setForm(f=>({...f,data:e.target.value}))} style={{marginTop:4}}/></label>
       {profileId==="br"&&(form.tipo||"despesa")!=="receita"&&!form.editId&&<label style={{fontSize:12,color:D.text3}}>Parcelas (cartão BR)
@@ -1288,7 +1296,7 @@ ${paginas}
         <div style={{borderTop:`1px solid ${D.border}`,margin:"12px 0 0"}}/>
       </div>}
       <p style={{fontSize:12,color:D.text2,fontWeight:600,margin:"0 0 6px"}}>{orcForm.editId?"Editar orçamento":"Novo orçamento"}</p>
-      <label style={{fontSize:12,color:D.text3}}>Categoria<select value={orcForm.categoria||""} onChange={e=>setOrcForm(f=>({...f,categoria:e.target.value}))} style={{marginTop:4}}><option value="">Selecione...</option>{catD.map(c=><option key={c}>{c}</option>)}</select></label>
+      <label style={{fontSize:12,color:D.text3}}>Categoria<select value={orcForm.categoria||""} onChange={e=>setOrcForm(f=>({...f,categoria:e.target.value}))} style={{marginTop:4}}><option value="">Selecione...</option>{ordCat(catD).map(c=><option key={c}>{c}</option>)}</select></label>
       <label style={{fontSize:12,color:D.text3,marginTop:8,display:"block"}}>Limite ({currency})<input type="number" value={orcForm.valor||""} onChange={e=>setOrcForm(f=>({...f,valor:e.target.value}))} style={{marginTop:4}}/></label>
       <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:10}}>
         {orcForm.editId&&<Btn outline color={D.text3} onClick={()=>setOrcForm({})}>Cancelar edição</Btn>}
@@ -1300,7 +1308,7 @@ ${paginas}
       <label style={{fontSize:12,color:D.text3}}>Tipo<select value={recForm.tipo||"despesa"} onChange={e=>setRecForm(f=>({...f,tipo:e.target.value}))} style={{marginTop:4}}><option value="despesa">Despesa</option><option value="receita">Receita</option></select></label>
       <label style={{fontSize:12,color:D.text3}}>Descrição<input value={recForm.descricao||""} onChange={e=>setRecForm(f=>({...f,descricao:e.target.value}))} style={{marginTop:4}}/></label>
       <label style={{fontSize:12,color:D.text3}}>Valor ({currency})<input type="number" value={recForm.valor||""} onChange={e=>setRecForm(f=>({...f,valor:e.target.value}))} style={{marginTop:4}}/></label>
-      <label style={{fontSize:12,color:D.text3}}>Categoria<select value={recForm.categoria||""} onChange={e=>setRecForm(f=>({...f,categoria:e.target.value}))} style={{marginTop:4}}>{(recForm.tipo==="receita"?catR:catD).map(c=><option key={c}>{c}</option>)}</select></label>
+      <label style={{fontSize:12,color:D.text3}}>Categoria<select value={recForm.categoria||""} onChange={e=>setRecForm(f=>({...f,categoria:e.target.value}))} style={{marginTop:4}}>{ordCat(recForm.tipo==="receita"?catR:catD).map(c=><option key={c}>{c}</option>)}</select></label>
       <label style={{fontSize:12,color:D.text3}}>Frequência<select value={recForm.frequencia||"mensal"} onChange={e=>setRecForm(f=>({...f,frequencia:e.target.value}))} style={{marginTop:4}}><option value="mensal">Mensal</option><option value="semanal">Semanal</option><option value="quinzenal">Quinzenal (a cada 2 semanas)</option></select></label>
       <label style={{fontSize:12,color:D.text3}}>Primeira parcela (opcional)<input type="date" value={recForm.inicio||""} onChange={e=>setRecForm(f=>({...f,inicio:e.target.value}))} style={{marginTop:4}}/><span style={{fontSize:10,color:D.text3}}>Escolhendo a data, o dia da cobrança vem dela — e nada é lançado antes.</span></label>
       {!recForm.inicio&&(recForm.frequencia||"mensal")==="mensal"&&<label style={{fontSize:12,color:D.text3}}>Dia do mês<input type="number" min="1" max="31" value={recForm.dia||""} onChange={e=>setRecForm(f=>({...f,dia:e.target.value}))} style={{marginTop:4}}/></label>}
