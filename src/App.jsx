@@ -9,7 +9,7 @@ import {
   calcSaldos as calcSaldosPure, calcDividas as calcDividasPure, totaisPorPessoa as totaisPorPessoaPure,
   salarioMensal, converteMoeda, taxaMensalSim, simularJuros,
   semFotos, mesclarFotos, projetarFluxo, addDias, marcarDuplicatas, montarAgendaPush,
-  compraAcao, vendaAcao, pendentesRecorrenciaSW, relatorioMensal, compararMeses, serieGastoAcumulado,
+  compraAcao, vendaAcao, pendentesRecorrenciaSW, relatorioMensal, compararMeses, serieGastoAcumulado, extratoComSaldo,
 } from "./calc.mjs";
 
 // Chave pública VAPID (par gerado para este app; a privada é secret no Cloudflare)
@@ -850,7 +850,7 @@ function BancosTab({data,setData,currency}){
   const totalC=data.bancos.reduce((a,b)=>a+sc(b),0);
   const totalI=data.bancos.reduce((a,b)=>a+data.investimentos.filter(i=>i.bancoId===b.id).reduce((x,y)=>x+(y.valorAtual||y.valorInvestido||y.valor||0),0),0);
   const bExtr=extratoBanco?data.bancos.find(b=>b.id===extratoBanco):null;
-  const txExtr=bExtr?data.transacoes.filter(t=>t.bancoId===extratoBanco).sort((a,b)=>b.data.localeCompare(a.data)):[];
+  const txExtr=bExtr?extratoComSaldo(bExtr,data.transacoes):[]; // testado em calc.mjs (invariante: 1ª linha = saldo do banco)
   return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
       <Btn onClick={()=>{setModal(true);setForm({});}}>+ Novo banco</Btn>
@@ -865,10 +865,15 @@ function BancosTab({data,setData,currency}){
         <p style={{fontSize:14,fontWeight:700,color:D.text}}>📄 Extrato — {bExtr.nome}</p>
         <button onClick={()=>setExtratoBanco(null)} style={{border:"none",background:"none",cursor:"pointer",fontSize:18,color:D.text3}}>✕</button>
       </div>
-      {txExtr.length===0?<p style={{fontSize:13,color:D.text3}}>Sem movimentações.</p>:txExtr.map(t=><div key={t.id} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${D.border}`,fontSize:13}}>
-        <div><p style={{margin:0,fontWeight:500,color:D.text}}>{t.descricao}</p><p style={{margin:0,fontSize:11,color:D.text3}}>{t.categoria} · {t.data}</p></div>
-        <span style={{fontWeight:700,color:t.tipo==="receita"?D.green:D.red}}>{t.tipo==="receita"?"+":"-"}{fmtM(t.valor,currency)}</span>
+      {txExtr.length>0&&<div style={{display:"flex",justifyContent:"space-between",padding:"4px 0 8px",fontSize:10,color:D.text3,letterSpacing:0.5}}><span>LANÇAMENTO</span><span>VALOR · SALDO APÓS</span></div>}
+      {txExtr.length===0?<p style={{fontSize:13,color:D.text3}}>Sem movimentações.</p>:txExtr.map(t=><div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${D.border}`,fontSize:13,gap:10}}>
+        <div style={{minWidth:0}}><p style={{margin:0,fontWeight:500,color:D.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</p><p style={{margin:0,fontSize:11,color:D.text3}}>{t.categoria} · {(t.data||"").split("-").reverse().join("/")}</p></div>
+        <div style={{textAlign:"right",flexShrink:0}}>
+          <p style={{margin:0,fontWeight:700,color:t.tipo==="receita"?D.green:D.red}}>{t.tipo==="receita"?"+":"-"}{fmtM(t.valor,currency)}</p>
+          <p style={{margin:0,fontSize:11,color:t.saldoApos<0?D.red:D.text3}}>saldo {fmtM(t.saldoApos,currency)}</p>
+        </div>
       </div>)}
+      {txExtr.length>0&&<p style={{margin:"8px 0 0",fontSize:10,color:D.text3}}>Saldo inicial: {fmtM(bExtr.saldoInicial||0,currency)} · confira linha a linha com o extrato oficial do banco</p>}
     </Card>}
     {data.bancos.length>=2&&<Card>
       <p style={{fontSize:14,fontWeight:700,color:D.text,marginBottom:10}}>↔ Transferência entre bancos</p>
