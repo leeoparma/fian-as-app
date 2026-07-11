@@ -13,7 +13,7 @@ import {
   calcSaldos,calcDividas,totaisPorPessoa,
   salarioMensal,converteMoeda,taxaMensalSim,simularJuros,
   semFotos,mesclarFotos,projetarFluxo,ocorrenciasRecorrencia,addDias,marcarDuplicatas,montarAgendaPush,compraAcao,vendaAcao,
-  ocorrenciasSWAte,pendentesRecorrenciaSW,relatorioMensal,compararMeses,
+  ocorrenciasSWAte,pendentesRecorrenciaSW,relatorioMensal,compararMeses,serieGastoAcumulado,
 } from "../src/calc.mjs";
 
 const aprox=(a,b,tol=0.01)=>assert.ok(Math.abs(a-b)<=tol,`esperado ~${b}, veio ${a}`);
@@ -538,4 +538,26 @@ test("comparação mensal: sem mês anterior, temBase é false e deltas contra z
   assert.equal(c.temBase,false);
   aprox(c.receitas.delta,100);
   assert.equal(c.receitas.pct,null);
+});
+
+// ── Curva de gasto acumulado ─────────────────────────────────────────────────
+test("gasto acumulado: soma dia a dia, ignora internas, fecha no total do mês", ()=>{
+  const txs=[
+    {tipo:"despesa",valor:100,categoria:"Mercado",data:"2026-06-05"},
+    {tipo:"despesa",valor:50,categoria:"Lazer",data:"2026-06-05"},
+    {tipo:"despesa",valor:200,categoria:"Moradia",data:"2026-06-20"},
+    {tipo:"despesa",valor:999,categoria:"Aplicação",data:"2026-06-10"},
+    {tipo:"receita",valor:5000,categoria:"Salário",data:"2026-06-01"},
+  ];
+  const s=serieGastoAcumulado(txs,"2026-06");
+  assert.equal(s.length,30);              // junho tem 30 dias
+  aprox(s[3].acumulado,0);                // dia 4: nada ainda
+  aprox(s[4].acumulado,150);              // dia 5: 100+50
+  aprox(s[18].acumulado,150);             // dia 19: inalterado
+  aprox(s[29].acumulado,350);             // fim do mês = total (sem a interna)
+});
+test("gasto acumulado: fevereiro tem 28 pontos e mês vazio é linha zero", ()=>{
+  const s=serieGastoAcumulado([],"2026-02");
+  assert.equal(s.length,28);
+  aprox(s[27].acumulado,0);
 });
