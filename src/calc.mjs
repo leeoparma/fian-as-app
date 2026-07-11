@@ -420,3 +420,21 @@ export function compararMeses(atual,anterior){
     categorias:Object.fromEntries((atual.todasCategorias||[]).map(c=>[c.categoria,d(c.total,antCat[c.categoria])])),
   };
 }
+
+// ── Relatório: curva do gasto acumulado dia a dia ────────────────────────────
+// Uma linha por dia do mês com o total gasto até ali (exclui categorias
+// internas). Comparada com a do mês anterior, mostra o RITMO do gasto.
+export function serieGastoAcumulado(transacoes,mesKey){
+  const [y,m]=mesKey.split("-").map(Number);
+  const ultimo=new Date(y,m,0).getDate();
+  const porDia=new Array(ultimo+1).fill(0);
+  for(const t of (transacoes||[])){
+    if(!t||t.tipo!=="despesa"||!t.data||!t.data.startsWith(mesKey))continue;
+    if(CAT_INTERNAS.includes(t.categoria))continue;
+    const d=Math.min(ultimo,Math.max(1,parseInt(t.data.slice(8,10))||1));
+    porDia[d]+=(t.valor||0);
+  }
+  let acc=0;const serie=[];
+  for(let d=1;d<=ultimo;d++){acc+=porDia[d];serie.push({dia:d,acumulado:Math.round(acc*100)/100});}
+  return serie;
+}
