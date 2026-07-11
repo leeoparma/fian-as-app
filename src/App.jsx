@@ -169,9 +169,9 @@ const GS2=`
   *{-webkit-tap-highlight-color:transparent}
   body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,Inter,Arial,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
     background:
-      radial-gradient(1100px 520px at 85% -10%, rgba(0,208,132,0.16), transparent 60%),
-      radial-gradient(900px 520px at -15% 25%, rgba(59,130,246,0.14), transparent 60%),
-      radial-gradient(800px 600px at 110% 85%, rgba(139,92,246,0.12), transparent 60%),
+      radial-gradient(1100px 520px at 85% -10%, rgba(0,208,132,0.26), transparent 60%),
+      radial-gradient(900px 520px at -15% 25%, rgba(59,130,246,0.22), transparent 60%),
+      radial-gradient(800px 600px at 110% 85%, rgba(139,92,246,0.20), transparent 60%),
       #05080f !important;
     background-attachment:fixed}
   body::before{content:"";position:fixed;top:0;left:0;right:0;height:3px;z-index:999;pointer-events:none;
@@ -4270,36 +4270,41 @@ function AppInner(){
   return <>
     <style>{GS}</style><style>{GS2}</style>
     <div style={{maxWidth:780,margin:"0 auto",padding:"0.75rem 1rem 4rem",minHeight:"100vh"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem",flexWrap:"wrap",gap:8,padding:"0.75rem 1rem",background:D.card,borderRadius:14,border:`1px solid ${D.border}`,position:"sticky",top:8,zIndex:50}}>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
+      <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:"1rem",padding:"0.75rem 1rem",background:"rgba(13,19,36,0.72)",backdropFilter:"blur(18px) saturate(1.3)",WebkitBackdropFilter:"blur(18px) saturate(1.3)",borderRadius:16,border:"1px solid rgba(148,163,184,0.14)",borderTop:"1px solid rgba(255,255,255,0.10)",position:"sticky",top:8,zIndex:50}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
           <img src="/logo.svg" alt="logo" style={{width:34,height:34,borderRadius:9,filter:`drop-shadow(0 0 8px ${D.green}66)`}}/>
           <div><p style={{margin:0,fontSize:15,fontWeight:800,color:D.text}}>Controle Financeiro</p>{syncing&&<p style={{margin:0,fontSize:10,color:D.green}}>● sincronizando...</p>}{!syncing&&syncErro&&<p style={{margin:0,fontSize:10,color:D.gold}}>⚠ sem nuvem — suas alterações estão salvas no aparelho · reconectando…</p>}</div>
+          </div>
+          <button onClick={handleLogout} style={{padding:"5px 12px",borderRadius:16,fontSize:11,cursor:"pointer",background:D.red+"22",border:`1px solid ${D.red}44`,color:D.red,flexShrink:0}}>Sair</button>
         </div>
-        <div style={{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
+        <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",width:"100%",justifyContent:"space-between"}}>
+          <div style={{display:"flex",gap:4,alignItems:"center"}}>
           {PROFILES.map(p=>{const aberto=mercadoAberto(p.id);const corBola=aberto===true?D.green:aberto===false?D.text3:"transparent";return <button key={p.id} onClick={()=>setProfileId(p.id)} title={aberto===true?"Mercado aberto":aberto===false?"Mercado fechado":""} style={{padding:"5px 12px",borderRadius:20,fontSize:12,cursor:"pointer",fontWeight:profileId===p.id?700:400,background:profileId===p.id?D.green:"transparent",color:profileId===p.id?"#000":D.text3,border:`1px solid ${profileId===p.id?D.green:D.border}`,display:"inline-flex",alignItems:"center",gap:6}}><span style={{width:7,height:7,borderRadius:"50%",background:corBola,boxShadow:aberto===true?`0 0 5px ${D.green}`:"none",flexShrink:0}}/>{p.label}</button>;})}
-          <div style={{width:1,height:20,background:D.border}}/>
-          <button onClick={exportar} style={{padding:"5px 10px",borderRadius:16,fontSize:11,cursor:"pointer",background:"transparent",border:`1px solid ${D.border}`,color:D.text3}}>⬇️</button>
-          <button onClick={()=>importRef.current.click()} style={{padding:"5px 10px",borderRadius:16,fontSize:11,cursor:"pointer",background:"transparent",border:`1px solid ${D.border}`,color:D.text3}}>⬆️</button>
+          </div>
+          <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          <button title="Exportar dados (.json)" onClick={exportar} style={{padding:"5px 10px",borderRadius:16,fontSize:11,cursor:"pointer",background:"transparent",border:`1px solid ${D.border}`,color:D.text3}}>⬇️</button>
+          <button title="Importar dados" onClick={()=>importRef.current.click()} style={{padding:"5px 10px",borderRadius:16,fontSize:11,cursor:"pointer",background:"transparent",border:`1px solid ${D.border}`,color:D.text3}}>⬆️</button>
           <button onClick={abrirBackups} title="Backups automáticos" style={{padding:"5px 10px",borderRadius:16,fontSize:11,cursor:"pointer",background:"transparent",border:`1px solid ${D.border}`,color:D.text3}}>🕒</button>
           <button onClick={()=>setModalPush(true)} title="Notificações" style={{padding:"5px 10px",borderRadius:16,fontSize:11,cursor:"pointer",background:"transparent",border:`1px solid ${D.border}`,color:D.text3}}>🔔</button>
           <input ref={importRef} type="file" accept=".json" onChange={importar} style={{display:"none"}}/>
-          <button onClick={handleLogout} style={{padding:"5px 10px",borderRadius:16,fontSize:11,cursor:"pointer",background:D.red+"22",border:`1px solid ${D.red}44`,color:D.red}}>Sair</button>
+          </div>
         </div>
       </div>
 
       <div style={{display:"flex",gap:2,marginBottom:"1.25rem",background:D.card,borderRadius:12,padding:4,border:`1px solid ${D.border}`,overflowX:"auto"}}>
-        {TABS.map((t,i)=><button key={t} onClick={()=>setTab(i)} style={{display:"flex",alignItems:"center",gap:5,padding:"8px 12px",borderRadius:10,fontSize:11.5,cursor:"pointer",border:"none",background:tab===i?`linear-gradient(135deg,${D.green},#06b6d4)`:"transparent",color:tab===i?"#04120a":D.text3,fontWeight:tab===i?800:500,whiteSpace:"nowrap",flexShrink:0,boxShadow:tab===i?`0 2px 14px ${D.green}55`:"none"}}><span style={{fontSize:13}}>{TAB_ICONES[i]}</span>{t}</button>)}
+        {TABS.map((t,i)=><button key={t} onClick={()=>setTab(i)} style={{display:"flex",alignItems:"center",gap:4,padding:"7px 9px",borderRadius:9,fontSize:11,cursor:"pointer",border:"none",background:tab===i?`linear-gradient(135deg,${D.green},#06b6d4)`:"transparent",color:tab===i?"#04120a":D.text3,fontWeight:tab===i?800:500,whiteSpace:"nowrap",flexShrink:0,boxShadow:tab===i?`0 2px 14px ${D.green}55`:"none"}}><span style={{fontSize:12}}>{TAB_ICONES[i]}</span>{t}</button>)}
       </div>
 
-      {(tab===0||tab===2||tab===3)&&<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"1rem"}}>
+      {(tab===2||tab===3)&&<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"1rem"}}>
         <span style={{fontSize:12,color:D.text3}}>Mês:</span>
         <select value={mes} onChange={e=>setMes(+e.target.value)} style={{width:"auto",padding:"5px 10px"}}>{MESES.map((m,i)=><option key={m} value={i}>{m} {ANO_ATUAL}</option>)}</select>
       </div>}
 
       {tab===0&&<div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
-        <Card glow style={{background:`linear-gradient(135deg,${D.bg3},${D.card2})`,border:`1px solid ${D.green}33`}}>
-          <p style={{fontSize:10,color:D.text3,textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}}>Patrimônio Líquido Total</p>
-          <p style={{fontSize:34,fontWeight:800,color:D.green,textShadow:`0 0 20px ${D.green}66`}}>{fmtM(patrimonioLiq,currency)}</p>
+        <Card glow style={{border:`1px solid ${D.green}44`}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}><p style={{fontSize:10,color:D.text3,textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}}>Patrimônio Líquido Total</p><select value={mes} onChange={e=>setMes(+e.target.value)} style={{width:"auto",padding:"4px 8px",fontSize:11,background:"rgba(255,255,255,0.05)"}}>{MESES.map((m,i)=><option key={m} value={i}>{m.slice(0,3)} {ANO_ATUAL}</option>)}</select></div>
+          <p style={{textShadow:`0 0 26px ${D.green}55`,fontSize:"clamp(34px,7vw,44px)",fontWeight:800,color:D.green,textShadow:`0 0 20px ${D.green}66`}}>{fmtM(patrimonioLiq,currency)}</p>
           <p style={{fontSize:11,color:D.text3,marginTop:4}}>Bancos + Investimentos</p>
         </Card>
 
