@@ -913,6 +913,7 @@ function LancamentosTab({data,setData,currency,mes,profileId}){
   const [impBanco,setImpBanco]=useState("");
   const [nfView,setNfView]=useState(null);
   const [delParc,setDelParc]=useState(null);
+  const [busca,setBusca]=useState("");const [fCat,setFCat]=useState("");const [fBanco,setFBanco]=useState("");const [fTipo,setFTipo]=useState("");
   const isAU=profileId==="au";  // AU: ano fiscal 1 jul–30 jun · BR/US: ano-calendário 1 jan–31 dez
   const FY_ATUAL=isAU?(MES_ATUAL>=6?ANO_ATUAL:ANO_ATUAL-1):ANO_ATUAL;
   const [fyPdf,setFyPdf]=useState(FY_ATUAL);
@@ -1189,8 +1190,30 @@ ${paginas}
     </Card>}
 
     {data.bancos.length===0&&<div style={{background:D.red+"22",border:`1px solid ${D.red}44`,borderRadius:10,padding:"10px 14px",fontSize:12,color:D.red}}>⚠️ Cadastre um banco primeiro.</div>}
-    {txMes.length===0&&<p style={{fontSize:13,color:D.text3}}>Nenhum lançamento neste mês.</p>}
-    {txMes.sort((a,b)=>b.data.localeCompare(a.data)).map(t=><Card key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"0.75rem 1rem"}}>
+    <Card style={{padding:"0.7rem 1rem"}}>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+        <input placeholder="🔎 Buscar descrição, categoria ou valor…" value={busca} onChange={e=>setBusca(e.target.value)} style={{flex:"2 1 190px",padding:"7px 10px",fontSize:12}}/>
+        <select value={fTipo} onChange={e=>setFTipo(e.target.value)} style={{width:"auto",flex:"0 1 auto",padding:"6px 8px",fontSize:11}}><option value="">Tudo</option><option value="receita">Receitas</option><option value="despesa">Despesas</option></select>
+        <select value={fCat} onChange={e=>setFCat(e.target.value)} style={{width:"auto",flex:"0 1 auto",padding:"6px 8px",fontSize:11}}><option value="">Categoria</option>{[...new Set(txMes.map(t=>t.categoria).filter(Boolean))].sort().map(c=><option key={c} value={c}>{c}</option>)}</select>
+        {data.bancos.length>0&&<select value={fBanco} onChange={e=>setFBanco(e.target.value)} style={{width:"auto",flex:"0 1 auto",padding:"6px 8px",fontSize:11}}><option value="">Banco</option>{data.bancos.map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}</select>}
+        {(busca||fCat||fBanco||fTipo)&&<button onClick={()=>{setBusca("");setFCat("");setFBanco("");setFTipo("");}} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:11}}>✕ limpar</button>}
+      </div>
+    </Card>
+    {(()=>{
+      const q=busca.trim().toLowerCase();
+      const txVis=txMes.filter(t=>
+        (!q||(t.descricao||"").toLowerCase().includes(q)||(t.categoria||"").toLowerCase().includes(q)||String(t.valor).includes(q))
+        &&(!fTipo||t.tipo===fTipo)
+        &&(!fCat||t.categoria===fCat)
+        &&(!fBanco||t.bancoId===fBanco)
+      ).sort((a,b)=>b.data.localeCompare(a.data));
+      const filtrando=!!(q||fTipo||fCat||fBanco);
+      const totV=txVis.reduce((a,t)=>a+(t.tipo==="receita"?t.valor:-t.valor),0);
+      return <>
+      {filtrando&&txVis.length>0&&<p style={{fontSize:11,color:D.text3,margin:"-6px 0 0"}}>{txVis.length} lançamento{txVis.length===1?"":"s"} · saldo do filtro: <b style={{color:totV>=0?D.green:D.red}}>{totV>=0?"+":""}{fmtM(totV,currency)}</b></p>}
+      {txMes.length===0&&<p style={{fontSize:13,color:D.text3}}>Nenhum lançamento neste mês.</p>}
+      {txMes.length>0&&txVis.length===0&&<p style={{fontSize:13,color:D.text3}}>Nada encontrado com esses filtros. <button onClick={()=>{setBusca("");setFCat("");setFBanco("");setFTipo("");}} style={{border:"none",background:"none",cursor:"pointer",color:D.blue,fontSize:12}}>limpar</button></p>}
+      {txVis.map(t=><Card key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"0.75rem 1rem"}}>
       <div style={{width:36,height:36,borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center",background:t.tipo==="receita"?D.green+"22":D.red+"22",fontSize:16,flexShrink:0}}>{t.tipo==="receita"?"↑":"↓"}</div>
       <div style={{flex:1,minWidth:0}}>
         <div style={{display:"flex",alignItems:"center",gap:6}}><p style={{margin:0,fontSize:13,fontWeight:600,color:D.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</p>{t.nfImg&&<img src={t.nfImg} style={{width:22,height:22,objectFit:"cover",borderRadius:3,cursor:"pointer",flexShrink:0}} onClick={()=>setNfView(t.nfImg)} title="Ver NF"/>}{!t.nfImg&&t.nfManual&&<span title="NF Manual" style={{fontSize:11}}>📋</span>}</div>
@@ -1202,6 +1225,7 @@ ${paginas}
         <button onClick={()=>t.parceladoId?setDelParc(t):setData(d=>({...d,transacoes:d.transacoes.filter(x=>x.id!==t.id)}))} style={{border:"none",background:"none",cursor:"pointer",fontSize:13,color:D.red}}>🗑</button>
       </div>
     </Card>)}
+    </>;})()}
 
     {delParc&&(()=>{
       const grupo=data.transacoes.filter(x=>x.parceladoId===delParc.parceladoId);
