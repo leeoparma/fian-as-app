@@ -167,7 +167,17 @@ const TAB_ICONES=["📊","🏦","🧾","💳","📈","🎯","🔍","👥","📄"
 // microinterações nos botões e barra de rolagem discreta.
 const GS2=`
   *{-webkit-tap-highlight-color:transparent}
-  body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,Inter,Arial,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,Inter,Arial,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+    background:
+      radial-gradient(1100px 520px at 85% -10%, rgba(0,208,132,0.16), transparent 60%),
+      radial-gradient(900px 520px at -15% 25%, rgba(59,130,246,0.14), transparent 60%),
+      radial-gradient(800px 600px at 110% 85%, rgba(139,92,246,0.12), transparent 60%),
+      #05080f !important;
+    background-attachment:fixed}
+  body::before{content:"";position:fixed;top:0;left:0;right:0;height:3px;z-index:999;pointer-events:none;
+    background:linear-gradient(90deg,${D.green},#06b6d4,${D.purple},${D.green});background-size:300% 100%;
+    animation:cfEnergia 8s linear infinite;opacity:0.9}
+  @keyframes cfEnergia{0%{background-position:0% 0}100%{background-position:300% 0}}
   input,select,textarea{transition:border-color .15s ease, box-shadow .15s ease}
   input:focus,select:focus,textarea:focus{outline:none;border-color:${D.blue}99 !important;box-shadow:0 0 0 3px ${D.blue}26}
   button{transition:opacity .12s ease, transform .05s ease, box-shadow .15s ease}
@@ -329,9 +339,9 @@ function Tip({text,children}){
     {show&&<span style={{position:"absolute",bottom:"calc(100% + 6px)",left:0,background:D.card2,border:`1px solid ${D.border2}`,borderRadius:8,padding:"8px 12px",fontSize:11,color:D.text2,whiteSpace:"normal",zIndex:999,lineHeight:1.6,boxShadow:"0 4px 20px rgba(0,0,0,0.5)",minWidth:200,maxWidth:260}}>{text}</span>}
   </span>;
 }
-function Card({children,style,glow}){return <div style={{background:`linear-gradient(180deg,${D.card} 0%,#0d1424 100%)`,border:`1px solid ${D.border}`,borderRadius:16,padding:"1.1rem 1.25rem",boxShadow:glow?`0 0 24px ${D.green}22`:"0 1px 0 rgba(255,255,255,0.03) inset, 0 10px 28px rgba(0,0,0,0.28)",...style}}>{children}</div>;}
+function Card({children,style,glow}){return <div style={{background:"rgba(15,22,41,0.55)",backdropFilter:"blur(14px) saturate(1.3)",WebkitBackdropFilter:"blur(14px) saturate(1.3)",border:"1px solid rgba(148,163,184,0.13)",borderTop:"1px solid rgba(255,255,255,0.10)",borderRadius:18,padding:"1.1rem 1.25rem",boxShadow:glow?`0 0 28px ${D.green}33`:"0 12px 32px rgba(0,0,0,0.35)",...style}}>{children}</div>;}
 function MetricCard({label,value,color,sub,tip}){
-  return <div style={{background:D.card2,border:`1px solid ${D.border}`,borderLeft:`3px solid ${color||D.border2}`,borderRadius:12,padding:"0.9rem"}}>
+  return <div style={{background:"rgba(21,29,53,0.5)",backdropFilter:"blur(10px)",WebkitBackdropFilter:"blur(10px)",border:"1px solid rgba(148,163,184,0.12)",borderLeft:`3px solid ${color||D.border2}`,borderRadius:14,padding:"0.9rem"}}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
       {tip?<Tip text={tip}><p style={{margin:0,fontSize:10,color:D.text3,textTransform:"uppercase",letterSpacing:"0.5px"}}>{label}</p></Tip>:<p style={{margin:0,fontSize:10,color:D.text3,textTransform:"uppercase",letterSpacing:"0.5px"}}>{label}</p>}
     </div>
@@ -345,7 +355,7 @@ function Btn({children,onClick,color,disabled,style,outline,sm}){
 }
 function Modal({title,onClose,children,wide}){
   return <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200,backdropFilter:"blur(4px)"}}>
-    <div onClick={e=>e.stopPropagation()} style={{background:D.card,border:`1px solid ${D.border2}`,borderRadius:16,padding:"1.5rem",width:wide?"min(96vw,600px)":"min(96vw,400px)",display:"flex",flexDirection:"column",gap:12,maxHeight:"90vh",overflowY:"auto"}}>
+    <div onClick={e=>e.stopPropagation()} style={{background:"rgba(13,19,36,0.78)",backdropFilter:"blur(22px) saturate(1.3)",WebkitBackdropFilter:"blur(22px) saturate(1.3)",border:"1px solid rgba(148,163,184,0.16)",borderTop:"1px solid rgba(255,255,255,0.12)",borderRadius:18,padding:"1.5rem",width:wide?"min(96vw,600px)":"min(96vw,400px)",display:"flex",flexDirection:"column",gap:12,maxHeight:"90vh",overflowY:"auto"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <h3 style={{fontSize:16,fontWeight:700,color:D.text}}>{title}</h3>
         <button onClick={onClose} style={{border:"none",background:"none",cursor:"pointer",fontSize:20,color:D.text3}}>✕</button>
@@ -4278,7 +4288,7 @@ function AppInner(){
       </div>
 
       <div style={{display:"flex",gap:2,marginBottom:"1.25rem",background:D.card,borderRadius:12,padding:4,border:`1px solid ${D.border}`,overflowX:"auto"}}>
-        {TABS.map((t,i)=><button key={t} onClick={()=>setTab(i)} style={{display:"flex",alignItems:"center",gap:5,padding:"8px 12px",borderRadius:10,fontSize:11.5,cursor:"pointer",border:"none",background:tab===i?D.green:"transparent",color:tab===i?"#04120a":D.text3,fontWeight:tab===i?800:500,whiteSpace:"nowrap",flexShrink:0,boxShadow:tab===i?`0 2px 14px ${D.green}55`:"none"}}><span style={{fontSize:13}}>{TAB_ICONES[i]}</span>{t}</button>)}
+        {TABS.map((t,i)=><button key={t} onClick={()=>setTab(i)} style={{display:"flex",alignItems:"center",gap:5,padding:"8px 12px",borderRadius:10,fontSize:11.5,cursor:"pointer",border:"none",background:tab===i?`linear-gradient(135deg,${D.green},#06b6d4)`:"transparent",color:tab===i?"#04120a":D.text3,fontWeight:tab===i?800:500,whiteSpace:"nowrap",flexShrink:0,boxShadow:tab===i?`0 2px 14px ${D.green}55`:"none"}}><span style={{fontSize:13}}>{TAB_ICONES[i]}</span>{t}</button>)}
       </div>
 
       {(tab===0||tab===2||tab===3)&&<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"1rem"}}>
