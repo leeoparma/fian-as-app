@@ -438,3 +438,18 @@ export function serieGastoAcumulado(transacoes,mesKey){
   for(let d=1;d<=ultimo;d++){acc+=porDia[d];serie.push({dia:d,acumulado:Math.round(acc*100)/100});}
   return serie;
 }
+
+// ── Extrato com saldo corrente ───────────────────────────────────────────────
+// Igual ao extrato do banco: cada linha mostra o saldo APÓS o lançamento.
+// Ordena por data (empate: ordem de criação) e devolve do mais recente para
+// o mais antigo. INVARIANTE: o saldo da primeira linha = saldoBancoCalc.
+export function extratoComSaldo(banco,transacoes){
+  const doBanco=(transacoes||[]).map((t,i)=>({t,i})).filter(x=>x.t&&x.t.bancoId===banco.id);
+  doBanco.sort((a,b)=>((a.t.data||"").localeCompare(b.t.data||""))||(a.i-b.i));
+  let s=banco.saldoInicial||0;
+  const out=doBanco.map(({t})=>{
+    s+=t.tipo==="receita"?(t.valor||0):-(t.valor||0);
+    return {...t,saldoApos:Math.round(s*100)/100};
+  });
+  return out.reverse();
+}
