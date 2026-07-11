@@ -162,6 +162,21 @@ const TIPOS_INV=["Ações","FII","ETF","Cripto","Renda Fixa","Tesouro Direto","O
 const INDICES_RF=["CDI","IPCA","Selic","IGPM","Prefixado"];
 const MESES=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
 const TABS=["Dashboard","Bancos","Lançamentos","Cartão","Investimentos","Metas","Análise","Splitwise","Relatórios"];
+const TAB_ICONES=["📊","🏦","🧾","💳","📈","🎯","🔍","👥","📄"];
+// Polimento global: tipografia nativa, foco visível nos campos,
+// microinterações nos botões e barra de rolagem discreta.
+const GS2=`
+  *{-webkit-tap-highlight-color:transparent}
+  body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,Inter,Arial,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  input,select,textarea{transition:border-color .15s ease, box-shadow .15s ease}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:${D.blue}99 !important;box-shadow:0 0 0 3px ${D.blue}26}
+  button{transition:opacity .12s ease, transform .05s ease, box-shadow .15s ease}
+  button:active{transform:scale(0.985)}
+  ::-webkit-scrollbar{width:8px;height:6px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:${D.border2};border-radius:4px}
+  ::selection{background:${D.blue}55}
+`;
 const WL_CATS=["Todas","Banco","Infraestrutura","Fundo Imobiliário","Energia","Tecnologia","Varejo","Saúde","Agronegócio","Mineração","Petróleo","ETF","Exterior","Outros"];
 const IND_COMP=[
   {key:"preco",label:"Preço",fmt:(v,cur)=>v!=null?`${cur} ${Number(v).toFixed(2)}`:"—",higher:false},
@@ -314,9 +329,9 @@ function Tip({text,children}){
     {show&&<span style={{position:"absolute",bottom:"calc(100% + 6px)",left:0,background:D.card2,border:`1px solid ${D.border2}`,borderRadius:8,padding:"8px 12px",fontSize:11,color:D.text2,whiteSpace:"normal",zIndex:999,lineHeight:1.6,boxShadow:"0 4px 20px rgba(0,0,0,0.5)",minWidth:200,maxWidth:260}}>{text}</span>}
   </span>;
 }
-function Card({children,style,glow}){return <div style={{background:D.card,border:`1px solid ${D.border}`,borderRadius:14,padding:"1rem 1.25rem",...(glow?{boxShadow:`0 0 20px ${D.green}22`}:{}),...style}}>{children}</div>;}
+function Card({children,style,glow}){return <div style={{background:`linear-gradient(180deg,${D.card} 0%,#0d1424 100%)`,border:`1px solid ${D.border}`,borderRadius:16,padding:"1.1rem 1.25rem",boxShadow:glow?`0 0 24px ${D.green}22`:"0 1px 0 rgba(255,255,255,0.03) inset, 0 10px 28px rgba(0,0,0,0.28)",...style}}>{children}</div>;}
 function MetricCard({label,value,color,sub,tip}){
-  return <div style={{background:D.card2,border:`1px solid ${D.border}`,borderRadius:12,padding:"0.9rem"}}>
+  return <div style={{background:D.card2,border:`1px solid ${D.border}`,borderLeft:`3px solid ${color||D.border2}`,borderRadius:12,padding:"0.9rem"}}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
       {tip?<Tip text={tip}><p style={{margin:0,fontSize:10,color:D.text3,textTransform:"uppercase",letterSpacing:"0.5px"}}>{label}</p></Tip>:<p style={{margin:0,fontSize:10,color:D.text3,textTransform:"uppercase",letterSpacing:"0.5px"}}>{label}</p>}
     </div>
@@ -326,7 +341,7 @@ function MetricCard({label,value,color,sub,tip}){
 }
 function Btn({children,onClick,color,disabled,style,outline,sm}){
   const c=color||D.green;
-  return <button onClick={onClick} disabled={disabled} style={{padding:sm?"5px 12px":"9px 18px",borderRadius:8,fontSize:sm?11:13,fontWeight:600,cursor:disabled?"not-allowed":"pointer",opacity:disabled?0.5:1,transition:"all .15s",...(outline?{background:"transparent",border:`1px solid ${c}`,color:c}:{background:c,border:"none",color:c===D.green||c===D.gold?"#000":"#fff"}),...style}}>{children}</button>;
+  return <button onClick={onClick} disabled={disabled} style={{padding:sm?"6px 13px":"10px 18px",borderRadius:10,fontSize:sm?11:13,fontWeight:600,cursor:disabled?"not-allowed":"pointer",opacity:disabled?0.5:1,transition:"all .15s",...(outline?{background:"transparent",border:`1px solid ${c}`,color:c}:{background:c,border:"none",color:c===D.green||c===D.gold?"#000":"#fff"}),...style}}>{children}</button>;
 }
 function Modal({title,onClose,children,wide}){
   return <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200,backdropFilter:"blur(4px)"}}>
@@ -4215,7 +4230,7 @@ function AppInner(){
   function exportar(){const p={version:4,exportedAt:new Date().toISOString(),all_profiles:allData,watchlist_br:lsGet("watchlist_br")||[],watchlist_au:lsGet("watchlist_au")||[]};const b=new Blob([JSON.stringify(p,null,2)],{type:"application/json"});const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download=`financas_${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(u);}
   function importar(e){const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=ev=>{try{const p=JSON.parse(ev.target.result);if(!p.all_profiles){alert("Arquivo inválido.");return;}if(!window.confirm("Substituir todos os dados?"))return;lsSet("all_profiles",p.all_profiles);if(p.watchlist_br)lsSet("watchlist_br",p.watchlist_br);if(p.watchlist_au)lsSet("watchlist_au",p.watchlist_au);setAllData(p.all_profiles);if(session)salvarComRetry(session.user.id,p.all_profiles).catch(()=>{});alert("✅ Dados restaurados!");}catch{alert("Arquivo inválido.");}};r.readAsText(file);e.target.value="";}
 
-  if(!session)return <><style>{GS}</style><LoginScreen onLogin={handleLogin}/></>;
+  if(!session)return <><style>{GS}</style><style>{GS2}</style><LoginScreen onLogin={handleLogin}/></>;
 
   const profile=PROFILES.find(p=>p.id===profileId);
   const currency=profile.currency;
@@ -4243,7 +4258,7 @@ function AppInner(){
   const catPieR=catR.map((c,i)=>({label:c,cat:c,v:txMes.filter(t=>t.tipo==="receita"&&t.categoria===c).reduce((a,b)=>a+b.valor,0),color:CORES[i%CORES.length]})).filter(x=>x.v>0).sort((a,b)=>b.v-a.v);
 
   return <>
-    <style>{GS}</style>
+    <style>{GS}</style><style>{GS2}</style>
     <div style={{maxWidth:780,margin:"0 auto",padding:"0.75rem 1rem 4rem",minHeight:"100vh"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem",flexWrap:"wrap",gap:8,padding:"0.75rem 1rem",background:D.card,borderRadius:14,border:`1px solid ${D.border}`,position:"sticky",top:8,zIndex:50}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -4263,7 +4278,7 @@ function AppInner(){
       </div>
 
       <div style={{display:"flex",gap:2,marginBottom:"1.25rem",background:D.card,borderRadius:12,padding:4,border:`1px solid ${D.border}`,overflowX:"auto"}}>
-        {TABS.map((t,i)=><button key={t} onClick={()=>setTab(i)} style={{padding:"7px 11px",borderRadius:9,fontSize:11,cursor:"pointer",border:"none",background:tab===i?D.green:"transparent",color:tab===i?"#000":D.text3,fontWeight:tab===i?700:400,whiteSpace:"nowrap",flexShrink:0}}>{t}</button>)}
+        {TABS.map((t,i)=><button key={t} onClick={()=>setTab(i)} style={{display:"flex",alignItems:"center",gap:5,padding:"8px 12px",borderRadius:10,fontSize:11.5,cursor:"pointer",border:"none",background:tab===i?D.green:"transparent",color:tab===i?"#04120a":D.text3,fontWeight:tab===i?800:500,whiteSpace:"nowrap",flexShrink:0,boxShadow:tab===i?`0 2px 14px ${D.green}55`:"none"}}><span style={{fontSize:13}}>{TAB_ICONES[i]}</span>{t}</button>)}
       </div>
 
       {(tab===0||tab===2||tab===3)&&<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"1rem"}}>
