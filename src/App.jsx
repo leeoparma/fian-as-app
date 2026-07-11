@@ -60,7 +60,7 @@ async function renovarSessao(){
       if(!s?.refresh)return null;               // sessão antiga, sem refresh guardado → precisa relogar 1x
       const r=await supa.refresh(s.refresh);
       if(!r?.access_token)return null;          // refresh vencido/revogado → relogar
-      const ns={...s,token:r.access_token,refresh:r.refresh_token||s.refresh,user:r.user||s.user};
+      const ns={...s,token:r.access_token,refresh:r.refresh_token||s.refresh,user:r.user||s.user,ts:Date.now()};
       lsSet("session",ns);                      // authHdr() e os saves passam a usar o token novo
       return ns;
     }catch{return null;}
@@ -3958,6 +3958,7 @@ function AppInner(){
   // Trava de segurança: só permite salvar no Supabase DEPOIS de carregar com sucesso.
   // Evita que uma leitura falha (ex: Supabase acordando da pausa) sobrescreva dados bons com vazio.
   const loadOk=useRef(false);
+  const editouSemNuvem=useRef(false); // edições feitas enquanto a nuvem estava fora
   const [syncErro,setSyncErro]=useState(false);
   const [cambio,setCambio]=useState(null);          // {brl,usd,aud} valor de cada moeda em BRL
   const [moedaCons,setMoedaCons]=useState(()=>lsGet("moeda_cons")||"BRL"); // moeda de exibição do consolidado
@@ -3999,46 +4000,74 @@ function AppInner(){
   useEffect(()=>{
     if(!session) return;
     loadOk.current=false;
+    editouSemNuvem.current=false;
     setSyncErro(false);
-    (async()=>{
+    let cancelado=false;
+    let timer=null;
+    const ESPERAS=[3000,8000,20000,30000]; // reconexão automática: 3s→8s→20s→30s (repete)
+    let tentativa=0;
+    async function tentar(){
+      if(cancelado)return;
       setSyncing(true);
       try{
-        // Garante token fresco antes de carregar (o access dura ~1h)
-        let sess=session;
-        if(session.refresh){const ns=await renovarSessao();if(ns){sess=ns;setSession(ns);}}
+        let sess=lsGet("session")||session;
+        // Renova o token SÓ quando está velho (>45 min) — na maioria das
+        // aberturas isso poupa uma viagem de rede inteira (sincroniza mais rápido)
+        if(sess.refresh&&(Date.now()-(sess.ts||0))>45*60*1000){
+          const ns=await renovarSessao();
+          if(ns){sess=ns;setSession(ns);}
+        }
         let r;
         try{r=await supa.load(sess.token,sess.user.id);}
         catch(e){
           if(e?.status===401){const ns=await renovarSessao();if(!ns)throw e;sess=ns;setSession(ns);r=await supa.load(ns.token,ns.user.id);}
           else throw e;
         }
+        if(cancelado)return;
         if(r){
-          // Carregou dados da nuvem com sucesso → libera o salvamento
-          setAllData(r);
-          lsSet("all_profiles",r);
-          loadOk.current=true;
-          backupAutomatico(r); // 1×/dia, silencioso
-          sincronizarAgendaPush(r); // push: agenda dos próximos 7 dias
+          if(editouSemNuvem.current){
+            // Você editou enquanto a nuvem estava fora: o LOCAL é mais novo.
+            // Sobe o local — a nuvem antiga não apaga suas alterações.
+            loadOk.current=true;
+            const local=lsGet("all_profiles");
+            if(local){try{await salvarComRetry(sess.user.id,local);}catch{}}
+          }else{
+            setAllData(r);
+            lsSet("all_profiles",r);
+            loadOk.current=true;
+            backupAutomatico(r); // 1×/dia, silencioso
+            sincronizarAgendaPush(r); // push: agenda dos próximos 7 dias
+          }
         }else{
           // load retornou null = conta sem dados na nuvem.
-          // Se há dados locais com conteúdo real, faz um "upload" inicial seguro
-          // (envia o local para a nuvem) em vez de só liberar o save.
           const local=lsGet("all_profiles");
           const temConteudo=local&&Object.values(local).some(p=>p&&((p.transacoes?.length)||(p.investimentos?.length)||(p.bancos?.length)));
           loadOk.current=true;
           if(temConteudo){
-            try{await salvarComRetry(session.user.id,local);}catch{}
+            try{await salvarComRetry(sess.user.id,local);}catch{}
             backupAutomatico(local);
           }
         }
+        setSyncErro(false);
+        setSyncing(false);
       }catch{
-        // Leitura falhou (Supabase fora/instável). NÃO libera salvamento,
-        // mantém os dados locais e avisa o usuário — nada é sobrescrito.
+        if(cancelado)return;
+        // Falhou (rede/Supabase instável). Nada é sobrescrito, os dados ficam
+        // no aparelho, e a reconexão é AUTOMÁTICA — sem precisar recarregar.
         setSyncErro(true);
         loadOk.current=false;
+        setSyncing(false);
+        const espera=ESPERAS[Math.min(tentativa,ESPERAS.length-1)];
+        tentativa++;
+        timer=setTimeout(tentar,espera);
       }
-      setSyncing(false);
-    })();
+    }
+    const retomar=()=>{if(!cancelado&&!loadOk.current){if(timer)clearTimeout(timer);tentar();}};
+    const aoVisivel=()=>{if(document.visibilityState==="visible")retomar();};
+    window.addEventListener("online",retomar);
+    document.addEventListener("visibilitychange",aoVisivel);
+    tentar();
+    return ()=>{cancelado=true;if(timer)clearTimeout(timer);window.removeEventListener("online",retomar);document.removeEventListener("visibilitychange",aoVisivel);};
   },[session?.token]);
 
   async function ativarPush(){
@@ -4117,7 +4146,7 @@ function AppInner(){
       if(session&&loadOk.current){
         clearTimeout(saveTimer.current);
         saveTimer.current=setTimeout(()=>salvarComRetry(session.user.id,updated).catch(()=>{}),1500);
-      }
+      }else if(session){editouSemNuvem.current=true;}
       return updated;
     });
     setModalTransf(false);setTransfForm({});
@@ -4133,10 +4162,10 @@ function AppInner(){
     if(session&&loadOk.current){
       clearTimeout(saveTimer.current);
       saveTimer.current=setTimeout(()=>salvarComRetry(session.user.id,updated).catch(()=>{}),1500);
-    }
+    }else if(session){editouSemNuvem.current=true;}
     return updated;
   });}
-  function handleLogin(t,u,rt){const s={token:t,user:u,refresh:rt||null};setSession(s);lsSet("session",s);}
+  function handleLogin(t,u,rt){const s={token:t,user:u,refresh:rt||null,ts:Date.now()};setSession(s);lsSet("session",s);}
   async function handleLogout(){
     // Logout local imediato — não trava se o Supabase estiver fora
     try{ if(session) supa.signOut(session.token).catch(()=>{}); }catch{}
@@ -4219,7 +4248,7 @@ function AppInner(){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem",flexWrap:"wrap",gap:8,padding:"0.75rem 1rem",background:D.card,borderRadius:14,border:`1px solid ${D.border}`,position:"sticky",top:8,zIndex:50}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
           <img src="/logo.svg" alt="logo" style={{width:34,height:34,borderRadius:9,filter:`drop-shadow(0 0 8px ${D.green}66)`}}/>
-          <div><p style={{margin:0,fontSize:15,fontWeight:800,color:D.text}}>Controle Financeiro</p>{syncing&&<p style={{margin:0,fontSize:10,color:D.green}}>● sincronizando...</p>}{!syncing&&syncErro&&<p style={{margin:0,fontSize:10,color:D.gold}}>⚠ sem conexão com a nuvem — alterações não estão sendo salvas online</p>}</div>
+          <div><p style={{margin:0,fontSize:15,fontWeight:800,color:D.text}}>Controle Financeiro</p>{syncing&&<p style={{margin:0,fontSize:10,color:D.green}}>● sincronizando...</p>}{!syncing&&syncErro&&<p style={{margin:0,fontSize:10,color:D.gold}}>⚠ sem nuvem — suas alterações estão salvas no aparelho · reconectando…</p>}</div>
         </div>
         <div style={{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
           {PROFILES.map(p=>{const aberto=mercadoAberto(p.id);const corBola=aberto===true?D.green:aberto===false?D.text3:"transparent";return <button key={p.id} onClick={()=>setProfileId(p.id)} title={aberto===true?"Mercado aberto":aberto===false?"Mercado fechado":""} style={{padding:"5px 12px",borderRadius:20,fontSize:12,cursor:"pointer",fontWeight:profileId===p.id?700:400,background:profileId===p.id?D.green:"transparent",color:profileId===p.id?"#000":D.text3,border:`1px solid ${profileId===p.id?D.green:D.border}`,display:"inline-flex",alignItems:"center",gap:6}}><span style={{width:7,height:7,borderRadius:"50%",background:corBola,boxShadow:aberto===true?`0 0 5px ${D.green}`:"none",flexShrink:0}}/>{p.label}</button>;})}
