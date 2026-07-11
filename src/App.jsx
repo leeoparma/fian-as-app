@@ -9,7 +9,7 @@ import {
   calcSaldos as calcSaldosPure, calcDividas as calcDividasPure, totaisPorPessoa as totaisPorPessoaPure,
   salarioMensal, converteMoeda, taxaMensalSim, simularJuros,
   semFotos, mesclarFotos, projetarFluxo, addDias, marcarDuplicatas, montarAgendaPush,
-  compraAcao, vendaAcao, pendentesRecorrenciaSW, relatorioMensal, compararMeses,
+  compraAcao, vendaAcao, pendentesRecorrenciaSW, relatorioMensal, compararMeses, serieGastoAcumulado,
 } from "./calc.mjs";
 
 // Chave pública VAPID (par gerado para este app; a privada é secret no Cloudflare)
@@ -3478,6 +3478,7 @@ function RelatoriosTab({data,setData,currency}){
   const [aiResult,setAiResult]=useState(null);
   const [relMes,setRelMes]=useState("");
   const [relAi,setRelAi]=useState(null);const [relAiBusy,setRelAiBusy]=useState(false);
+  const [relFull,setRelFull]=useState(false);
   const [aiLoading,setAiLoading]=useState(false);
   const [aiErro,setAiErro]=useState("");
 
@@ -3643,10 +3644,10 @@ tbody tr:nth-child(even){background:#fafbfc}
         }catch(e){setRelAi("Erro na análise: "+(e?.message||e));}
         finally{setRelAiBusy(false);}
       };
-      return <Card>
+      return <><Card>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:8}}>
           <Tip text="📊 O fechamento do mês: quanto entrou e saiu, seus maiores gastos, o rendimento da renda fixa (do mês e desde o início de cada aplicação) e a variação real das ações — já descontando aportes e somando vendas do período. A comparação de ações usa a foto de fim de mês da carteira; o primeiro mês cria a base."><p style={{fontSize:14,fontWeight:700,color:D.text,margin:0}}>📊 Relatório mensal</p></Tip>
-          <select value={mk} onChange={e=>setRelMes(e.target.value)} style={{width:"auto",padding:"5px 8px",fontSize:12}}>{opcoes.map(o=>{const[oy,om]=o.split("-").map(Number);return <option key={o} value={o}>{MESES[om-1]} {oy}</option>;})}</select>
+          <div style={{display:"flex",gap:6,alignItems:"center"}}><select value={mk} onChange={e=>setRelMes(e.target.value)} style={{width:"auto",padding:"5px 8px",fontSize:12}}>{opcoes.map(o=>{const[oy,om]=o.split("-").map(Number);return <option key={o} value={o}>{MESES[om-1]} {oy}</option>;})}</select><Btn sm color={D.purple} onClick={()=>setRelFull(true)}>📖 Completo</Btn></div>
         </div>
         {!temAlgo&&<p style={{fontSize:12,color:D.text3}}>Sem movimentações registradas neste mês.</p>}
         {temAlgo&&<>
@@ -3682,7 +3683,125 @@ tbody tr:nth-child(even){background:#fafbfc}
           {relAi&&<div style={{marginTop:8,padding:"10px 12px",background:D.bg3,borderRadius:8,border:`1px solid ${D.purple}44`}}><p style={{fontSize:12,color:D.text2,margin:0,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{relAi}</p></div>}
         </div>
         </>}
-      </Card>;})()}
+      </Card>
+      {relFull&&(()=>{ // 📖 Relatório completo — v3 visual
+        const nomeMes=`${MESES[rm-1]} ${ry}`;
+        const pmIdx=Number(prevKey.split("-")[1]);
+        const nomeMesPrev=MESES[pmIdx-1];
+        const serie=serieGastoAcumulado(data.transacoes,mk);       // testado em calc.mjs
+        const seriePrev=serieGastoAcumulado(data.transacoes,prevKey);
+        const maxA=Math.max(serie[serie.length-1]?.acumulado||0,seriePrev[seriePrev.length-1]?.acumulado||0,1);
+        const pts=s=>s.map((p,i)=>`${10+(i/Math.max(1,s.length-1))*300},${112-(p.acumulado/maxA)*92}`).join(" ");
+        const maxRG=Math.max(R.receitas,R.despesas,Rprev.receitas,Rprev.despesas,1);
+        const Sec=({t,children})=><div style={{marginBottom:28}}><p style={{fontSize:11,fontWeight:700,letterSpacing:1.5,color:D.text3,margin:"0 0 10px"}}>{t}</p>{children}</div>;
+        const BarraRG=({rotulo,cor,atual,anterior,delta,inv})=>(<div style={{marginBottom:14}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4}}>
+            <span style={{fontSize:12,color:D.text2}}>{rotulo}</span>
+            <span style={{fontSize:15,fontWeight:700,color:cor}}>{fmtM(atual,currency)} {cmp.temBase&&seta(delta,inv)}</span>
+          </div>
+          <div style={{height:16,background:D.bg3,borderRadius:8,overflow:"hidden"}}><div style={{width:`${Math.min(100,atual/maxRG*100)}%`,height:"100%",background:cor,borderRadius:8}}/></div>
+          {cmp.temBase&&<div style={{height:8,background:D.bg3,borderRadius:4,overflow:"hidden",marginTop:3,opacity:0.45}}><div style={{width:`${Math.min(100,(anterior||0)/maxRG*100)}%`,height:"100%",background:cor,borderRadius:4}}/></div>}
+          {cmp.temBase&&<p style={{fontSize:10,color:D.text3,margin:"2px 0 0"}}>{nomeMesPrev}: {fmtM(anterior||0,currency)}</p>}
+        </div>);
+        return <div style={{position:"fixed",inset:0,zIndex:2000,background:`linear-gradient(180deg,#0e1730 0%,${D.bg} 260px)`,overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
+          <button onClick={()=>setRelFull(false)} style={{position:"fixed",top:14,right:14,zIndex:2001,width:38,height:38,borderRadius:19,border:`1px solid ${D.border}`,background:D.card,color:D.text2,fontSize:16,cursor:"pointer"}}>✕</button>
+          <div style={{maxWidth:760,margin:"0 auto",padding:"30px 20px 44px"}}>
+            <p style={{fontSize:11,letterSpacing:2.5,color:D.text3,margin:0,textTransform:"uppercase"}}>Relatório mensal</p>
+            <h1 style={{fontSize:27,fontWeight:800,color:D.text,margin:"2px 0 22px"}}>{nomeMes}</h1>
+
+            <div style={{marginBottom:30}}>
+              <p style={{fontSize:11,letterSpacing:1,color:D.text3,margin:0}}>SALDO DO MÊS</p>
+              <p style={{fontSize:"clamp(34px,9vw,56px)",fontWeight:800,lineHeight:1.05,margin:"2px 0 10px",color:R.saldoMes>=0?D.green:D.red}}>{R.saldoMes>=0?"+":"−"}{fmtM(Math.abs(R.saldoMes),currency)}</p>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                {R.poupancaPct!=null&&<span style={{fontSize:12,fontWeight:700,color:"#08130c",background:R.poupancaPct>=0?D.green:D.red,borderRadius:14,padding:"5px 12px"}}>guardou {R.poupancaPct.toFixed(0)}% do que recebeu</span>}
+                {(patFim!=null&&patIni!=null)&&<span style={{fontSize:12,color:D.text2,border:`1px solid ${D.border}`,borderRadius:14,padding:"5px 12px"}}>patrimônio {patFim-patIni>=0?"▲":"▼"} {fmtM(Math.abs(patFim-patIni),currency)} · total <b style={{color:D.text}}>{fmtM(patFim,currency)}</b></span>}
+              </div>
+            </div>
+
+            {temAlgo?<>
+            <Sec t="ENTRADAS E SAÍDAS — COMPARADO COM O MÊS ANTERIOR">
+              <BarraRG rotulo="Recebido" cor={D.green} atual={R.receitas} anterior={Rprev.receitas} delta={cmp.receitas.pct} inv={false}/>
+              <BarraRG rotulo="Gasto" cor={D.red} atual={R.despesas} anterior={Rprev.despesas} delta={cmp.despesas.pct} inv={true}/>
+              {(R.fixos>0||R.variaveis>0)&&<div style={{display:"flex",height:30,borderRadius:9,overflow:"hidden",marginTop:4,border:`1px solid ${D.border}`}}>
+                <div style={{flex:Math.max(R.fixos,0.001),background:D.purple+"cc",display:"flex",alignItems:"center",padding:"0 10px",minWidth:74}}><span style={{fontSize:10,fontWeight:700,color:"#fff",whiteSpace:"nowrap"}}>FIXOS {R.despesas>0?Math.round(R.fixos/R.despesas*100):0}%</span></div>
+                <div style={{flex:Math.max(R.variaveis,0.001),background:D.blue+"aa",display:"flex",alignItems:"center",justifyContent:"flex-end",padding:"0 10px",minWidth:96}}><span style={{fontSize:10,fontWeight:700,color:"#fff",whiteSpace:"nowrap"}}>VARIÁVEIS {R.despesas>0?Math.round(R.variaveis/R.despesas*100):0}%</span></div>
+              </div>}
+            </Sec>
+
+            <Sec t="RITMO DO GASTO — DIA A DIA">
+              <svg viewBox="0 0 320 122" style={{width:"100%",height:"auto",display:"block"}}>
+                <line x1="10" y1="112" x2="310" y2="112" stroke={D.border} strokeWidth="1"/>
+                <polyline points={pts(seriePrev)} fill="none" stroke={D.text3} strokeWidth="1.5" strokeDasharray="4 3" opacity="0.8"/>
+                <polyline points={pts(serie)} fill="none" stroke={D.gold} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"/>
+              </svg>
+              <div style={{display:"flex",gap:16,marginTop:6,flexWrap:"wrap"}}>
+                <span style={{fontSize:10,color:D.text2}}><span style={{display:"inline-block",width:16,height:3,background:D.gold,borderRadius:2,verticalAlign:"middle",marginRight:5}}/>{nomeMes}</span>
+                <span style={{fontSize:10,color:D.text3}}><span style={{display:"inline-block",width:16,height:3,background:D.text3,borderRadius:2,verticalAlign:"middle",marginRight:5,opacity:0.8}}/>{nomeMesPrev} (tracejado)</span>
+              </div>
+            </Sec>
+
+            {R.topCategorias.length>0&&<Sec t="PARA ONDE FOI O DINHEIRO">
+              <div style={{display:"flex",gap:20,alignItems:"center",flexWrap:"wrap"}}>
+                {(()=>{
+                  const resto=Math.max(0,R.despesas-R.topCategorias.reduce((a,c)=>a+c.total,0));
+                  const fatias=[...R.topCategorias.map((c,i)=>({v:c.total,cor:CORES[i%CORES.length]})),...(resto>0.01?[{v:resto,cor:D.text3}]:[])];
+                  const tot=fatias.reduce((a,f)=>a+f.v,0)||1;
+                  const C=2*Math.PI*42;let off=0;
+                  return <svg viewBox="0 0 120 120" style={{width:136,height:136,flexShrink:0}}>
+                    {fatias.map((f,i)=>{const fr=f.v/tot;const el=<circle key={i} cx="60" cy="60" r="42" fill="none" stroke={f.cor} strokeWidth="15" strokeDasharray={`${Math.max(0,fr*C-1.5)} ${C}`} strokeDashoffset={-off*C} transform="rotate(-90 60 60)"/>;off+=fr;return el;})}
+                    <text x="60" y="56" textAnchor="middle" fill={D.text3} fontSize="8" letterSpacing="1">GASTO</text>
+                    <text x="60" y="70" textAnchor="middle" fill={D.text} fontSize="11" fontWeight="700">{currency} {Math.round(R.despesas).toLocaleString("pt-BR")}</text>
+                  </svg>;})()}
+                <div style={{flex:1,minWidth:230}}>
+                  {R.topCategorias.map((c,i)=>(<div key={c.categoria} style={{marginBottom:9}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                      <span style={{fontSize:12,color:D.text2}}><span style={{display:"inline-block",width:8,height:8,borderRadius:4,background:CORES[i%CORES.length],marginRight:6}}/>{c.categoria}</span>
+                      <span style={{fontSize:12,color:D.text,fontWeight:600}}>{fmtM(c.total,currency)} {cmp.temBase&&seta(cmp.categorias[c.categoria]?.pct,true)}</span>
+                    </div>
+                    <div style={{height:6,background:D.bg3,borderRadius:3}}><div style={{width:`${Math.min(100,c.pct)}%`,height:"100%",background:CORES[i%CORES.length],borderRadius:3,opacity:0.85}}/></div>
+                  </div>))}
+                </div>
+              </div>
+            </Sec>}
+
+            {R.topLancamentos.length>0&&<Sec t="MAIORES LANÇAMENTOS DO MÊS">
+              {R.topLancamentos.map((t,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:i<R.topLancamentos.length-1?`1px solid ${D.border}`:"none"}}>
+                <div style={{minWidth:0}}>
+                  <p style={{fontSize:13,color:D.text,margin:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</p>
+                  <p style={{fontSize:10,color:D.text3,margin:0}}>{(t.data||"").slice(8,10)}/{(t.data||"").slice(5,7)} · {t.categoria}</p>
+                </div>
+                <span style={{fontSize:14,fontWeight:700,color:D.text,flexShrink:0,marginLeft:10}}>{fmtM(t.valor,currency)}</span>
+              </div>))}
+            </Sec>}
+
+            {(R.rf.length>0||R.acoes.length>0||!R.temBaseAcoes)&&<Sec t="INVESTIMENTOS NO MÊS">
+              {R.rf.length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8,marginBottom:12}}>
+                {R.rf.map((x,i)=>(<div key={i} style={{background:D.bg3,borderRadius:10,padding:"10px 12px"}}>
+                  <p style={{fontSize:10,color:D.text3,margin:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{x.descricao}</p>
+                  <p style={{fontSize:16,fontWeight:700,color:D.green,margin:"2px 0 0"}}>+{fmtM(x.rendMes,currency)}</p>
+                  <p style={{fontSize:10,color:D.text3,margin:0}}>no mês · acum. {fmtM(x.acumulado,currency)}</p>
+                </div>))}
+              </div>}
+              {!R.temBaseAcoes&&<p style={{fontSize:11,color:D.text3,margin:"0 0 6px"}}>A variação mensal das ações estreia no próximo mês fechado (a base por ativo começou a ser registrada agora).</p>}
+              {R.acoes.length>0&&R.acoes.slice(0,8).map((a,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${D.border}`}}>
+                <span style={{fontSize:13,color:D.text2}}>{a.nome}{a.novo?<span style={{fontSize:10,color:D.text3}}> · novo no mês</span>:null}</span>
+                {a.ganho==null?<span style={{fontSize:12,color:D.text3}}>{fmtM(a.valorFim,currency)}</span>:<span style={{fontSize:14,fontWeight:700,color:a.ganho>=0?D.green:D.red}}>{a.ganho>=0?"+":""}{fmtM(a.ganho,currency)}</span>}
+              </div>))}
+              {R.temBaseAcoes&&R.acoes.some(a=>a.ganho!=null)&&<p style={{fontSize:12,color:D.text2,margin:"8px 0 0",textAlign:"right"}}>Total ações no mês: <b style={{color:R.acoesTotalGanho>=0?D.green:D.red}}>{R.acoesTotalGanho>=0?"+":""}{fmtM(R.acoesTotalGanho,currency)}</b></p>}
+            </Sec>}
+
+            <Sec t="PARECER DO MÊS">
+              {!relAi&&<Btn color={D.purple} onClick={analisarMesIA} disabled={relAiBusy}>{relAiBusy?"Analisando seu mês…":"🤖 Gerar análise do mês"}</Btn>}
+              {relAi&&<div style={{borderLeft:`3px solid ${D.purple}`,background:D.bg3,borderRadius:"0 10px 10px 0",padding:"12px 14px"}}>
+                <p style={{fontSize:13,color:D.text2,margin:0,lineHeight:1.7,whiteSpace:"pre-wrap"}}>{relAi}</p>
+              </div>}
+            </Sec>
+            </>:<p style={{fontSize:13,color:D.text3}}>Sem movimentações registradas neste mês.</p>}
+
+            <p style={{fontSize:10,color:D.text3,textAlign:"center",margin:"34px 0 0",letterSpacing:0.5}}>Controle Financeiro · relatório gerado em {new Date().toLocaleDateString("pt-BR")}</p>
+          </div>
+        </div>;})()}
+      </>;})()}
     <Card>
       <p style={{fontSize:14,fontWeight:700,color:D.text,marginBottom:10}}>📄 Relatórios</p>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8}}>
