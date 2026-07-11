@@ -844,6 +844,7 @@ function BancoCard({b,data,setData,currency,extratoBanco,setExtratoBanco,onEdit}
 function BancosTab({data,setData,currency}){
   const [modal,setModal]=useState(false);const [form,setForm]=useState({});
   const [transf,setTransf]=useState({de:"",para:"",valor:""});const [extratoBanco,setExtratoBanco]=useState(null);
+  const [buscaExt,setBuscaExt]=useState("");
   function saveBanco(){const clampDia=v=>{const n=parseInt(v,10);return n>=1&&n<=31?n:null;};const b={id:form.editId||uid(),nome:form.nome||"Banco",saldoInicial:parseFloat(form.saldoInicial)||0,limite:parseFloat(form.limite)||0,tipo:form.tipo||"corrente",diaFecha:clampDia(form.diaFecha),diaVence:clampDia(form.diaVence)};setData(d=>({...d,bancos:form.editId?d.bancos.map(x=>x.id===form.editId?b:x):[...d.bancos,b]}));setModal(false);setForm({});}
   function doTransf(){const v=parseFloat(transf.valor);if(!v||!transf.de||!transf.para||transf.de===transf.para)return;const dt=hoje.toISOString().slice(0,10);setData(d=>({...d,transacoes:[...d.transacoes,{id:uid(),tipo:"despesa",descricao:`Transf. → ${d.bancos.find(b=>b.id===transf.para)?.nome}`,valor:v,categoria:"Transferência",data:dt,bancoId:transf.de},{id:uid(),tipo:"receita",descricao:`Transf. ← ${d.bancos.find(b=>b.id===transf.de)?.nome}`,valor:v,categoria:"Transferência",data:dt,bancoId:transf.para}]}));setTransf({de:"",para:"",valor:""});}
   function sc(b){const txs=data.transacoes.filter(t=>t.bancoId===b.id);return(b.saldoInicial||0)+txs.filter(t=>t.tipo==="receita").reduce((a,x)=>a+x.valor,0)-txs.filter(t=>t.tipo==="despesa").reduce((a,x)=>a+x.valor,0);}
@@ -851,6 +852,13 @@ function BancosTab({data,setData,currency}){
   const totalI=data.bancos.reduce((a,b)=>a+data.investimentos.filter(i=>i.bancoId===b.id).reduce((x,y)=>x+(y.valorAtual||y.valorInvestido||y.valor||0),0),0);
   const bExtr=extratoBanco?data.bancos.find(b=>b.id===extratoBanco):null;
   const txExtr=bExtr?extratoComSaldo(bExtr,data.transacoes):[]; // testado em calc.mjs (invariante: 1ª linha = saldo do banco)
+  const qE=buscaExt.trim().toLowerCase();
+  const txVisE=!qE?txExtr:txExtr.filter(t=>{
+    const dBR=(t.data||"").split("-").reverse().join("/");
+    return (t.descricao||"").toLowerCase().includes(qE)||(t.categoria||"").toLowerCase().includes(qE)
+      ||String(t.valor).includes(qE)||String(t.saldoApos).includes(qE)
+      ||(t.data||"").includes(qE)||dBR.includes(qE);
+  });
   return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
       <Btn onClick={()=>{setModal(true);setForm({});}}>+ Novo banco</Btn>
@@ -863,10 +871,12 @@ function BancosTab({data,setData,currency}){
     {extratoBanco&&bExtr&&<Card>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
         <p style={{fontSize:14,fontWeight:700,color:D.text}}>📄 Extrato — {bExtr.nome}</p>
-        <button onClick={()=>setExtratoBanco(null)} style={{border:"none",background:"none",cursor:"pointer",fontSize:18,color:D.text3}}>✕</button>
+        <button onClick={()=>{setExtratoBanco(null);setBuscaExt("");}} style={{border:"none",background:"none",cursor:"pointer",fontSize:18,color:D.text3}}>✕</button>
       </div>
+      {txExtr.length>1&&<input placeholder="🔎 Buscar por descrição, categoria, valor, saldo ou data…" value={buscaExt} onChange={e=>setBuscaExt(e.target.value)} style={{marginBottom:8,padding:"7px 10px",fontSize:12}}/>}
+      {qE&&txVisE.length>0&&<p style={{fontSize:11,color:D.text3,margin:"0 0 6px"}}>{txVisE.length} de {txExtr.length} lançamentos</p>}
       {txExtr.length>0&&<div style={{display:"flex",justifyContent:"space-between",padding:"4px 0 8px",fontSize:10,color:D.text3,letterSpacing:0.5}}><span>LANÇAMENTO</span><span>VALOR · SALDO APÓS</span></div>}
-      {txExtr.length===0?<p style={{fontSize:13,color:D.text3}}>Sem movimentações.</p>:txExtr.map(t=><div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${D.border}`,fontSize:13,gap:10}}>
+      {txExtr.length===0?<p style={{fontSize:13,color:D.text3}}>Sem movimentações.</p>:txVisE.length===0?<p style={{fontSize:13,color:D.text3}}>Nada encontrado. <button onClick={()=>setBuscaExt("")} style={{border:"none",background:"none",cursor:"pointer",color:D.blue,fontSize:12}}>limpar busca</button></p>:txVisE.map(t=><div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${D.border}`,fontSize:13,gap:10}}>
         <div style={{minWidth:0}}><p style={{margin:0,fontWeight:500,color:D.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</p><p style={{margin:0,fontSize:11,color:D.text3}}>{t.categoria} · {(t.data||"").split("-").reverse().join("/")}</p></div>
         <div style={{textAlign:"right",flexShrink:0}}>
           <p style={{margin:0,fontWeight:700,color:t.tipo==="receita"?D.green:D.red}}>{t.tipo==="receita"?"+":"-"}{fmtM(t.valor,currency)}</p>
