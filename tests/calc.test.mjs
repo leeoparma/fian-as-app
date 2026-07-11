@@ -13,7 +13,7 @@ import {
   calcSaldos,calcDividas,totaisPorPessoa,
   salarioMensal,converteMoeda,taxaMensalSim,simularJuros,
   semFotos,mesclarFotos,projetarFluxo,ocorrenciasRecorrencia,addDias,marcarDuplicatas,montarAgendaPush,compraAcao,vendaAcao,
-  ocorrenciasSWAte,pendentesRecorrenciaSW,relatorioMensal,compararMeses,serieGastoAcumulado,
+  ocorrenciasSWAte,pendentesRecorrenciaSW,relatorioMensal,compararMeses,serieGastoAcumulado,extratoComSaldo,
 } from "../src/calc.mjs";
 
 const aprox=(a,b,tol=0.01)=>assert.ok(Math.abs(a-b)<=tol,`esperado ~${b}, veio ${a}`);
@@ -560,4 +560,24 @@ test("gasto acumulado: fevereiro tem 28 pontos e mês vazio é linha zero", ()=>
   const s=serieGastoAcumulado([],"2026-02");
   assert.equal(s.length,28);
   aprox(s[27].acumulado,0);
+});
+
+// ── Extrato com saldo corrente ───────────────────────────────────────────────
+test("extrato: saldo linha a linha; a linha mais recente fecha com saldoBancoCalc", ()=>{
+  const banco={id:"b1",nome:"NAB",saldoInicial:1000};
+  const txs=[
+    {id:"t1",tipo:"despesa",valor:200,bancoId:"b1",data:"2026-07-05",descricao:"Mercado"},
+    {id:"t2",tipo:"receita",valor:3000,bancoId:"b1",data:"2026-07-01",descricao:"Salário"},
+    {id:"t3",tipo:"despesa",valor:50,bancoId:"b1",data:"2026-07-05",descricao:"Uber"},
+    {id:"t4",tipo:"despesa",valor:999,bancoId:"OUTRO",data:"2026-07-03"},
+  ];
+  const ex=extratoComSaldo(banco,txs);
+  assert.equal(ex.length,3);                    // ignora o de outro banco
+  assert.equal(ex[2].id,"t2");aprox(ex[2].saldoApos,4000);   // 01/07: 1000+3000
+  assert.equal(ex[1].id,"t1");aprox(ex[1].saldoApos,3800);   // 05/07 (1º criado)
+  assert.equal(ex[0].id,"t3");aprox(ex[0].saldoApos,3750);   // 05/07 (2º criado)
+  aprox(ex[0].saldoApos,saldoBanco(banco,txs));              // invariante fecha
+});
+test("extrato: banco sem movimentações devolve lista vazia", ()=>{
+  assert.deepEqual(extratoComSaldo({id:"bx",saldoInicial:10},[]),[]);
 });
