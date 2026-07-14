@@ -4167,21 +4167,23 @@ function AppInner(){
     if(!session)return;
     let cancelado=false;
     async function puxar(){
-      if(cancelado||!loadOk.current||_pendenteDeSalvar)return;
-      if(Date.now()-ultimaEdicaoLocal.current<4000)return; // edição em andamento — não atropela o save
+      if(cancelado||!loadOk.current||_pendenteDeSalvar){console.log("[puxar] pulado — loadOk:",loadOk.current,"pendente:",_pendenteDeSalvar);return;}
+      if(Date.now()-ultimaEdicaoLocal.current<4000){console.log("[puxar] pulado — edição recente");return;}
       try{
         const sess=lsGet("session")||session;
+        console.log("[puxar] consultando a nuvem…");
         const r=await supa.load(sess.token,sess.user.id);
-        if(cancelado||!r)return;
+        if(cancelado||!r){console.log("[puxar] sem dados na nuvem");return;}
         const cloudTs=r.__updated_at?new Date(r.__updated_at).getTime():0;
         delete r.__updated_at;
         const localTs=parseInt(lsGet("all_profiles_ts")||"0",10);
+        console.log("[puxar] nuvem:",new Date(cloudTs).toISOString(),"local:",new Date(localTs).toISOString(),cloudTs>localTs?"→ TRAZENDO":"→ já atualizado");
         if(cloudTs>localTs){ // outro aparelho salvou algo mais novo — traz para cá
           setAllData(r);
           lsSet("all_profiles",r);
           lsSet("all_profiles_ts",String(cloudTs));
         }
-      }catch{} // silencioso de propósito: é só um "será que mudou?" de fundo
+      }catch(e){console.log("[puxar] ERRO:",e?.message||e);} // logado por enquanto para diagnóstico
     }
     const iv=setInterval(puxar,25000);
     const aoFoco=()=>{if(document.visibilityState==="visible")puxar();};
