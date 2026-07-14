@@ -39,6 +39,12 @@ export function calcFaturaPagamentos(faturas,totalPago){
 }
 
 // ── Renda fixa e impostos ────────────────────────────────────────────────────
+// Único critério correto de RF: o campo `tipo`. NUNCA usar indice/taxaRF para
+// classificar — todo ativo (inclusive ações) nasce com indice:"CDI" e
+// taxaRF:0 por padrão no formulário, então esses campos sempre existem e um
+// filtro baseado neles classifica TUDO como RF por engano (bug real, corrigido
+// em 14/07/2026 — atingia também o relatório mensal).
+export function isRFAtivo(inv){return !!inv&&(inv.tipo==="Renda Fixa"||inv.tipo==="Tesouro Direto");}
 export function calcRFAnual(inv){const indice=inv.indice||"CDI",taxa=parseFloat(inv.taxaRF)||0,pct=parseFloat(inv.pctIndice)||100;if(indice==="Prefixado")return taxa;const base=INDICES_RATE[indice]||10.5;return inv.rfTipo==="pct"?base*(pct/100):base+taxa;}
 // `agora` é parâmetro (default = hoje) só para permitir teste determinístico.
 export function calcValorAtualRF(inv,agora=new Date()){const anos=(agora-new Date(inv.data))/(1000*60*60*24*365);return(inv.valorInvestido||inv.valor||0)*Math.pow(1+calcRFAnual(inv)/100,Math.max(0,anos));}
@@ -399,7 +405,7 @@ export function relatorioMensal({mesKey,transacoes=[],investimentos=[],snapIni=n
   const [y,m]=mesKey.split("-").map(Number);
   const fimD=new Date(y,m,0), iniD=new Date(y,m-1,0);   // último dia do mês / do anterior
   const fimStr=_ymdC(fimD);
-  const rf=(investimentos||[]).filter(i=>i&&((i.taxaRF!=null&&i.taxaRF!=="")||i.indice)&&i.data&&i.data<=fimStr).map(i=>{
+  const rf=(investimentos||[]).filter(i=>isRFAtivo(i)&&i.data&&i.data<=fimStr).map(i=>{
     const vFim=calcValorAtualRF(i,fimD), vIni=calcValorAtualRF(i,iniD);
     const investido=(i.valorInvestido||i.valor||0);
     return {descricao:i.descricao||i.ticker||"Renda fixa",rendMes:vFim-vIni,acumulado:vFim-investido,valorFim:vFim};
@@ -511,7 +517,7 @@ export function serieRentabilidadeRF(investimentosRF,inicio,fim){
 // ── Composição da carteira de ações (para o donut) ───────────────────────────
 // % de cada ativo sobre o total investido em renda variável (não-RF).
 export function composicaoAcoes(investimentos){
-  const acoes=(investimentos||[]).filter(i=>i&&!((i.taxaRF!=null&&i.taxaRF!=="")||i.indice));
+  const acoes=(investimentos||[]).filter(i=>!isRFAtivo(i));
   const itens=acoes.map(i=>({ticker:i.ticker||i.descricao||"Ativo",valor:i.valorAtual||i.valorInvestido||i.valor||0}))
     .filter(x=>x.valor>0.005);
   const total=itens.reduce((a,x)=>a+x.valor,0);
@@ -530,7 +536,7 @@ export function composicaoAcoes(investimentos){
 // histórico não é mais somado aqui (seguindo o mesmo limite já aceito no
 // relatório mensal).
 export function rentabilidadeAcoesDesdeInicio(investimentos){
-  const acoes=(investimentos||[]).filter(i=>i&&!((i.taxaRF!=null&&i.taxaRF!=="")||i.indice));
+  const acoes=(investimentos||[]).filter(i=>!isRFAtivo(i));
   const valorAtual=acoes.reduce((a,i)=>a+(i.valorAtual||i.valorInvestido||i.valor||0),0);
   const custo=acoes.reduce((a,i)=>a+(i.valorInvestido||i.valor||0),0);
   const realizado=acoes.reduce((a,i)=>a+(i.vendas||[]).reduce((s,v)=>s+(v.resultado||0),0),0);
@@ -541,7 +547,7 @@ export function rentabilidadeAcoesDesdeInicio(investimentos){
 export function ganhoAcoesEntreSnapshots(investimentos,snapIni,iniStr,fimStr){
   if(!Array.isArray(snapIni)||!snapIni.length)return {temBase:false,valor:0,pct:null};
   let ganho=0,baseTotal=0;
-  const vivos=(investimentos||[]).filter(i=>i&&!((i.taxaRF!=null&&i.taxaRF!=="")||i.indice));
+  const vivos=(investimentos||[]).filter(i=>!isRFAtivo(i));
   for(const f of vivos){
     const ini=snapIni.find(x=>x&&x.id===f.id);
     if(!ini)continue; // ativo novo no período — sem base, não entra na conta
