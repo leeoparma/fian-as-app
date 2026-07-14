@@ -29,11 +29,15 @@ const supa={
   // Troca o refresh_token por um access_token novo (o access dura ~1h)
   async refresh(rt){const r=await fetch(`${SUPA_URL}/auth/v1/token?grant_type=refresh_token`,{method:"POST",headers:supa.h,body:JSON.stringify({refresh_token:rt})});if(!r.ok)return null;return r.json();},
   async load(t,id){
-    const resp=await fetch(`${SUPA_URL}/rest/v1/profiles?id=eq.${id}&select=data`,{headers:supa.ah(t)});
+    const resp=await fetch(`${SUPA_URL}/rest/v1/profiles?id=eq.${id}&select=data,updated_at`,{headers:supa.ah(t)});
     if(!resp.ok){const e=new Error("Supabase load HTTP "+resp.status);e.status=resp.status;throw e;} // 4xx/5xx (ex: restoring) -> erro, NÃO conta vazia
     const r=await resp.json();
     if(!Array.isArray(r)) throw new Error("Resposta inesperada do servidor"); // formato errado -> erro
-    return r?.[0]?.data||null; // array vazio = conta realmente nova
+    const row=r?.[0];
+    if(!row)return null; // array vazio = conta realmente nova
+    const d=row.data||null;
+    if(d)d.__updated_at=row.updated_at; // usado só para a proteção local×nuvem no boot; nunca é salvo de volta
+    return d;
   },
   async save(t,id,d){const resp=await fetch(`${SUPA_URL}/rest/v1/profiles`,{method:"POST",headers:{...supa.ah(t),"Prefer":"resolution=merge-duplicates"},body:JSON.stringify({id,data:d,updated_at:new Date().toISOString()})});if(!resp.ok){const e=new Error("Supabase save HTTP "+resp.status);e.status=resp.status;throw e;}},
   // Backups automáticos (tabela public.backups — ver backups.sql)
@@ -70,16 +74,28 @@ async function renovarSessao(){
 }
 // Salva na nuvem lendo o token NA HORA (não um token velho preso na closure);
 // se tomar 401, renova a sessão e tenta mais uma vez.
+// Estado global de falha de save — lido pelo banner. Reseta a "" no próximo save OK.
+let _saveErroGlobal="";const _saveErroOuvintes=new Set();
+function setSaveErro(msg){_saveErroGlobal=msg;_saveErroOuvintes.forEach(fn=>fn(msg));}
 async function salvarComRetry(id,dados){
   const t=lsGet("session")?.token;
   if(!t)return;
-  try{await supa.save(t,id,dados);}
-  catch(e){
+  const marcarLocal=()=>{try{lsSet("all_profiles_ts",String(Date.now()));}catch{}};
+  try{
+    await supa.save(t,id,dados);
+    marcarLocal();setSaveErro("");
+  }catch(e){
     if(e?.status===401){
-      const ns=await renovarSessao();
-      if(!ns)throw e;
-      await supa.save(ns.token,id,dados);
-    }else throw e;
+      try{
+        const ns=await renovarSessao();
+        if(!ns)throw e;
+        await supa.save(ns.token,id,dados);
+        marcarLocal();setSaveErro("");
+      }catch(e2){setSaveErro("Não consegui salvar na nuvem (sessão). Seus dados estão seguros neste aparelho.");throw e2;}
+    }else{
+      setSaveErro("Não consegui salvar na nuvem — verifique a internet. Seus dados estão seguros neste aparelho.");
+      throw e;
+    }
   }
 }
 
@@ -4069,6 +4085,8 @@ function AppInner(){
   // Evita que uma leitura falha (ex: Supabase acordando da pausa) sobrescreva dados bons com vazio.
   const loadOk=useRef(false);
   const editouSemNuvem=useRef(false); // edições feitas enquanto a nuvem estava fora
+  const [saveErro,setSaveErroUI]=useState("");
+  useEffect(()=>{const fn=m=>setSaveErroUI(m);_saveErroOuvintes.add(fn);setSaveErroUI(_saveErroGlobal);return()=>_saveErroOuvintes.delete(fn);},[]);
   const [syncErro,setSyncErro]=useState(false);
   const [cambio,setCambio]=useState(null);          // {brl,usd,aud} valor de cada moeda em BRL
   const [moedaCons,setMoedaCons]=useState(()=>lsGet("moeda_cons")||"BRL"); // moeda de exibição do consolidado
@@ -4135,15 +4153,22 @@ function AppInner(){
         }
         if(cancelado)return;
         if(r){
-          if(editouSemNuvem.current){
-            // Você editou enquanto a nuvem estava fora: o LOCAL é mais novo.
-            // Sobe o local — a nuvem antiga não apaga suas alterações.
+          // Proteção por timestamp: se o que está NESTE aparelho foi salvo
+          // localmente DEPOIS do último save aceito pela nuvem (ex.: a nuvem
+          // ficou fora de ar por dias e você seguiu lançando), o local é a
+          // verdade — a nuvem velha NUNCA sobrescreve o local mais novo.
+          const localTs=parseInt(lsGet("all_profiles_ts")||"0",10);
+          const cloudTs=r.__updated_at?new Date(r.__updated_at).getTime():0;
+          delete r.__updated_at; // nunca deixa esse carimbo entrar em all_profiles / na nuvem
+          const localMaisNovo=localTs>0&&cloudTs>0&&localTs>cloudTs;
+          if(editouSemNuvem.current||localMaisNovo){
             loadOk.current=true;
             const local=lsGet("all_profiles");
             if(local){try{await salvarComRetry(sess.user.id,local);}catch{}}
           }else{
             setAllData(r);
             lsSet("all_profiles",r);
+            lsSet("all_profiles_ts",String(cloudTs||Date.now()));
             loadOk.current=true;
             backupAutomatico(r); // 1×/dia, silencioso
             sincronizarAgendaPush(r); // push: agenda dos próximos 7 dias
@@ -4359,7 +4384,7 @@ function AppInner(){
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%"}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
           <img src="/logo.svg" alt="logo" style={{width:34,height:34,borderRadius:9,filter:`drop-shadow(0 0 8px ${D.green}66)`}}/>
-          <div><p style={{margin:0,fontSize:15,fontWeight:800,color:D.text}}>Controle Financeiro</p>{syncing&&<p style={{margin:0,fontSize:10,color:D.green}}>● sincronizando...</p>}{!syncing&&syncErro&&<p style={{margin:0,fontSize:10,color:D.gold}}>⚠ sem nuvem — suas alterações estão salvas no aparelho · reconectando…</p>}</div>
+          <div><p style={{margin:0,fontSize:15,fontWeight:800,color:D.text}}>Controle Financeiro</p>{syncing&&<p style={{margin:0,fontSize:10,color:D.green}}>● sincronizando...</p>}{!syncing&&syncErro&&<p style={{margin:0,fontSize:10,color:D.gold}}>⚠ sem nuvem — suas alterações estão salvas no aparelho · reconectando…</p>}{!syncing&&!syncErro&&saveErro&&<p style={{margin:0,fontSize:10,color:D.red}}>⚠ {saveErro}</p>}</div>
           </div>
           <button onClick={handleLogout} style={{padding:"5px 12px",borderRadius:16,fontSize:11,cursor:"pointer",background:D.red+"22",border:`1px solid ${D.red}44`,color:D.red,flexShrink:0}}>Sair</button>
         </div>
