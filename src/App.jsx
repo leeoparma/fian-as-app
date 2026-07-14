@@ -77,14 +77,16 @@ async function renovarSessao(){
 // Estado global de falha de save — lido pelo banner. Reseta a "" no próximo save OK.
 let _saveErroGlobal="";const _saveErroOuvintes=new Set();
 function setSaveErro(msg){_saveErroGlobal=msg;_saveErroOuvintes.forEach(fn=>fn(msg));}
+let _pendenteDeSalvar=false; // true enquanto existir uma gravação que ainda não foi confirmada pela nuvem
 async function salvarComRetry(id,dados){
   const t=lsGet("session")?.token;
   if(!t)return;
   const marcarLocal=()=>{try{lsSet("all_profiles_ts",String(Date.now()));}catch{}};
   try{
     await supa.save(t,id,dados);
-    marcarLocal();setSaveErro("");
+    marcarLocal();setSaveErro("");_pendenteDeSalvar=false;
   }catch(e){
+    _pendenteDeSalvar=true;
     if(e?.status===401){
       try{
         const ns=await renovarSessao();
@@ -97,6 +99,32 @@ async function salvarComRetry(id,dados){
       throw e;
     }
   }
+}
+// Vigia de gravação: se um save falhar, ninguém mais o repete sozinho — sem
+// isto, o banner de erro ficava aceso para sempre e a última edição podia
+// nunca chegar à nuvem até você editar de novo por acaso. Este vigia tenta de
+// novo com o all_profiles ATUAL (sempre a verdade, pois o local grava primeiro
+// — ver setData) quando a rede volta, a aba volta ao foco, e por um relógio de
+// fundo com backoff crescente.
+function iniciarVigiaDeSalvamento(getSessionId){
+  const ESPERAS=[4000,10000,25000,45000,60000];
+  let tentativa=0,timer=null,rodando=false;
+  async function tentar(){
+    if(rodando)return;
+    if(!_pendenteDeSalvar){timer=setTimeout(tentar,ESPERAS[0]);return;}
+    const id=getSessionId();
+    if(!id){timer=setTimeout(tentar,ESPERAS[0]);return;}
+    rodando=true;
+    const dados=lsGet("all_profiles");
+    try{if(dados)await salvarComRetry(id,dados);tentativa=0;}
+    catch{tentativa=Math.min(tentativa+1,ESPERAS.length-1);}
+    rodando=false;
+    timer=setTimeout(tentar,ESPERAS[tentativa]);
+  }
+  const retomar=()=>{clearTimeout(timer);tentar();};
+  window.addEventListener("online",retomar);
+  document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")retomar();});
+  timer=setTimeout(tentar,ESPERAS[0]);
 }
 
 // Executa uma chamada autenticada, renovando a sessão e repetindo 1x se tomar 401
@@ -4085,6 +4113,11 @@ function AppInner(){
   // Evita que uma leitura falha (ex: Supabase acordando da pausa) sobrescreva dados bons com vazio.
   const loadOk=useRef(false);
   const editouSemNuvem=useRef(false); // edições feitas enquanto a nuvem estava fora
+  const vigiaLigado=useRef(false);
+  useEffect(()=>{
+    if(vigiaLigado.current)return;vigiaLigado.current=true;
+    iniciarVigiaDeSalvamento(()=>lsGet("session")?.user?.id||null);
+  },[]);
   const [saveErro,setSaveErroUI]=useState("");
   useEffect(()=>{const fn=m=>setSaveErroUI(m);_saveErroOuvintes.add(fn);setSaveErroUI(_saveErroGlobal);return()=>_saveErroOuvintes.delete(fn);},[]);
   const [syncErro,setSyncErro]=useState(false);
