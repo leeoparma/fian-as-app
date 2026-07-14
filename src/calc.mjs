@@ -471,3 +471,49 @@ export function extratoComSaldo(banco,transacoes){
   });
   return out.reverse();
 }
+
+// ── Rentabilidade da Renda Fixa (dia · mês · ano · desde o início) ───────────
+// Usa calcValorAtualRF (determinístico, sem depender de snapshot) para achar
+// o valor total da carteira RF em qualquer instante do passado.
+function _valorTotalRF(rf,data){return (rf||[]).reduce((a,i)=>a+calcValorAtualRF(i,data),0);}
+export function rentabilidadeRF(investimentosRF,hoje=new Date()){
+  const rf=(investimentosRF||[]).filter(Boolean);
+  const hj=new Date(hoje.getFullYear(),hoje.getMonth(),hoje.getDate());
+  const ontem=new Date(hj);ontem.setDate(ontem.getDate()-1);
+  const inicioMes=new Date(hj.getFullYear(),hj.getMonth(),1);
+  const inicioAno=new Date(hj.getFullYear(),0,1);
+  const vHoje=_valorTotalRF(rf,hj);
+  const investidoTotal=rf.reduce((a,i)=>a+(i.valorInvestido||i.valor||0),0);
+  const calc=(base)=>{const v=_valorTotalRF(rf,base);return {valor:vHoje-v,pct:v>0?(vHoje-v)/v*100:null};};
+  return {
+    valorTotal:Math.round(vHoje*100)/100,
+    dia:calc(ontem),
+    mes:calc(inicioMes),
+    ano:calc(inicioAno),
+    desdeInicio:{valor:vHoje-investidoTotal,pct:investidoTotal>0?(vHoje-investidoTotal)/investidoTotal*100:null},
+  };
+}
+// Curva diária de rentabilidade (%) entre duas datas — para o gráfico "no mês/no ano".
+// pct de cada dia é relativo ao valor do PRIMEIRO dia da série (a "baseline").
+export function serieRentabilidadeRF(investimentosRF,inicio,fim){
+  const rf=(investimentosRF||[]).filter(Boolean);
+  const ini=new Date(inicio.getFullYear(),inicio.getMonth(),inicio.getDate());
+  const fimD=new Date(fim.getFullYear(),fim.getMonth(),fim.getDate());
+  const base=_valorTotalRF(rf,ini);
+  const out=[];
+  for(let d=new Date(ini);d<=fimD;d.setDate(d.getDate()+1)){
+    const v=_valorTotalRF(rf,d);
+    out.push({data:_ymdC(d),valor:Math.round(v*100)/100,pct:base>0?Math.round((v-base)/base*100*10000)/10000:0});
+  }
+  return out;
+}
+
+// ── Composição da carteira de ações (para o donut) ───────────────────────────
+// % de cada ativo sobre o total investido em renda variável (não-RF).
+export function composicaoAcoes(investimentos){
+  const acoes=(investimentos||[]).filter(i=>i&&!((i.taxaRF!=null&&i.taxaRF!=="")||i.indice));
+  const itens=acoes.map(i=>({ticker:i.ticker||i.descricao||"Ativo",valor:i.valorAtual||i.valorInvestido||i.valor||0}))
+    .filter(x=>x.valor>0.005);
+  const total=itens.reduce((a,x)=>a+x.valor,0);
+  return itens.map(x=>({...x,pct:total>0?x.valor/total*100:0})).sort((a,b)=>b.valor-a.valor);
+}
