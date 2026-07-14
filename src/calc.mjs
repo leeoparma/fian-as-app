@@ -7,7 +7,7 @@
 
 // ── Constantes de negócio ────────────────────────────────────────────────────
 // Movimentos internos: não são receita nem despesa de verdade (não entram nos totais)
-export const CAT_INTERNAS=["Transferência","Aplicação","Resgate"];
+export const CAT_INTERNAS=["Transferência","Aplicação","Resgate","Pagamento de fatura"];
 // Taxas anuais de referência usadas na renda fixa e no simulador (estáticas)
 export const INDICES_RATE={CDI:10.5,Selic:10.5,IPCA:4.62,IGPM:5.1};
 
@@ -19,6 +19,24 @@ export function _ddmm(d){return d?`${String(d.getDate()).padStart(2,"0")}/${Stri
 export function faturaDeCompra(diaFecha,dataStr){const d=new Date(dataStr+"T00:00:00");let c=_clampDia(d.getFullYear(),d.getMonth(),diaFecha);if(d>c)c=_clampDia(d.getFullYear(),d.getMonth()+1,diaFecha);return c;}
 export function vencimentoDe(fechaDate,diaFecha,diaVence){if(diaVence>=diaFecha)return _clampDia(fechaDate.getFullYear(),fechaDate.getMonth(),diaVence);return _clampDia(fechaDate.getFullYear(),fechaDate.getMonth()+1,diaVence);}
 export function faturaAbertaHoje(diaFecha,hojeD){const h=new Date(hojeD);h.setHours(0,0,0,0);let fecha=_clampDia(h.getFullYear(),h.getMonth(),diaFecha);if(h>fecha)fecha=_clampDia(h.getFullYear(),h.getMonth()+1,diaFecha);return fecha;}
+
+// Soma paga de fatura de um cartão específico (perna "receita" do pagamento, ver App.jsx doPagarFatura)
+export function totalPagoFatura(transacoes,cartaoId){
+  return (transacoes||[]).filter(t=>t&&t.tipo==="receita"&&t.categoria==="Pagamento de fatura"&&t.bancoId===cartaoId).reduce((a,t)=>a+(t.valor||0),0);
+}
+// Abatimento em cascata: quita a fatura fechada mais antiga não paga primeiro, excedente abate a
+// aberta, sobra vira crédito para a próxima. `faturas` deve vir ordenada (mais antiga → mais nova,
+// como já produz o agrupamento de CartaoTab); faturas "futura" não consomem o total pago aqui.
+export function calcFaturaPagamentos(faturas,totalPago){
+  let saldo=totalPago||0;
+  const porFatura=(faturas||[]).map(f=>{
+    if(f.status==="futura")return {...f,pago:0,restante:f.total};
+    const pago=Math.min(saldo,f.total);
+    saldo-=pago;
+    return {...f,pago,restante:Math.round((f.total-pago)*100)/100};
+  });
+  return {porFatura,creditoDisponivel:Math.round(saldo*100)/100};
+}
 
 // ── Renda fixa e impostos ────────────────────────────────────────────────────
 export function calcRFAnual(inv){const indice=inv.indice||"CDI",taxa=parseFloat(inv.taxaRF)||0,pct=parseFloat(inv.pctIndice)||100;if(indice==="Prefixado")return taxa;const base=INDICES_RATE[indice]||10.5;return inv.rfTipo==="pct"?base*(pct/100):base+taxa;}

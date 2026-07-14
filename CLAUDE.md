@@ -14,6 +14,7 @@ App de controle financeiro pessoal usado por Leo e sua parceira Carol. Suporta p
 - **Proxy/API:** Cloudflare Worker (`controlfinanceiro.leeo-parms.workers.dev`). ATENÇÃO: o Worker NÃO faz deploy via git — exige clicar em "Deploy" manualmente no painel da Cloudflare. Se uma mudança envolver o Worker, avisar o Leo explicitamente que ele precisa fazer esse deploy manual.
 - **Backend/dados:** Supabase (`llpzdrqgvkpxjnecttkb.supabase.co`) — auth e dados.
 - **Cotações:** brapi (apenas módulos gratuitos — NÃO usar módulos pagos) com fallback para Yahoo Finance.
+- **Cartões de crédito:** não são uma entidade própria — são `bancos` com `tipo==="cartão"` (`limite`, `diaFecha`, `diaVence`). As faturas são calculadas na hora em `CartaoTab`, agrupando despesas por `faturaDeCompra()` — não existem persistidas (o array `data.faturas` é um recurso aposentado do modelo antigo, não usar).
 
 ## Regras de segurança — NÃO QUEBRAR
 
@@ -27,6 +28,7 @@ App de controle financeiro pessoal usado por Leo e sua parceira Carol. Suporta p
 - **Preço médio de ações:** convenção de execução da corretora (broker execution convention), validada contra notas de corretagem reais do Leo.
 - **Corretagem:** é uma despesa real e visível no app, não embutida silenciosamente no preço.
 - **Fluxos de investimento:** ➕ Aportar e ➖ Vender são os fluxos oficiais de compra/venda.
+- **Pagamento de fatura de cartão:** abatimento em cascata — quita a fatura fechada mais antiga não paga primeiro, excedente abate a aberta, sobra vira crédito para a próxima (`calcFaturaPagamentos` em `calc.mjs`). Implementado como duas transações emparelhadas (despesa no banco de origem + receita no banco-cartão, categoria `"Pagamento de fatura"`, incluída em `CAT_INTERNAS`), igual ao padrão já usado em Transferência entre bancos. Vale só para lançamentos feitos a partir de 14/07/2026 em diante — nada retroativo.
 
 ## Limitações conhecidas e ACEITAS (não "corrigir")
 
@@ -45,6 +47,7 @@ App de controle financeiro pessoal usado por Leo e sua parceira Carol. Suporta p
 
 - **Relatório Mensal:** v3 entregue e aprovada (10/07/2026) — fullscreen com saldo, barras mês a mês, curva de gasto acumulado, donut de categorias, fixo/variável, patrimônio, renda fixa e ações. Seção completa de ações chega no relatório de agosto. Upgrades futuros só por uso real, a pedido do Leo.
 - **Próxima feature grande:** "como uso meu dinheiro" — análise de gastos com IA (ver regra 4 de segurança). Design já definido: (1) explicar gastos por categoria/% da renda em linguagem simples, (2) identificar candidatos a desperdício em R$/mês e R$/ano, (3) sugerir ajustes que economizam sem reduzir qualidade de vida, (4) plano de poupança dividido por metas.
+- **Pagamento de fatura de cartão:** entregue (14/07/2026) — card "💳 Pagar fatura" na aba Cartão, abatimento em cascata, mostra pago/falta por fatura e crédito disponível. Cobertura de testes em `calc.mjs`. Ainda não testado logado com dados reais do Leo (Claude não tem acesso às credenciais Supabase) — validar visualmente antes de considerar 100% fechado.
 
 ## Fluxo de trabalho com o Leo
 

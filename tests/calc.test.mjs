@@ -6,7 +6,7 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {
-  CAT_INTERNAS,_ymdC,faturaDeCompra,vencimentoDe,faturaAbertaHoje,
+  CAT_INTERNAS,_ymdC,faturaDeCompra,vencimentoDe,faturaAbertaHoje,totalPagoFatura,calcFaturaPagamentos,
   calcRFAnual,calcValorAtualRF,calcImpostoBR,calcImpostoAU,
   aporteMedio,totalProventoAgendado,diasAte,
   totaisTransacoes,saldoBanco,parcelaValor,parcelaData,
@@ -51,6 +51,74 @@ test("fatura aberta hoje: antes do fechamento é a do mês", ()=>{
 });
 test("fatura aberta hoje: depois do fechamento é a do mês seguinte", ()=>{
   assert.equal(_ymdC(faturaAbertaHoje(15,new Date(2026,6,20))),"2026-08-15");
+});
+
+// ── Cartão: pagamento de fatura ───────────────────────────────────────────────
+test("pagamento de fatura: categoria é interna (não conta como receita/despesa real)", ()=>{
+  assert.ok(CAT_INTERNAS.includes("Pagamento de fatura"));
+});
+test("totalPagoFatura: soma só receitas de pagamento daquele cartão", ()=>{
+  const txs=[
+    {tipo:"receita",categoria:"Pagamento de fatura",bancoId:"cartaoA",valor:200},
+    {tipo:"receita",categoria:"Pagamento de fatura",bancoId:"cartaoA",valor:50},
+    {tipo:"receita",categoria:"Pagamento de fatura",bancoId:"cartaoB",valor:999}, // outro cartão
+    {tipo:"despesa",categoria:"Pagamento de fatura",bancoId:"cartaoA",valor:250}, // a perna de origem, não conta aqui
+    {tipo:"receita",categoria:"Salário",bancoId:"cartaoA",valor:1000}, // receita normal, não é pagamento
+  ];
+  assert.equal(totalPagoFatura(txs,"cartaoA"),250);
+});
+test("cascata: pagamento quita só a fatura fechada mais antiga, resto fica intacto", ()=>{
+  const faturas=[
+    {k:"2026-05-15",total:300,status:"anterior"},
+    {k:"2026-06-15",total:400,status:"anterior"},
+    {k:"2026-07-15",total:500,status:"aberta"},
+  ];
+  const {porFatura,creditoDisponivel}=calcFaturaPagamentos(faturas,300);
+  assert.equal(porFatura[0].pago,300); assert.equal(porFatura[0].restante,0);
+  assert.equal(porFatura[1].pago,0); assert.equal(porFatura[1].restante,400);
+  assert.equal(porFatura[2].pago,0); assert.equal(porFatura[2].restante,500);
+  assert.equal(creditoDisponivel,0);
+});
+test("cascata: excedente da fatura anterior abate a aberta", ()=>{
+  const faturas=[
+    {k:"2026-06-15",total:300,status:"anterior"},
+    {k:"2026-07-15",total:500,status:"aberta"},
+  ];
+  const {porFatura,creditoDisponivel}=calcFaturaPagamentos(faturas,450);
+  assert.equal(porFatura[0].restante,0);
+  assert.equal(porFatura[1].pago,150); assert.equal(porFatura[1].restante,350);
+  assert.equal(creditoDisponivel,0);
+});
+test("cascata: pagamento maior que todas as faturas vira crédito para a próxima", ()=>{
+  const faturas=[
+    {k:"2026-06-15",total:300,status:"anterior"},
+    {k:"2026-07-15",total:500,status:"aberta"},
+  ];
+  const {porFatura,creditoDisponivel}=calcFaturaPagamentos(faturas,1000);
+  assert.equal(porFatura[0].restante,0);
+  assert.equal(porFatura[1].restante,0);
+  assert.equal(creditoDisponivel,200);
+});
+test("cascata: fatura futura nunca é abatida, mesmo sobrando saldo", ()=>{
+  const faturas=[
+    {k:"2026-07-15",total:500,status:"aberta"},
+    {k:"2026-08-15",total:600,status:"futura"},
+  ];
+  const {porFatura,creditoDisponivel}=calcFaturaPagamentos(faturas,1000);
+  assert.equal(porFatura[1].pago,0); assert.equal(porFatura[1].restante,600);
+  assert.equal(creditoDisponivel,500); // 1000 - 500 da aberta, nada vai pra futura
+});
+test("cascata: sem nenhum pagamento, tudo fica em aberto e sem crédito", ()=>{
+  const faturas=[{k:"2026-07-15",total:500,status:"aberta"}];
+  const {porFatura,creditoDisponivel}=calcFaturaPagamentos(faturas,0);
+  assert.equal(porFatura[0].pago,0); assert.equal(porFatura[0].restante,500);
+  assert.equal(creditoDisponivel,0);
+});
+test("cascata: pagamento exato zera a fatura sem sobra", ()=>{
+  const faturas=[{k:"2026-07-15",total:123.45,status:"aberta"}];
+  const {porFatura,creditoDisponivel}=calcFaturaPagamentos(faturas,123.45);
+  assert.equal(porFatura[0].restante,0);
+  assert.equal(creditoDisponivel,0);
 });
 
 // ── Renda fixa e impostos ────────────────────────────────────────────────────
@@ -114,7 +182,7 @@ test("diasAte: hoje=0, amanhã=1, +30=30, passado=negativo, inválida=null", ()=
 });
 
 // ── Totais com categorias internas ───────────────────────────────────────────
-test("totais: Transferência/Aplicação/Resgate não inflam receita nem despesa", ()=>{
+test("totais: Transferência/Aplicação/Resgate/Pagamento de fatura não inflam receita nem despesa", ()=>{
   const txs=[
     {tipo:"receita",valor:1000,categoria:"Salário"},
     {tipo:"despesa",valor:200,categoria:"Mercado"},
@@ -122,10 +190,12 @@ test("totais: Transferência/Aplicação/Resgate não inflam receita nem despesa
     {tipo:"receita",valor:500,categoria:"Transferência"},
     {tipo:"despesa",valor:300,categoria:"Aplicação"},
     {tipo:"receita",valor:150,categoria:"Resgate"},
+    {tipo:"despesa",valor:400,categoria:"Pagamento de fatura"},
+    {tipo:"receita",valor:400,categoria:"Pagamento de fatura"},
   ];
   const {receitas,despesas}=totaisTransacoes(txs);
   aprox(receitas,1000);aprox(despesas,200);
-  assert.deepEqual(CAT_INTERNAS,["Transferência","Aplicação","Resgate"]);
+  assert.deepEqual(CAT_INTERNAS,["Transferência","Aplicação","Resgate","Pagamento de fatura"]);
 });
 
 // ── Saldo de banco ───────────────────────────────────────────────────────────

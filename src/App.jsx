@@ -10,6 +10,7 @@ import {
   salarioMensal, converteMoeda, taxaMensalSim, simularJuros,
   semFotos, mesclarFotos, projetarFluxo, addDias, marcarDuplicatas, montarAgendaPush,
   compraAcao, vendaAcao, pendentesRecorrenciaSW, relatorioMensal, compararMeses, serieGastoAcumulado, extratoComSaldo,
+  totalPagoFatura, calcFaturaPagamentos,
 } from "./calc.mjs";
 
 // Chave pública VAPID (par gerado para este app; a privada é secret no Cloudflare)
@@ -3392,6 +3393,7 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
 function CartaoTab({data,setData,currency,mes}){
   const hojeStr=new Date().toISOString().slice(0,10);
   const [histAberto,setHistAberto]=useState({});
+  const [pagForm,setPagForm]=useState({cartaoId:"",bancoOrigemId:"",valor:"",data:hojeStr});
   const sBanco=b=>{const txs=data.transacoes.filter(t=>t.bancoId===b.id);return(b.saldoInicial||0)+txs.filter(t=>t.tipo==="receita").reduce((a,x)=>a+x.valor,0)-txs.filter(t=>t.tipo==="despesa").reduce((a,x)=>a+x.valor,0);};
   const cartoes=data.bancos.filter(b=>b.tipo==="cartão").map(b=>{
     const saldo=sBanco(b), limite=b.limite||0, usado=Math.max(0,-saldo);
@@ -3400,31 +3402,50 @@ function CartaoTab({data,setData,currency,mes}){
     const gastoMes=txs.filter(t=>{if(t.tipo!=="despesa")return false;const d=new Date(t.data);return d.getMonth()===mes&&d.getFullYear()===ANO_ATUAL;}).reduce((a,x)=>a+x.valor,0);
     const futuras=txs.filter(t=>t.tipo==="despesa"&&t.parceladoId&&t.data>hojeStr).reduce((a,x)=>a+x.valor,0);
     const diaFecha=b.diaFecha||null, diaVence=b.diaVence||null;
-    let faturas=null;
+    let faturas=null, creditoDisponivel=0;
     if(diaFecha){
       const grupos={};
       txs.filter(t=>t.tipo==="despesa").forEach(t=>{const k=_ymdC(faturaDeCompra(diaFecha,t.data));(grupos[k]=grupos[k]||[]).push(t);});
       const abertaK=_ymdC(faturaAbertaHoje(diaFecha,new Date()));
       if(!grupos[abertaK]) grupos[abertaK]=[];
-      faturas=Object.keys(grupos).sort().map(k=>{
+      const faturasBrutas=Object.keys(grupos).sort().map(k=>{
         const fechaDate=new Date(k+"T00:00:00");
         const venceDate=diaVence?vencimentoDe(fechaDate,diaFecha,diaVence):null;
         const total=grupos[k].reduce((a,x)=>a+x.valor,0);
         const status=k<abertaK?"anterior":k===abertaK?"aberta":"futura";
         return {k,fechaDate,venceDate,total,itens:grupos[k].slice().sort((a,b)=>a.data.localeCompare(b.data)),status};
       });
+      // Pagamentos abatem em cascata: fechada mais antiga → aberta → crédito (calc.mjs, testado)
+      const totalPago=totalPagoFatura(data.transacoes,b.id);
+      const calc=calcFaturaPagamentos(faturasBrutas,totalPago);
+      faturas=calc.porFatura;
+      creditoDisponivel=calc.creditoDisponivel;
     }
-    return {b,saldo,limite,usado,disp,pct,gastoMes,futuras,diaFecha,diaVence,faturas};
+    return {b,saldo,limite,usado,disp,pct,gastoMes,futuras,diaFecha,diaVence,faturas,creditoDisponivel};
   });
   const totLimite=cartoes.reduce((a,c)=>a+c.limite,0);
   const totUsado=cartoes.reduce((a,c)=>a+c.usado,0);
   const totFuturas=cartoes.reduce((a,c)=>a+c.futuras,0);
   const faturasAntigas=data.faturas||[];
+  const bancosOrigem=data.bancos.filter(b=>b.tipo!=="cartão");
+  function doPagarFatura(){
+    const v=parseFloat(pagForm.valor);
+    if(!v||v<=0||!pagForm.cartaoId||!pagForm.bancoOrigemId){alert("Selecione o cartão, o banco de origem e um valor maior que zero.");return;}
+    const dt=pagForm.data||hojeStr;
+    const pagId=uid();
+    const cartaoNome=data.bancos.find(x=>x.id===pagForm.cartaoId)?.nome||"Cartão";
+    const origemNome=data.bancos.find(x=>x.id===pagForm.bancoOrigemId)?.nome||"Banco";
+    setData(d=>({...d,transacoes:[...d.transacoes,
+      {id:uid(),tipo:"despesa",descricao:`Pagamento fatura ${cartaoNome}`,valor:v,categoria:"Pagamento de fatura",data:dt,bancoId:pagForm.bancoOrigemId,pagamentoFaturaId:pagId},
+      {id:uid(),tipo:"receita",descricao:`Pagamento fatura ← ${origemNome}`,valor:v,categoria:"Pagamento de fatura",data:dt,bancoId:pagForm.cartaoId,pagamentoFaturaId:pagId},
+    ]}));
+    setPagForm({cartaoId:"",bancoOrigemId:"",valor:"",data:hojeStr});
+  }
 
   return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
     <Card>
       <p style={{fontSize:14,fontWeight:700,color:D.text,marginBottom:4}}>💳 Cartões</p>
-      <p style={{fontSize:11,color:D.text3,lineHeight:1.5}}>Calculado dos seus lançamentos. Um banco aparece aqui quando você o marca como <b>Cartão de crédito</b> (na aba Bancos → editar → Tipo). Você lança compra por compra — sem fatura fechada.</p>
+      <p style={{fontSize:11,color:D.text3,lineHeight:1.5}}>Calculado dos seus lançamentos. Um banco aparece aqui quando você o marca como <b>Cartão de crédito</b> (na aba Bancos → editar → Tipo). Você lança compra por compra — sem fatura fechada. Pagamentos abatem a fatura fechada mais antiga primeiro, depois a aberta; o que sobrar vira crédito para a próxima.</p>
     </Card>
 
     {cartoes.length===0
@@ -3444,6 +3465,7 @@ function CartaoTab({data,setData,currency,mes}){
               <div style={{background:D.bg3,borderRadius:5,height:8,overflow:"hidden",marginBottom:6}}><div style={{width:c.pct+"%",height:8,borderRadius:5,background:c.pct>90?D.red:c.pct>70?D.gold:D.green}}/></div>
               <p style={{margin:0,fontSize:13}}><span style={{color:D.text3}}>Disponível: </span><span style={{fontWeight:700,color:c.disp>=0?D.green:D.red}}>{fmtM(c.disp,currency)}</span></p>
             </>:<p style={{margin:0,fontSize:12,color:D.text3}}>Sem limite definido — saldo {fmtM(c.saldo,currency)}</p>}
+            {c.creditoDisponivel>0&&<p style={{margin:"4px 0 0",fontSize:12}}><span style={{color:D.text3}}>Crédito disponível: </span><span style={{fontWeight:700,color:D.green}}>{fmtM(c.creditoDisponivel,currency)}</span></p>}
             {c.faturas&&(()=>{
               const aberta=c.faturas.find(f=>f.status==="aberta");
               const futuras=c.faturas.filter(f=>f.status==="futura");
@@ -3456,6 +3478,7 @@ function CartaoTab({data,setData,currency,mes}){
                     <span style={{fontSize:18,fontWeight:800,color:D.gold}}>{fmtM(aberta.total,currency)}</span>
                   </div>
                   <p style={{margin:"2px 0 0",fontSize:11,color:D.text3}}>fecha {_ddmm(aberta.fechaDate)}{aberta.venceDate?` · vence ${_ddmm(aberta.venceDate)}`:""}</p>
+                  {aberta.pago>0&&<p style={{margin:"4px 0 0",fontSize:11}}>{aberta.restante<=0?<span style={{color:D.green,fontWeight:700}}>✓ Paga</span>:<><span style={{color:D.text3}}>pago {fmtM(aberta.pago,currency)} · falta </span><span style={{color:D.gold,fontWeight:700}}>{fmtM(aberta.restante,currency)}</span></>}</p>}
                 </div>}
                 {futuras.length>0&&<div style={{marginBottom:6}}>
                   <p style={{margin:"0 0 4px",fontSize:11,color:D.text3,fontWeight:600}}>Próximas faturas</p>
@@ -3467,11 +3490,14 @@ function CartaoTab({data,setData,currency,mes}){
                 {anteriores.length>0&&<>
                   <button onClick={()=>setHistAberto(h=>({...h,[c.b.id]:!h[c.b.id]}))} style={{border:"none",background:"none",cursor:"pointer",fontSize:11,color:D.blue,padding:0}}>{exp?"▼":"▶"} Faturas anteriores ({anteriores.length})</button>
                   {exp&&<div style={{marginTop:4}}>
-                    {anteriores.map(f=><div key={f.k} style={{fontSize:12,padding:"3px 0",borderBottom:`1px solid ${D.border}`,display:"flex",justifyContent:"space-between"}}>
-                      <span style={{color:D.text3}}>{MESES[f.fechaDate.getMonth()]}/{f.fechaDate.getFullYear()}{f.venceDate?` · venceu ${_ddmm(f.venceDate)}`:""}</span>
-                      <span style={{color:D.text2,fontWeight:600}}>{fmtM(f.total,currency)}</span>
+                    {anteriores.map(f=><div key={f.k} style={{fontSize:12,padding:"3px 0",borderBottom:`1px solid ${D.border}`}}>
+                      <div style={{display:"flex",justifyContent:"space-between"}}>
+                        <span style={{color:D.text3}}>{MESES[f.fechaDate.getMonth()]}/{f.fechaDate.getFullYear()}{f.venceDate?` · venceu ${_ddmm(f.venceDate)}`:""}</span>
+                        <span style={{color:D.text2,fontWeight:600}}>{fmtM(f.total,currency)}</span>
+                      </div>
+                      <div style={{textAlign:"right"}}>{f.restante<=0?<span style={{color:D.green,fontSize:11,fontWeight:700}}>✓ Paga</span>:<span style={{color:D.red,fontSize:11}}>falta {fmtM(f.restante,currency)}</span>}</div>
                     </div>)}
-                    <p style={{margin:"6px 0 0",fontSize:10,color:D.text3,lineHeight:1.4}}>Agrupamento das mesmas compras que já contam no "Usado" — não é dívida extra. O app não marca fatura como paga.</p>
+                    <p style={{margin:"6px 0 0",fontSize:10,color:D.text3,lineHeight:1.4}}>Agrupamento das mesmas compras que já contam no "Usado" — não é dívida extra.</p>
                   </div>}
                 </>}
               </div>;
@@ -3483,6 +3509,18 @@ function CartaoTab({data,setData,currency,mes}){
             </div>
           </Card>)}
         </div>
+        {bancosOrigem.length>0&&<Card>
+          <p style={{fontSize:14,fontWeight:700,color:D.text,marginBottom:10}}>💳 Pagar fatura</p>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+            <label style={{fontSize:12,color:D.text3}}>Cartão<select value={pagForm.cartaoId} onChange={e=>setPagForm(f=>({...f,cartaoId:e.target.value}))} style={{marginTop:4}}><option value="">Selecione...</option>{cartoes.map(c=><option key={c.b.id} value={c.b.id}>{c.b.nome}</option>)}</select></label>
+            <label style={{fontSize:12,color:D.text3}}>De (origem)<select value={pagForm.bancoOrigemId} onChange={e=>setPagForm(f=>({...f,bancoOrigemId:e.target.value}))} style={{marginTop:4}}><option value="">Selecione...</option>{bancosOrigem.map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}</select></label>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+            <label style={{fontSize:12,color:D.text3}}>Valor ({currency})<input type="number" value={pagForm.valor} onChange={e=>setPagForm(f=>({...f,valor:e.target.value}))} style={{marginTop:4}}/></label>
+            <label style={{fontSize:12,color:D.text3}}>Data<input type="date" value={pagForm.data} onChange={e=>setPagForm(f=>({...f,data:e.target.value}))} style={{marginTop:4}}/></label>
+          </div>
+          <Btn onClick={doPagarFatura} color={D.purple}>Pagar</Btn>
+        </Card>}
       </>}
 
     {faturasAntigas.length>0&&<Card>
