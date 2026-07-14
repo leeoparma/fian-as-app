@@ -11,6 +11,7 @@ import {
   semFotos, mesclarFotos, projetarFluxo, addDias, marcarDuplicatas, montarAgendaPush,
   compraAcao, vendaAcao, pendentesRecorrenciaSW, relatorioMensal, compararMeses, serieGastoAcumulado, extratoComSaldo,
   totalPagoFatura, calcFaturaPagamentos,
+rentabilidadeRF, serieRentabilidadeRF, composicaoAcoes,
 } from "./calc.mjs";
 
 // Chave pública VAPID (par gerado para este app; a privada é secret no Cloudflare)
@@ -1383,6 +1384,7 @@ ${paginas}
 // ── Investimentos Tab ─────────────────────────────────────────────────────────
 function InvestimentosTab({data,setData,currency,profileId}){
   const [view,setView]=useState("classe");
+  const [perRF,setPerRF]=useState("mes");
   const [modal,setModal]=useState(false);const [form,setForm]=useState({});
   const [chartTicker,setChartTicker]=useState(null);const [loadingId,setLoadingId]=useState(null);
   const [modalDiv,setModalDiv]=useState(false);const [divForm,setDivForm]=useState({});
@@ -1613,6 +1615,52 @@ function InvestimentosTab({data,setData,currency,profileId}){
         </div>
       </div>
     </Card>
+
+    {(()=>{ // 📈 Rentabilidade da Renda Fixa (dia/mês/ano/desde o início) — testado em calc.mjs
+      const rf=data.investimentos.filter(i=>i&&((i.taxaRF!=null&&i.taxaRF!=="")||i.indice));
+      if(!rf.length)return null;
+      const hoje=new Date();
+      const R=rentabilidadeRF(rf,hoje);
+      const PERIODOS={dia:{lbl:"1 dia",ini:new Date(hoje.getFullYear(),hoje.getMonth(),hoje.getDate()-1)},mes:{lbl:"No mês",ini:new Date(hoje.getFullYear(),hoje.getMonth(),1)},ano:{lbl:"No ano",ini:new Date(hoje.getFullYear(),0,1)},inicio:{lbl:"Desde o início",ini:new Date(Math.min(...rf.map(i=>new Date(i.data).getTime())))}};
+      const p=PERIODOS[perRF];
+      const serie=serieRentabilidadeRF(rf,p.ini,hoje);
+      const info=perRF==="inicio"?R.desdeInicio:R[perRF];
+      const maxAbs=Math.max(...serie.map(s=>Math.abs(s.pct)),0.01);
+      const pts=serie.map((s,i)=>`${8+(i/Math.max(1,serie.length-1))*284},${64-(s.pct/maxAbs)*50}`).join(" ");
+      return <Card>
+        <p style={{fontSize:11,color:D.text3,margin:"0 0 2px",letterSpacing:0.5}}>RENTABILIDADE · RENDA FIXA</p>
+        <p style={{fontSize:20,fontWeight:800,color:D.text,margin:"0 0 10px"}}>{fmtM(R.valorTotal,currency)}</p>
+        <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+          {Object.entries(PERIODOS).map(([k,v])=><button key={k} onClick={()=>setPerRF(k)} style={{padding:"5px 10px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:perRF===k?700:400,background:perRF===k?D.green:"transparent",color:perRF===k?"#04120a":D.text3}}>{v.lbl}</button>)}
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}}>
+          <span style={{fontSize:12,color:D.text3}}>Rendeu no período</span>
+          <span style={{fontSize:16,fontWeight:700,color:(info.valor||0)>=0?D.green:D.red}}>{(info.valor||0)>=0?"+":""}{fmtM(info.valor||0,currency)} {info.pct!=null&&<span style={{fontSize:12}}>({info.pct>=0?"+":""}{info.pct.toFixed(2)}%)</span>}</span>
+        </div>
+        {serie.length>1&&<svg viewBox="0 0 300 70" style={{width:"100%",height:"auto",display:"block"}}>
+          <line x1="8" y1="64" x2="292" y2="64" stroke={D.border} strokeWidth="1"/>
+          <polyline points={pts} fill="none" stroke={(info.valor||0)>=0?D.green:D.red} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/>
+        </svg>}
+      </Card>;})()}
+
+    {(()=>{ // 🥧 Composição da carteira de ações — testado em calc.mjs
+      const C=composicaoAcoes(data.investimentos);
+      if(C.length<2)return null;
+      const CS=2*Math.PI*42;let off=0;
+      return <Card>
+        <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>🥧 Composição da carteira (ações)</p>
+        <div style={{display:"flex",gap:20,alignItems:"center",flexWrap:"wrap"}}>
+          <svg viewBox="0 0 120 120" style={{width:130,height:130,flexShrink:0}}>
+            {C.map((c,i)=>{const fr=c.pct/100;const el=<circle key={c.ticker} cx="60" cy="60" r="42" fill="none" stroke={CORES[i%CORES.length]} strokeWidth="16" strokeDasharray={`${Math.max(0,fr*CS-1.5)} ${CS}`} strokeDashoffset={-off*CS} transform="rotate(-90 60 60)"/>;off+=fr;return el;})}
+          </svg>
+          <div style={{flex:1,minWidth:180}}>
+            {C.map((c,i)=><div key={c.ticker} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0"}}>
+              <span style={{color:D.text2}}><span style={{display:"inline-block",width:8,height:8,borderRadius:4,background:CORES[i%CORES.length],marginRight:6}}/>{c.ticker}</span>
+              <span style={{color:D.text,fontWeight:600}}>{c.pct.toFixed(1)}% <span style={{color:D.text3,fontWeight:400}}>· {fmtM(c.valor,currency)}</span></span>
+            </div>)}
+          </div>
+        </div>
+      </Card>;})()}
 
     {/* Meta de aporte mensal */}
     <Card>
