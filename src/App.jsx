@@ -75,6 +75,11 @@ async function renovarSessao(){
 // Salva na nuvem lendo o token NA HORA (não um token velho preso na closure);
 // se tomar 401, renova a sessão e tenta mais uma vez.
 // Estado global de falha de save — lido pelo banner. Reseta a "" no próximo save OK.
+function parseSupaTs(s){
+  if(!s)return 0;
+  const temFuso=/[Zz]|[+-]\d\d:\d\d$/.test(s);
+  return new Date(temFuso?s:s+"Z").getTime();
+}
 let _saveErroGlobal="";const _saveErroOuvintes=new Set();
 function setSaveErro(msg){_saveErroGlobal=msg;_saveErroOuvintes.forEach(fn=>fn(msg));}
 let _pendenteDeSalvar=false; // true enquanto existir uma gravação que ainda não foi confirmada pela nuvem
@@ -4174,7 +4179,7 @@ function AppInner(){
         console.log("[puxar] consultando a nuvem…");
         const r=await supa.load(sess.token,sess.user.id);
         if(cancelado||!r){console.log("[puxar] sem dados na nuvem");return;}
-        const cloudTs=r.__updated_at?new Date(r.__updated_at).getTime():0;
+        const cloudTs=parseSupaTs(r.__updated_at);
         delete r.__updated_at;
         const localTs=parseInt(lsGet("all_profiles_ts")||"0",10);
         console.log("[puxar] nuvem:",new Date(cloudTs).toISOString(),"local:",new Date(localTs).toISOString(),cloudTs>localTs?"→ TRAZENDO":"→ já atualizado");
@@ -4225,7 +4230,7 @@ function AppInner(){
           // ficou fora de ar por dias e você seguiu lançando), o local é a
           // verdade — a nuvem velha NUNCA sobrescreve o local mais novo.
           const localTs=parseInt(lsGet("all_profiles_ts")||"0",10);
-          const cloudTs=r.__updated_at?new Date(r.__updated_at).getTime():0;
+          const cloudTs=parseSupaTs(r.__updated_at);
           delete r.__updated_at; // nunca deixa esse carimbo entrar em all_profiles / na nuvem
           const localMaisNovo=localTs>0&&cloudTs>0&&localTs>cloudTs;
           if(editouSemNuvem.current||localMaisNovo){
