@@ -15,7 +15,7 @@ import {
   semFotos,mesclarFotos,projetarFluxo,ocorrenciasRecorrencia,addDias,marcarDuplicatas,montarAgendaPush,compraAcao,vendaAcao,
   ocorrenciasSWAte,pendentesRecorrenciaSW,relatorioMensal,compararMeses,serieGastoAcumulado,extratoComSaldo,
 rentabilidadeRF,serieRentabilidadeRF,composicaoAcoes,
-rentabilidadeAcoesDesdeInicio,ganhoAcoesEntreSnapshots,rentabilidadeAcoes,
+rentabilidadeAcoesDesdeInicio,ganhoAcoesEntreSnapshots,rentabilidadeAcoes,isRFAtivo,
 } from "../src/calc.mjs";
 
 const aprox=(a,b,tol=0.01)=>assert.ok(Math.abs(a-b)<=tol,`esperado ~${b}, veio ${a}`);
@@ -534,7 +534,7 @@ test("relatório: top categorias ordenado com percentual", ()=>{
   assert.equal(R.topLancamentos[0].descricao,"Aluguel");
 });
 test("relatório RF: rendimento do mês + acumulado (prefixado, determinístico)", ()=>{
-  const inv={indice:"Prefixado",taxaRF:"12",valorInvestido:10000,data:"2026-01-01",descricao:"CDB"};
+  const inv={tipo:"Renda Fixa",indice:"Prefixado",taxaRF:"12",valorInvestido:10000,data:"2026-01-01",descricao:"CDB"};
   const R=relatorioMensal({mesKey:"2026-06",transacoes:[],investimentos:[inv]});
   const vIni=calcValorAtualRF(inv,new Date(2026,4,31)), vFim=calcValorAtualRF(inv,new Date(2026,5,30));
   aprox(R.rf[0].rendMes,vFim-vIni,0.01);
@@ -680,7 +680,7 @@ test("composicaoAcoes: percentuais somam ~100% e ordena por valor desc", ()=>{
   const invs=[
     {ticker:"BBAS3",valorAtual:3000},
     {ticker:"ITUB4",valorAtual:2000},
-    {ticker:"CDB-teste",indice:"CDI",taxaRF:"0",valorInvestido:5000}, // RF: fora do donut
+    {tipo:"Renda Fixa",ticker:"CDB-teste",indice:"CDI",taxaRF:"0",valorInvestido:5000}, // RF: fora do donut
   ];
   const C=composicaoAcoes(invs);
   assert.equal(C.length,2); // RF excluída
@@ -740,4 +740,27 @@ test("rentabilidadeAcoes: sem historico nenhum, mês/ano ficam sem base (honesto
   assert.equal(R.mes.temBase,false);
   assert.equal(R.ano.temBase,false);
   assert.equal(R.desdeInicio.valor,20);
+});
+
+// ── Regressão: ação com indice/taxaRF default NÃO pode virar RF (bug real 14/07) ──
+// Todo ativo nasce com indice:"CDI" e taxaRF:0 no formulário — inclusive ações.
+// A classificação tem que usar SÓ o campo `tipo`, nunca indice/taxaRF.
+test("isRFAtivo: ação com indice/taxaRF padrão (mas tipo='Ações') não é RF", ()=>{
+  const acao={tipo:"Ações",ticker:"BBAS3",indice:"CDI",taxaRF:0,valorAtual:1000};
+  assert.equal(isRFAtivo(acao),false);
+});
+test("isRFAtivo: só tipo Renda Fixa / Tesouro Direto conta como RF", ()=>{
+  assert.equal(isRFAtivo({tipo:"Renda Fixa"}),true);
+  assert.equal(isRFAtivo({tipo:"Tesouro Direto"}),true);
+  assert.equal(isRFAtivo({tipo:"Ações"}),false);
+  assert.equal(isRFAtivo({}),false); // sem tipo (legado) não vira RF por acidente
+});
+test("composicaoAcoes: ação com indice/taxaRF default entra no donut normalmente", ()=>{
+  const invs=[
+    {tipo:"Ações",ticker:"BBAS3",indice:"CDI",taxaRF:0,valorAtual:600},
+    {tipo:"Ações",ticker:"ITUB4",indice:"CDI",taxaRF:0,valorAtual:400},
+  ];
+  const C=composicaoAcoes(invs);
+  assert.equal(C.length,2);
+  aprox(C[0].pct,60);aprox(C[1].pct,40);
 });
