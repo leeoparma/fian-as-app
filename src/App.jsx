@@ -4113,6 +4113,7 @@ function AppInner(){
   // Evita que uma leitura falha (ex: Supabase acordando da pausa) sobrescreva dados bons com vazio.
   const loadOk=useRef(false);
   const editouSemNuvem=useRef(false); // edições feitas enquanto a nuvem estava fora
+  const ultimaEdicaoLocal=useRef(0);
   const vigiaLigado=useRef(false);
   useEffect(()=>{
     if(vigiaLigado.current)return;vigiaLigado.current=true;
@@ -4157,6 +4158,37 @@ function AppInner(){
     for(const p of PROFILES){total+=converte(patrimonioPerfil(p.id),p.id,moedaCons)||0;}
     return total;
   }
+
+  // Puxa a nuvem periodicamente enquanto o app fica aberto — sem isto, um
+  // lançamento feito noutro aparelho só apareceria aqui se você recarregasse a
+  // página manualmente. Nunca pisa em cima de edição local recente ou não
+  // confirmada (a proteção "local vence" continua valendo).
+  useEffect(()=>{
+    if(!session)return;
+    let cancelado=false;
+    async function puxar(){
+      if(cancelado||!loadOk.current||_pendenteDeSalvar)return;
+      if(Date.now()-ultimaEdicaoLocal.current<4000)return; // edição em andamento — não atropela o save
+      try{
+        const sess=lsGet("session")||session;
+        const r=await supa.load(sess.token,sess.user.id);
+        if(cancelado||!r)return;
+        const cloudTs=r.__updated_at?new Date(r.__updated_at).getTime():0;
+        delete r.__updated_at;
+        const localTs=parseInt(lsGet("all_profiles_ts")||"0",10);
+        if(cloudTs>localTs){ // outro aparelho salvou algo mais novo — traz para cá
+          setAllData(r);
+          lsSet("all_profiles",r);
+          lsSet("all_profiles_ts",String(cloudTs));
+        }
+      }catch{} // silencioso de propósito: é só um "será que mudou?" de fundo
+    }
+    const iv=setInterval(puxar,25000);
+    const aoFoco=()=>{if(document.visibilityState==="visible")puxar();};
+    document.addEventListener("visibilitychange",aoFoco);
+    window.addEventListener("focus",puxar);
+    return()=>{cancelado=true;clearInterval(iv);document.removeEventListener("visibilitychange",aoFoco);window.removeEventListener("focus",puxar);};
+  },[session?.token]);
 
   useEffect(()=>{
     if(!session) return;
@@ -4320,7 +4352,7 @@ function AppInner(){
     setModalTransf(false);setTransfForm({});
   }
 
-  function setData(upd){setAllData(all=>{
+  function setData(upd){ultimaEdicaoLocal.current=Date.now();setAllData(all=>{
     const prev=all[profileId]||{...EMPTY};
     const next=typeof upd==="function"?upd(prev):{...prev,...upd};
     const updated={...all,[profileId]:next};
