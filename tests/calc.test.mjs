@@ -15,6 +15,7 @@ import {
   semFotos,mesclarFotos,projetarFluxo,ocorrenciasRecorrencia,addDias,marcarDuplicatas,montarAgendaPush,compraAcao,vendaAcao,
   ocorrenciasSWAte,pendentesRecorrenciaSW,relatorioMensal,compararMeses,serieGastoAcumulado,extratoComSaldo,
 rentabilidadeRF,serieRentabilidadeRF,composicaoAcoes,
+rentabilidadeAcoesDesdeInicio,ganhoAcoesEntreSnapshots,rentabilidadeAcoes,
 } from "../src/calc.mjs";
 
 const aprox=(a,b,tol=0.01)=>assert.ok(Math.abs(a-b)<=tol,`esperado ~${b}, veio ${a}`);
@@ -689,4 +690,54 @@ test("composicaoAcoes: percentuais somam ~100% e ordena por valor desc", ()=>{
 });
 test("composicaoAcoes: carteira vazia devolve lista vazia sem dividir por zero", ()=>{
   assert.deepEqual(composicaoAcoes([]),[]);
+});
+
+// ── Rentabilidade de Renda Variável (ações) ──────────────────────────────────
+test("desde o início: ganho não realizado + realizado das vendas registradas", ()=>{
+  const invs=[
+    {ticker:"BBAS3",valorAtual:1200,valorInvestido:1000,vendas:[{resultado:50}]},
+    {ticker:"ITUB4",valorAtual:800,valorInvestido:900,vendas:[]},
+  ];
+  const R=rentabilidadeAcoesDesdeInicio(invs);
+  // não realizado: (1200-1000)+(800-900)=100 · realizado: 50 · total 150
+  aprox(R.valor,150);
+  aprox(R.pct,(100)/1900*100,0.01); // pct é só sobre o não realizado vs custo
+});
+test("desde o início: sem posições, tudo zerado sem dividir por zero", ()=>{
+  const R=rentabilidadeAcoesDesdeInicio([]);
+  aprox(R.valor,0);assert.equal(R.pct,null);
+});
+test("ganhoAcoesEntreSnapshots: desconta aporte do período e soma venda do período", ()=>{
+  const snapIni=[{id:"a1",valorAtual:800}];
+  const invs=[{id:"a1",valorAtual:966,aportes:[{data:"2026-06-10",quantidade:5,preco:40}],vendas:[{data:"2026-06-20",quantidade:2,preco:42}]}];
+  const R=ganhoAcoesEntreSnapshots(invs,snapIni,"2026-06-01","2026-06-30");
+  // 966 - 800 - 200(aporte) + 84(venda) = 50
+  assert.equal(R.temBase,true);aprox(R.valor,50);aprox(R.pct,50/800*100,0.01);
+});
+test("ganhoAcoesEntreSnapshots: sem foto disponível, temBase é false", ()=>{
+  const R=ganhoAcoesEntreSnapshots([{id:"a1",valorAtual:100}],null,"2026-01-01","2026-01-31");
+  assert.equal(R.temBase,false);aprox(R.valor,0);
+});
+test("ganhoAcoesEntreSnapshots: ativo novo no período (sem base) não entra na conta", ()=>{
+  const snapIni=[{id:"a1",valorAtual:500}];
+  const invs=[{id:"a1",valorAtual:520},{id:"novo",valorAtual:300}]; // "novo" não tem foto anterior
+  const R=ganhoAcoesEntreSnapshots(invs,snapIni,"2026-06-01","2026-06-30");
+  aprox(R.valor,20); // só o a1 conta
+});
+test("rentabilidadeAcoes: monta mês e ano a partir do historico salvo", ()=>{
+  const hist=[
+    {mes:"2026-05",ativos:[{id:"a1",valorAtual:700}]},
+    {mes:"2026-06",ativos:[{id:"a1",valorAtual:800}]},
+  ];
+  const invs=[{id:"a1",valorAtual:850,valorInvestido:600,vendas:[]}];
+  const R=rentabilidadeAcoes(invs,hist,new Date(2026,6,10)); // 10/jul/2026
+  assert.equal(R.mes.temBase,true);aprox(R.mes.valor,50);   // vs foto de junho (800)
+  assert.equal(R.ano.temBase,true);aprox(R.ano.valor,150);  // vs foto mais antiga do ano (maio, 700)
+  aprox(R.desdeInicio.valor,250); // 850-600, sem vendas
+});
+test("rentabilidadeAcoes: sem historico nenhum, mês/ano ficam sem base (honesto)", ()=>{
+  const R=rentabilidadeAcoes([{id:"a1",valorAtual:100,valorInvestido:80}],[],new Date());
+  assert.equal(R.mes.temBase,false);
+  assert.equal(R.ano.temBase,false);
+  assert.equal(R.desdeInicio.valor,20);
 });
