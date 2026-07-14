@@ -13,6 +13,7 @@ import {
   totalPagoFatura, calcFaturaPagamentos,
 rentabilidadeRF, serieRentabilidadeRF, composicaoAcoes,
 rentabilidadeAcoesDesdeInicio, rentabilidadeAcoes,
+isRFAtivo,
 } from "./calc.mjs";
 
 // Chave pública VAPID (par gerado para este app; a privada é secret no Cloudflare)
@@ -1619,7 +1620,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
     </Card>
 
     {(()=>{ // 📈 Rentabilidade da Renda Fixa (dia/mês/ano/desde o início) — testado em calc.mjs
-      const rf=data.investimentos.filter(i=>i&&((i.taxaRF!=null&&i.taxaRF!=="")||i.indice));
+      const rf=data.investimentos.filter(isRFAtivo);
       if(!rf.length)return null;
       const hoje=new Date();
       const R=rentabilidadeRF(rf,hoje);
