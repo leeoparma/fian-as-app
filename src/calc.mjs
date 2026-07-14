@@ -517,3 +517,56 @@ export function composicaoAcoes(investimentos){
   const total=itens.reduce((a,x)=>a+x.valor,0);
   return itens.map(x=>({...x,pct:total>0?x.valor/total*100:0})).sort((a,b)=>b.valor-a.valor);
 }
+
+// ── Rentabilidade da Renda Variável (ações) ──────────────────────────────────
+// Diferente da RF, ações não têm fórmula — o valor depende do preço de
+// mercado. "Desde o início" é sempre calculável (não depende de snapshot):
+// ganho não realizado das posições atuais + ganho realizado das vendas
+// registradas nelas. "No mês"/"No ano" comparam a foto mensal mais próxima
+// do início do período contra os valores ATUAIS (ao vivo), descontando
+// aportes e somando vendas do período — igual ao relatório mensal.
+// LIMITE HONESTO: não existe granularidade diária (sem "1 dia"/"1 ano" tick-a-tick);
+// e um ativo TOTALMENTE vendido sai da carteira e seu ganho realizado
+// histórico não é mais somado aqui (seguindo o mesmo limite já aceito no
+// relatório mensal).
+export function rentabilidadeAcoesDesdeInicio(investimentos){
+  const acoes=(investimentos||[]).filter(i=>i&&!((i.taxaRF!=null&&i.taxaRF!=="")||i.indice));
+  const valorAtual=acoes.reduce((a,i)=>a+(i.valorAtual||i.valorInvestido||i.valor||0),0);
+  const custo=acoes.reduce((a,i)=>a+(i.valorInvestido||i.valor||0),0);
+  const realizado=acoes.reduce((a,i)=>a+(i.vendas||[]).reduce((s,v)=>s+(v.resultado||0),0),0);
+  const valor=Math.round((valorAtual-custo+realizado)*100)/100;
+  return {valor,pct:custo>0?Math.round((valorAtual-custo)/custo*100*10000)/10000:null,valorAtual:Math.round(valorAtual*100)/100};
+}
+// Ganho entre uma foto (snapIni) e os valores atuais ao vivo — testável isolado.
+export function ganhoAcoesEntreSnapshots(investimentos,snapIni,iniStr,fimStr){
+  if(!Array.isArray(snapIni)||!snapIni.length)return {temBase:false,valor:0,pct:null};
+  let ganho=0,baseTotal=0;
+  const vivos=(investimentos||[]).filter(i=>i&&!((i.taxaRF!=null&&i.taxaRF!=="")||i.indice));
+  for(const f of vivos){
+    const ini=snapIni.find(x=>x&&x.id===f.id);
+    if(!ini)continue; // ativo novo no período — sem base, não entra na conta
+    const valorFim=f.valorAtual||f.valorInvestido||f.valor||0;
+    const aportesPeriodo=(f.aportes||[]).filter(a=>a&&a.data&&a.data>=iniStr&&a.data<=fimStr).reduce((s,a)=>s+(a.quantidade||0)*(a.preco||0),0);
+    const vendasPeriodo=(f.vendas||[]).filter(v=>v&&v.data&&v.data>=iniStr&&v.data<=fimStr).reduce((s,v)=>s+(v.quantidade||0)*(v.preco||0),0);
+    ganho+=valorFim-(ini.valorAtual||0)-aportesPeriodo+vendasPeriodo;
+    baseTotal+=ini.valorAtual||0;
+  }
+  return {temBase:true,valor:Math.round(ganho*100)/100,pct:baseTotal>0?Math.round(ganho/baseTotal*100*10000)/10000:null};
+}
+// Monta o pacote completo (mês corrente + ano corrente), escolhendo a foto
+// mais próxima do início de cada período dentro do historico salvo.
+export function rentabilidadeAcoes(investimentos,historico,hoje=new Date()){
+  const hist=(historico||[]).filter(h=>h&&Array.isArray(h.ativos));
+  const mesKeyAtual=`${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,"0")}`;
+  const [ay,am]=mesKeyAtual.split("-").map(Number);
+  const mesAnteriorKey=`${am===1?ay-1:ay}-${String(am===1?12:am-1).padStart(2,"0")}`;
+  const snapMes=hist.find(h=>h.mes===mesAnteriorKey)?.ativos;
+  const iniAnoStr=`${ay}-01-01`;
+  const snapAno=[...hist].filter(h=>h.mes<mesKeyAtual).sort((a,b)=>a.mes.localeCompare(b.mes))[0]?.ativos; // foto mais antiga disponível no ano
+  const fimStr=_ymdC(hoje);
+  return {
+    desdeInicio:rentabilidadeAcoesDesdeInicio(investimentos),
+    mes:ganhoAcoesEntreSnapshots(investimentos,snapMes,`${mesAnteriorKey}-01`,fimStr),
+    ano:ganhoAcoesEntreSnapshots(investimentos,snapAno,iniAnoStr,fimStr),
+  };
+}
