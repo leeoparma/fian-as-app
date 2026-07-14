@@ -12,6 +12,7 @@ import {
   compraAcao, vendaAcao, pendentesRecorrenciaSW, relatorioMensal, compararMeses, serieGastoAcumulado, extratoComSaldo,
   totalPagoFatura, calcFaturaPagamentos,
 rentabilidadeRF, serieRentabilidadeRF, composicaoAcoes,
+rentabilidadeAcoesDesdeInicio, rentabilidadeAcoes,
 } from "./calc.mjs";
 
 // Chave pública VAPID (par gerado para este app; a privada é secret no Cloudflare)
@@ -1385,6 +1386,7 @@ ${paginas}
 function InvestimentosTab({data,setData,currency,profileId}){
   const [view,setView]=useState("classe");
   const [perRF,setPerRF]=useState("mes");
+  const [perRVSel,setPerRVSel]=useState("mes");
   const [modal,setModal]=useState(false);const [form,setForm]=useState({});
   const [chartTicker,setChartTicker]=useState(null);const [loadingId,setLoadingId]=useState(null);
   const [modalDiv,setModalDiv]=useState(false);const [divForm,setDivForm]=useState({});
@@ -1641,6 +1643,27 @@ function InvestimentosTab({data,setData,currency,profileId}){
           <line x1="8" y1="64" x2="292" y2="64" stroke={D.border} strokeWidth="1"/>
           <polyline points={pts} fill="none" stroke={(info.valor||0)>=0?D.green:D.red} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/>
         </svg>}
+      </Card>;})()}
+
+    {(()=>{ // 📊 Rentabilidade da Renda Variável (ações) — testado em calc.mjs
+      const acoes=data.investimentos.filter(i=>i&&!((i.taxaRF!=null&&i.taxaRF!=="")||i.indice));
+      if(!acoes.length)return null;
+      const R=rentabilidadeAcoes(data.investimentos,data.historico,new Date());
+      const valorAtual=R.desdeInicio.valorAtual;
+      const [perRV,infoRV]=perRVSel==="mes"?["No mês",R.mes]:perRVSel==="ano"?["No ano",R.ano]:["Desde o início",R.desdeInicio];
+      return <Card>
+        <p style={{fontSize:11,color:D.text3,margin:"0 0 2px",letterSpacing:0.5}}>RENTABILIDADE · RENDA VARIÁVEL</p>
+        <p style={{fontSize:20,fontWeight:800,color:D.text,margin:"0 0 10px"}}>{fmtM(valorAtual,currency)}</p>
+        <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+          {[["mes","No mês"],["ano","No ano"],["inicio","Desde o início"]].map(([k,l])=><button key={k} onClick={()=>setPerRVSel(k)} style={{padding:"5px 10px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:perRVSel===k?700:400,background:perRVSel===k?D.blue:"transparent",color:perRVSel===k?"#fff":D.text3}}>{l}</button>)}
+        </div>
+        {(perRVSel!=="inicio"&&!infoRV.temBase)?
+          <p style={{fontSize:12,color:D.text3}}>Ainda sem foto de {perRV==="No mês"?"o mês anterior":"início do ano"} para comparar — aparece assim que o snapshot mensal acumular.</p>
+        :<div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+          <span style={{fontSize:12,color:D.text3}}>{perRV==="Desde o início"?"Ganho acumulado":"Variação no período"}</span>
+          <span style={{fontSize:16,fontWeight:700,color:(infoRV.valor||0)>=0?D.green:D.red}}>{(infoRV.valor||0)>=0?"+":""}{fmtM(infoRV.valor||0,currency)} {infoRV.pct!=null&&<span style={{fontSize:12}}>({infoRV.pct>=0?"+":""}{infoRV.pct.toFixed(2)}%)</span>}</span>
+        </div>}
+        <p style={{fontSize:10,color:D.text3,margin:"8px 0 0"}}>Sem granularidade diária: ações dependem do preço de mercado, não de fórmula — "1 dia" chega quando houver preço de fechamento guardado dia a dia.</p>
       </Card>;})()}
 
     {(()=>{ // 🥧 Composição da carteira de ações — testado em calc.mjs
