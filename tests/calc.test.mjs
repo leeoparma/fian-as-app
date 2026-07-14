@@ -14,6 +14,7 @@ import {
   salarioMensal,converteMoeda,taxaMensalSim,simularJuros,
   semFotos,mesclarFotos,projetarFluxo,ocorrenciasRecorrencia,addDias,marcarDuplicatas,montarAgendaPush,compraAcao,vendaAcao,
   ocorrenciasSWAte,pendentesRecorrenciaSW,relatorioMensal,compararMeses,serieGastoAcumulado,extratoComSaldo,
+rentabilidadeRF,serieRentabilidadeRF,composicaoAcoes,
 } from "../src/calc.mjs";
 
 const aprox=(a,b,tol=0.01)=>assert.ok(Math.abs(a-b)<=tol,`esperado ~${b}, veio ${a}`);
@@ -650,4 +651,42 @@ test("extrato: saldo linha a linha; a linha mais recente fecha com saldoBancoCal
 });
 test("extrato: banco sem movimentações devolve lista vazia", ()=>{
   assert.deepEqual(extratoComSaldo({id:"bx",saldoInicial:10},[]),[]);
+});
+
+// ── Rentabilidade RF (dia/mês/ano/início) e curva de rentabilidade ───────────
+test("rentabilidadeRF: prefixado simples cresce nos 4 recortes, todos coerentes", ()=>{
+  const inv={indice:"Prefixado",taxaRF:"12",valorInvestido:10000,data:"2025-01-01"};
+  const hoje=new Date(2026,6,14); // 14/07/2026
+  const R=rentabilidadeRF([inv],hoje);
+  assert.ok(R.valorTotal>10000);
+  assert.ok(R.dia.pct>0&&R.dia.pct<1);           // rendimento de 1 dia é pequeno
+  assert.ok(R.mes.pct>R.dia.pct);                 // mês acumula mais que 1 dia
+  assert.ok(R.ano.pct>R.mes.pct);                 // ano acumula mais que o mês
+  assert.ok(R.desdeInicio.pct>R.ano.pct);         // desde o início é o maior de todos
+});
+test("rentabilidadeRF: sem investimentos RF, tudo zerado e sem erro", ()=>{
+  const R=rentabilidadeRF([],new Date(2026,6,14));
+  aprox(R.valorTotal,0);assert.equal(R.desdeInicio.pct,null);
+});
+test("serieRentabilidadeRF: primeiro ponto é sempre 0% (é a própria baseline)", ()=>{
+  const inv={indice:"Prefixado",taxaRF:"12",valorInvestido:10000,data:"2026-01-01"};
+  const s=serieRentabilidadeRF([inv],new Date(2026,5,30),new Date(2026,6,10));
+  assert.equal(s[0].pct,0);
+  assert.equal(s.length,11); // 30/jun a 10/jul inclusive
+  assert.ok(s[s.length-1].pct>s[0].pct); // cresce ao longo da série
+});
+test("composicaoAcoes: percentuais somam ~100% e ordena por valor desc", ()=>{
+  const invs=[
+    {ticker:"BBAS3",valorAtual:3000},
+    {ticker:"ITUB4",valorAtual:2000},
+    {ticker:"CDB-teste",indice:"CDI",taxaRF:"0",valorInvestido:5000}, // RF: fora do donut
+  ];
+  const C=composicaoAcoes(invs);
+  assert.equal(C.length,2); // RF excluída
+  assert.equal(C[0].ticker,"BBAS3");
+  aprox(C[0].pct,60);aprox(C[1].pct,40);
+  aprox(C.reduce((a,x)=>a+x.pct,0),100);
+});
+test("composicaoAcoes: carteira vazia devolve lista vazia sem dividir por zero", ()=>{
+  assert.deepEqual(composicaoAcoes([]),[]);
 });
