@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback, Component } from "react";
 import {
   CAT_INTERNAS, INDICES_RATE,
   _clampDia, _ymdC, _ddmm, faturaDeCompra, vencimentoDe, faturaAbertaHoje,
-  calcRFAnual, calcValorAtualRF, calcImpostoBR, calcImpostoAU,
+  calcRFAnual, calcValorAtualRF, calcValorAtualRFHistorico, calcImpostoBR, calcImpostoAU,
   aporteMedio, totalProventoAgendado, diasAte,
   totaisTransacoes, saldoBanco as saldoBancoCalc, parcelaValor, parcelaData,
   calcSaldos as calcSaldosPure, calcDividas as calcDividasPure, totaisPorPessoa as totaisPorPessoaPure,
@@ -1388,6 +1388,36 @@ ${paginas}
 function InvestimentosTab({data,setData,currency,profileId}){
   const [view,setView]=useState("classe");
   const [perRF,setPerRF]=useState("mes");
+  // Série histórica REAL do BCB (CDI diário + IPCA mensal) — busca 1x, cacheada
+  // 12h em localStorage. Se falhar (offline, worker fora do ar), fica null e
+  // TODO cálculo de RF cai automaticamente para a fórmula fixa — sem quebrar
+  // nada e sem fingir precisão que não tem.
+  const [seriesBCB,setSeriesBCB]=useState(()=>{
+    try{const c=JSON.parse(localStorage.getItem("bcb_series")||"null");if(c&&Date.now()-c.ts<12*60*60*1000)return c.series;}catch{}
+    return null;
+  });
+  useEffect(()=>{
+    try{const c=JSON.parse(localStorage.getItem("bcb_series")||"null");if(c&&Date.now()-c.ts<12*60*60*1000)return;}catch{}
+    const rfAtivos=(data.investimentos||[]).filter(i=>i&&(i.tipo==="Renda Fixa"||i.tipo==="Tesouro Direto")&&i.indice!=="Prefixado"&&i.data);
+    if(!rfAtivos.length)return;
+    const dataMin=rfAtivos.reduce((min,i)=>i.data<min?i.data:min,rfAtivos[0].data);
+    const [ay,am,ad]=dataMin.split("-");
+    const inicioParam=`${ad}/${am}/${ay}`;
+    (async()=>{
+      try{
+        const [rCDI,rIPCA]=await Promise.all([
+          fetch(`${WORKER}/bcb-serie?codigo=12&inicio=${inicioParam}`),
+          fetch(`${WORKER}/bcb-serie?codigo=433&inicio=${inicioParam}`),
+        ]);
+        const CDI=rCDI.ok?await rCDI.json():[];
+        const IPCA=rIPCA.ok?await rIPCA.json():[];
+        if(!Array.isArray(CDI)||!Array.isArray(IPCA)||(!CDI.length&&!IPCA.length))return;
+        const series={CDI,Selic:CDI,IPCA}; // CDI e Selic andam colados; usar CDI como proxy é honesto (diferença é centavos)
+        setSeriesBCB(series);
+        try{localStorage.setItem("bcb_series",JSON.stringify({series,ts:Date.now()}));}catch{}
+      }catch{} // falha silenciosa de propósito: fórmula fixa assume automaticamente
+    })();
+  },[data.investimentos]);
   const [perRVSel,setPerRVSel]=useState("mes");
   const [modal,setModal]=useState(false);const [form,setForm]=useState({});
   const [chartTicker,setChartTicker]=useState(null);const [loadingId,setLoadingId]=useState(null);
@@ -1570,12 +1600,13 @@ function InvestimentosTab({data,setData,currency,profileId}){
     return invs.length===0?<p style={{fontSize:13,color:D.text3,padding:"12px 0"}}>{emptyMsg}</p>:<div style={{display:"flex",flexDirection:"column",gap:8}}>
       {invs.map(inv=>{
         // RF é função pura do tempo (sem preço de mercado a buscar) — recalcula
-        // SEMPRE ao vivo, nunca usa o snapshot congelado de valorAtual, que só
-        // era atualizado quando o ativo era editado/salvo de novo (bug real:
-        // o número ficava parado, divergindo cada vez mais do banco real).
+        // SEMPRE ao vivo. Usa a série histórica REAL do BCB quando ela cobre o
+        // período do ativo; senão cai para a fórmula de taxa fixa, sem avisos
+        // falsos de precisão (calcValorAtualRFHistorico já decide isso sozinho).
         const isRFItem=inv.tipo==="Renda Fixa"||inv.tipo==="Tesouro Direto";
         const custo=inv.valorInvestido||inv.valor||0;
-        const atual=isRFItem?calcValorAtualRF(inv):(inv.valorAtual||custo);
+        const rfCalc=isRFItem?calcValorAtualRFHistorico(inv,seriesBCB,new Date()):null;
+        const atual=isRFItem?rfCalc.valor:(inv.valorAtual||custo);
         const lucro=isRFItem?(atual-custo):(inv.lucro!==undefined?inv.lucro:atual-custo);
         const lpct=custo>0?(lucro/custo*100):0;
         return <div key={inv.id} style={{background:D.bg3,borderRadius:10,padding:"12px 14px",border:`1px solid ${lucro>0?D.green+"33":lucro<0?D.red+"33":D.border}`}}>
@@ -1603,7 +1634,12 @@ function InvestimentosTab({data,setData,currency,profileId}){
               <button onClick={()=>setData(d=>({...d,investimentos:d.investimentos.filter(x=>x.id!==inv.id),transacoes:inv.aplicacaoTxId?d.transacoes.filter(t=>t.id!==inv.aplicacaoTxId):d.transacoes}))} style={{border:"none",background:"none",cursor:"pointer",fontSize:12,color:D.red}}>🗑</button>
             </div>
           </div>
-          {isRFItem&&<div style={{marginTop:6,display:"flex",gap:6}}><Badge color={D.gold}>Taxa: {calcRFAnual(inv).toFixed(2)}% a.a.</Badge></div>}
+          {isRFItem&&<div style={{marginTop:6,display:"flex",gap:6,flexWrap:"wrap"}}>
+            <Badge color={D.gold}>Taxa: {calcRFAnual(inv).toFixed(2)}% a.a.</Badge>
+            {rfCalc.fonte==="historico"
+              ?<Badge color={D.blue}>📊 histórico real (BCB)</Badge>
+              :<Badge color={D.text3}>≈ taxa fixa aproximada</Badge>}
+          </div>}
           {!isRFItem&&inv.dy>0&&<div style={{marginTop:6,display:"flex",gap:6}}><Badge color={D.gold}>DY {inv.dy}%</Badge>{inv.prox_dividendo&&<Badge color={D.green}>Div: {inv.prox_dividendo}</Badge>}</div>}
           {inv.resumo&&<p style={{margin:"6px 0 0",fontSize:11,color:D.text3,borderTop:`1px solid ${D.border}`,paddingTop:6}}>{inv.resumo}</p>}
         </div>;
