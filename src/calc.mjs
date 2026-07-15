@@ -508,18 +508,31 @@ export function extratoComSaldo(banco,transacoes){
 // ── Rentabilidade da Renda Fixa (dia · mês · ano · desde o início) ───────────
 // Usa calcValorAtualRF (determinístico, sem depender de snapshot) para achar
 // o valor total da carteira RF em qualquer instante do passado.
-function _valorTotalRF(rf,data){return (rf||[]).reduce((a,i)=>a+calcValorAtualRF(i,data),0);}
-export function rentabilidadeRF(investimentosRF,hoje=new Date()){
+// Valor total da carteira RF numa data, e a "fonte" agregada honesta:
+// "historico" só se TODOS os ativos tiverem série real cobrindo o período,
+// "formula" se NENHUM tiver, "misto" nos demais casos — nunca finge um
+// consenso que não existe.
+function _valorTotalRF(rf,data,series){
+  let valor=0,nHist=0;
+  for(const i of (rf||[])){
+    if(series){const r=calcValorAtualRFHistorico(i,series,data);valor+=r.valor;if(r.fonte==="historico")nHist++;}
+    else valor+=calcValorAtualRF(i,data);
+  }
+  const fonte=!series?"formula":nHist===0?"formula":nHist===(rf||[]).length?"historico":"misto";
+  return {valor,fonte};
+}
+export function rentabilidadeRF(investimentosRF,hoje=new Date(),series=null){
   const rf=(investimentosRF||[]).filter(Boolean);
   const hj=new Date(hoje.getFullYear(),hoje.getMonth(),hoje.getDate());
   const ontem=new Date(hj);ontem.setDate(ontem.getDate()-1);
   const inicioMes=new Date(hj.getFullYear(),hj.getMonth(),1);
   const inicioAno=new Date(hj.getFullYear(),0,1);
-  const vHoje=_valorTotalRF(rf,hj);
+  const {valor:vHoje,fonte}=_valorTotalRF(rf,hj,series);
   const investidoTotal=rf.reduce((a,i)=>a+(i.valorInvestido||i.valor||0),0);
-  const calc=(base)=>{const v=_valorTotalRF(rf,base);return {valor:vHoje-v,pct:v>0?(vHoje-v)/v*100:null};};
+  const calc=(base)=>{const {valor:v}=_valorTotalRF(rf,base,series);return {valor:vHoje-v,pct:v>0?(vHoje-v)/v*100:null};};
   return {
     valorTotal:Math.round(vHoje*100)/100,
+    fonte, // "historico" | "formula" | "misto"
     dia:calc(ontem),
     mes:calc(inicioMes),
     ano:calc(inicioAno),
@@ -528,14 +541,14 @@ export function rentabilidadeRF(investimentosRF,hoje=new Date()){
 }
 // Curva diária de rentabilidade (%) entre duas datas — para o gráfico "no mês/no ano".
 // pct de cada dia é relativo ao valor do PRIMEIRO dia da série (a "baseline").
-export function serieRentabilidadeRF(investimentosRF,inicio,fim){
+export function serieRentabilidadeRF(investimentosRF,inicio,fim,series=null){
   const rf=(investimentosRF||[]).filter(Boolean);
   const ini=new Date(inicio.getFullYear(),inicio.getMonth(),inicio.getDate());
   const fimD=new Date(fim.getFullYear(),fim.getMonth(),fim.getDate());
-  const base=_valorTotalRF(rf,ini);
+  const base=_valorTotalRF(rf,ini,series).valor;
   const out=[];
   for(let d=new Date(ini);d<=fimD;d.setDate(d.getDate()+1)){
-    const v=_valorTotalRF(rf,d);
+    const {valor:v}=_valorTotalRF(rf,d,series);
     out.push({data:_ymdC(d),valor:Math.round(v*100)/100,pct:base>0?Math.round((v-base)/base*100*10000)/10000:0});
   }
   return out;
