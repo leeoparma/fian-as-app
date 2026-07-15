@@ -1510,7 +1510,9 @@ function InvestimentosTab({data,setData,currency,profileId}){
   const rendaFixa=data.investimentos.filter(i=>["Renda Fixa","Tesouro Direto"].includes(i.tipo));
   const outros=data.investimentos.filter(i=>i.tipo==="Outros");
   const totalRV=rendaVariavel.reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||0),0);
-  const totalRF=rendaFixa.reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||0),0);
+  // Ao vivo com a série real do BCB (mesmo caminho do card) — NÃO usa b.valorAtual
+  // (campo congelado, gravado com a fórmula de taxa fixa; bug real, achado em 15/07/2026).
+  const totalRF=rendaFixa.reduce((a,b)=>a+calcValorAtualRFHistorico(b,seriesBCB,new Date()).valor,0);
   const totalOu=outros.reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||0),0);
 
   const divMes=(data.dividendos||[]).filter(d=>{const dt=new Date(d.data);return dt.getMonth()===MES_ATUAL&&dt.getFullYear()===ANO_ATUAL;});
@@ -1646,7 +1648,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
               <div style={{textAlign:"right"}}>
                 <p style={{margin:0,fontSize:15,fontWeight:700,color:D.text}}>{fmtM(atual,currency)}</p>
                 <p style={{margin:0,fontSize:11,color:lucro>=0?D.green:D.red,fontWeight:600}}>{lucro>=0?"+":""}{fmtM(lucro,currency)} ({lpct>=0?"+":""}{lpct.toFixed(1)}%)</p>
-                {isRFItem&&(()=>{const L=calcValorLiquidoRF(inv);return <p style={{margin:"2px 0 0",fontSize:10,color:D.text3}}>líquido: <span style={{color:D.text2,fontWeight:600}}>{fmtM(L.valorLiquido,currency)}</span> <span style={{color:D.text3}}>(IR {fmtM(L.imposto,currency)})</span></p>;})()}
+                {isRFItem&&(()=>{const L=calcValorLiquidoRF(inv,new Date(),seriesBCB);return <p style={{margin:"2px 0 0",fontSize:10,color:D.text3}}>líquido: <span style={{color:D.text2,fontWeight:600}}>{fmtM(L.valorLiquido,currency)}</span> <span style={{color:D.text3}}>(IR {fmtM(L.imposto,currency)})</span></p>;})()}
               </div>
               <button onClick={()=>buscarDados(inv)} disabled={loadingId===inv.id} style={{border:"none",background:"none",cursor:"pointer",fontSize:15,opacity:loadingId===inv.id?0.4:1,color:D.green,flexShrink:0}}>{loadingId===inv.id?"⏳":"🔄"}</button>
               {!isRFItem&&<button onClick={()=>{setModalAporte(inv.id);setAporteForm({});}} title="Aportar mais (recalcula preço médio)" style={{border:"none",background:"none",cursor:"pointer",fontSize:14,color:D.blue}}>➕</button>}
@@ -1705,7 +1707,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
           {R.fonte==="formula"&&<Badge color={D.text3}>≈ taxa fixa aproximada</Badge>}
         </div>
         <p style={{fontSize:20,fontWeight:800,color:D.text,margin:"0 0 2px"}}>{fmtM(R.valorTotal,currency)}</p>
-        {(()=>{const totalLiq=rf.reduce((a,i)=>a+calcValorLiquidoRF(i).valorLiquido,0);const totalIR=rf.reduce((a,i)=>a+calcValorLiquidoRF(i).imposto,0);return <p style={{fontSize:11,color:D.text3,margin:"0 0 10px"}}>líquido de IR: <span style={{color:D.text2,fontWeight:600}}>{fmtM(totalLiq,currency)}</span> {totalIR>0.005&&<span>(IR estimado: {fmtM(totalIR,currency)})</span>}</p>;})()}
+        {(()=>{const totalLiq=rf.reduce((a,i)=>a+calcValorLiquidoRF(i,hoje,seriesBCB).valorLiquido,0);const totalIR=rf.reduce((a,i)=>a+calcValorLiquidoRF(i,hoje,seriesBCB).imposto,0);return <p style={{fontSize:11,color:D.text3,margin:"0 0 10px"}}>líquido de IR: <span style={{color:D.text2,fontWeight:600}}>{fmtM(totalLiq,currency)}</span> {totalIR>0.005&&<span>(IR estimado: {fmtM(totalIR,currency)})</span>}</p>;})()}
         <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
           {Object.entries(PERIODOS).map(([k,v])=><button key={k} onClick={()=>setPerRF(k)} style={{padding:"5px 10px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:perRF===k?700:400,background:perRF===k?D.green:"transparent",color:perRF===k?"#04120a":D.text3}}>{v.lbl}</button>)}
         </div>

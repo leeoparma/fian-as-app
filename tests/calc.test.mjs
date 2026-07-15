@@ -849,6 +849,38 @@ test("calcValorAtualRFHistorico: IPCA+spread compõe correção real + spread an
   aprox(R.valor,1000*1.005*Math.pow(1.09,anos),0.5);
 });
 
+// ── Bug real 15/07/2026: header/IR/líquido da RF divergiam do card ──────────
+// Diagnosticado por engenharia reversa na UI: o header "Total" da aba Renda
+// Fixa e o IR/líquido de cada card não batiam com o valor bruto mostrado no
+// próprio card. Causa: calcValorLiquidoRF (usado no header e no IR/líquido)
+// só conhecia calcValorAtualRF (taxa fixa de HOJE aplicada retroativamente),
+// enquanto o card usa calcValorAtualRFHistorico (série real do BCB). Como a
+// taxa de hoje é mais baixa que a média do índice ao longo do período, o
+// caminho errado SUBESTIMA o rendimento — invisível em Prefixado (não hoje
+// index), visível só em CDI/IPCA.
+// A série abaixo é sintética (regra da casa: SEM rede nos testes), mas
+// calibrada para reproduzir a magnitude real reportada pelo Leo no app
+// (ativo IPCA+9,25%, aplicado R$6.680,00 em 30/10/2025, card mostrando
+// ganho de R$709,17 em 15/07/2026 vs. R$644,55 implícito no IR/líquido).
+test("BUG: calcValorLiquidoRF deveria usar a série histórica (como o card), mas ainda ignora o parâmetro", ()=>{
+  const meses=["2025-10-01","2025-11-01","2025-12-01","2026-01-01","2026-02-01","2026-03-01","2026-04-01","2026-05-01","2026-06-01"];
+  const serie={IPCA:meses.map(d=>({data:d,valor:0.478}))}; // ~5,87% a.a., realista p/ o período (mais alto que os 4,64% badge de hoje)
+  const inv={tipo:"Renda Fixa",indice:"IPCA",rfTipo:"mais",taxaRF:"9.25",valorInvestido:6680,data:"2025-10-30"};
+  const agora=new Date(2026,6,15);
+
+  // Sanity check: o caminho do card (correto) dá ~709 de ganho com essa série.
+  const card=calcValorAtualRFHistorico(inv,serie,agora);
+  assert.equal(card.fonte,"historico");
+  aprox(card.valor-6680,709.17,1);
+
+  // calcValorLiquidoRF recebe a mesma série e usa o mesmo caminho do card
+  // (fix: 3º parâmetro `series`, opcional). Antes do fix, o parâmetro extra
+  // era ignorado (função só aceitava inv,agora), caía na fórmula de taxa
+  // fixa, e este teste falhava mostrando ~644,55 em vez de ~709,17.
+  const L=calcValorLiquidoRF(inv,agora,serie);
+  aprox(L.rendimento,709.17,1);
+});
+
 // ── Rentabilidade RF agregada com série histórica (fonte: historico/formula/misto) ──
 test("rentabilidadeRF: sem série (comportamento antigo intacto) → fonte 'formula'", ()=>{
   const inv={tipo:"Renda Fixa",indice:"Prefixado",taxaRF:"12",valorInvestido:10000,data:"2025-01-01"};

@@ -63,8 +63,13 @@ export function calcImpostoAU(r,m){if(r<=0)return 0;return(m>=12?r*0.5:r)*0.325;
 // Valor líquido de uma RF em BR: desconta o IR regressivo sobre o rendimento
 // bruto acumulado até `agora`. Reaproveita calcImpostoBR (mesma tabela oficial
 // exibida no extrato do banco: 22,5% até 6m · 20% até 12m · 17,5% até 24m · 15% acima).
-export function calcValorLiquidoRF(inv,agora=new Date()){
-  const valorBruto=calcValorAtualRF(inv,agora);
+// `series` (opcional): quando informado, usa calcValorAtualRFHistorico (série
+// real do BCB) para o bruto — MESMO caminho que o card usa. Sem `series`, cai
+// na fórmula de taxa fixa (calcValorAtualRF), como antes (bug real, achado em
+// 15/07/2026: header/IR/líquido da RF usavam a fórmula enquanto o card já
+// usava a série real, e os dois divergiam na mesma tela).
+export function calcValorLiquidoRF(inv,agora=new Date(),series=null){
+  const valorBruto=series?calcValorAtualRFHistorico(inv,series,agora).valor:calcValorAtualRF(inv,agora);
   const investido=inv.valorInvestido||inv.valor||0;
   const rendimento=valorBruto-investido;
   const dias=Math.max(0,(agora-new Date(inv.data))/86400000);

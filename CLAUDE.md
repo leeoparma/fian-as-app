@@ -42,12 +42,15 @@ App de controle financeiro pessoal usado por Leo e sua parceira Carol. Suporta p
 - Facts com `link:null` renderizam como texto puro (cosmético).
 - Migrar código de grupo `FAMILIA2026` para código não adivinhável.
 - Rotacionar o token brapi hardcoded no Worker.
+- `compoeFatorMensalProRata` tem um teste pré-existente falhando (`tests/calc.test.mjs`, cenário IPCA+9,75% aplicado R$7.500) — diverge ~R$0,91 do valor esperado. Achado en passant investigando o bug do header de RF (15/07/2026); é a MESMA família (precisão do pro-rata de IPCA), mas numa função usada no caminho CORRETO (o card), não no header. Não corrigido — fora do escopo daquela sessão.
+- `inv.valorAtual` para ativos de Renda Fixa continua um campo CONGELADO gravado com a fórmula de taxa fixa (`calcValorAtualRF`, não a série real do BCB) — atualizado a cada 60s por `buscarDados`/`atualizarTodos`. O header da aba Renda Fixa parou de depender dele (15/07/2026, ver abaixo), mas "Total investido" no topo da aba Investimentos ([App.jsx:1504](src/App.jsx)) e possivelmente o Patrimônio Líquido do Dashboard ainda leem esse campo — mesma subestimação, escopo maior. Não corrigido de propósito (correção cirúrgica pedida pelo Leo).
 
 ## Estado das features
 
 - **Relatório Mensal:** v3 entregue e aprovada (10/07/2026) — fullscreen com saldo, barras mês a mês, curva de gasto acumulado, donut de categorias, fixo/variável, patrimônio, renda fixa e ações. Seção completa de ações chega no relatório de agosto. Upgrades futuros só por uso real, a pedido do Leo.
 - **Próxima feature grande:** "como uso meu dinheiro" — análise de gastos com IA (ver regra 4 de segurança). Design já definido: (1) explicar gastos por categoria/% da renda em linguagem simples, (2) identificar candidatos a desperdício em R$/mês e R$/ano, (3) sugerir ajustes que economizam sem reduzir qualidade de vida, (4) plano de poupança dividido por metas.
 - **Pagamento de fatura de cartão:** entregue e validada pelo Leo com dados reais (14/07/2026) — card "💳 Pagar fatura" na aba Cartão, abatimento em cascata, mostra pago/falta por fatura e crédito disponível. Cobertura de testes em `calc.mjs`.
+- **Fix: header da aba Renda Fixa divergia dos cards (15/07/2026)** — diagnosticado por engenharia reversa na UI pelo Leo (header "Total" ≠ soma dos cards, diferença de R$124,23). Causa: `calcValorLiquidoRF` (usada no header e no IR/líquido de cada card) só sabia calcular pela fórmula de taxa fixa (`calcValorAtualRF`), enquanto o valor bruto do card já usava a série real do BCB (`calcValorAtualRFHistorico`) — dois caminhos divergentes pro MESMO ativo. Fix: `calcValorLiquidoRF` ganhou parâmetro opcional `series`; os 3 pontos de consumo (header, IR/líquido por card, líquido de IR agregado) agora passam `seriesBCB`. Invisível em Prefixado (não depende de índice) — só aparecia em CDI/IPCA. Pendente: Leo confirmar visualmente que o header bate exato com a soma dos cards.
 
 ## Fluxo de trabalho com o Leo
 
