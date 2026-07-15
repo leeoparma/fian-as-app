@@ -51,6 +51,24 @@ export function calcValorAtualRF(inv,agora=new Date()){const anos=(agora-new Dat
 export function calcImpostoBR(r,m){if(r<=0)return 0;if(m<=6)return r*0.225;if(m<=12)return r*0.20;if(m<=24)return r*0.175;return r*0.15;}
 export function calcImpostoAU(r,m){if(r<=0)return 0;return(m>=12?r*0.5:r)*0.325;}
 
+// Valor líquido de uma RF em BR: desconta o IR regressivo sobre o rendimento
+// bruto acumulado até `agora`. Reaproveita calcImpostoBR (mesma tabela oficial
+// exibida no extrato do banco: 22,5% até 6m · 20% até 12m · 17,5% até 24m · 15% acima).
+export function calcValorLiquidoRF(inv,agora=new Date()){
+  const valorBruto=calcValorAtualRF(inv,agora);
+  const investido=inv.valorInvestido||inv.valor||0;
+  const rendimento=valorBruto-investido;
+  const dias=Math.max(0,(agora-new Date(inv.data))/86400000);
+  const meses=dias/30; // aproximação em meses da tabela regressiva (180/360/720 dias)
+  const imposto=calcImpostoBR(rendimento,meses);
+  return {
+    valorBruto:Math.round(valorBruto*100)/100,
+    rendimento:Math.round(rendimento*100)/100,
+    imposto:Math.round(imposto*100)/100,
+    valorLiquido:Math.round((valorBruto-imposto)*100)/100,
+  };
+}
+
 // ── Investimentos ────────────────────────────────────────────────────────────
 // Preço médio ponderado ao aportar mais unidades numa posição existente
 export function aporteMedio(qtdAntiga,pmAntigo,qtdNova,precoNovo){
