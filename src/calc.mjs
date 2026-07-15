@@ -664,7 +664,7 @@ export function calcValorAtualRFHistorico(inv,series,agora=new Date()){
   const pct=parseFloat(inv.pctIndice)||100,taxaAd=parseFloat(inv.taxaRF)||0;
   let fator;
   if(indice==="IPCA"){
-    fator=compoeFatorMensal(serie,dataIni,dataFim);
+    fator=compoeFatorMensalProRata(serie,dataIni,dataFim); // pro-rata do mês de compra — testado com dados reais
     if(inv.rfTipo==="mais")fator*=Math.pow(1+taxaAd/100,anos);
     else fator*=Math.pow(pct/100,1); // "% do IPCA" é raro, mas mantém consistência
   }else{ // CDI / Selic — diário
@@ -689,4 +689,26 @@ export function mesclarIPCAcomPrevia(serieOficial,serieIPCA15){
   const chavesOficiais=new Set(oficial.map(p=>p.data));
   const previaExtra=(serieIPCA15||[]).filter(p=>p&&p.data&&!chavesOficiais.has(p.data));
   return [...oficial,...previaExtra].sort((a,b)=>a.data.localeCompare(b.data));
+}
+
+// ── Correção pro-rata do mês de compra (IPCA) ────────────────────────────────
+// compoeFatorMensal só conta meses CHEIOS — quem compra no meio do mês fica
+// sem NENHUM crédito daquele mês, tratando igual quem comprou no dia 2 e no
+// dia 30. Isso é um viés sistemático (subestima sempre). O pro-rata credita a
+// fração de dias efetivamente aplicados no mês de compra — mais justo em
+// princípio, mesmo sem reproduzir a interpolação exata e proprietária de cada
+// banco (que usa projeção geométrica dia a dia, não documentada publicamente).
+export function compoeFatorMensalProRata(serieMensal,dataIniStr,dataFimStr){
+  const [iy,im,id]=dataIniStr.split("-").map(Number);
+  const diasNoMes=new Date(iy,im,0).getDate();
+  const diasRestantes=diasNoMes-id+1;
+  const chaveMesIni=`${iy}-${String(im).padStart(2,"0")}-01`;
+  const entradaMesIni=(serieMensal||[]).find(p=>p&&p.data===chaveMesIni);
+  let fator=1;
+  if(entradaMesIni){ // aplica sempre — quando diasRestantes=diasNoMes (compra no dia 1), o expoente vira 1 = mês cheio, naturalmente
+    fator*=Math.pow(1+entradaMesIni.valor/100,diasRestantes/diasNoMes);
+  }
+  const proxMesStr=_ymdC(new Date(iy,im,1)); // 1º dia do mês seguinte — meses cheios a partir daqui
+  fator*=compoeFatorMensal(serieMensal,proxMesStr,dataFimStr);
+  return fator;
 }
