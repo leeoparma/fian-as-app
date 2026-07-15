@@ -15,7 +15,7 @@ import {
   semFotos,mesclarFotos,projetarFluxo,ocorrenciasRecorrencia,addDias,marcarDuplicatas,montarAgendaPush,compraAcao,vendaAcao,
   ocorrenciasSWAte,pendentesRecorrenciaSW,relatorioMensal,compararMeses,serieGastoAcumulado,extratoComSaldo,
 rentabilidadeRF,serieRentabilidadeRF,composicaoAcoes,
-rentabilidadeAcoesDesdeInicio,ganhoAcoesEntreSnapshots,rentabilidadeAcoes,isRFAtivo,
+rentabilidadeAcoesDesdeInicio,ganhoAcoesEntreSnapshots,rentabilidadeAcoes,isRFAtivo,calcValorLiquidoRF,
 } from "../src/calc.mjs";
 
 const aprox=(a,b,tol=0.01)=>assert.ok(Math.abs(a-b)<=tol,`esperado ~${b}, veio ${a}`);
@@ -763,4 +763,32 @@ test("composicaoAcoes: ação com indice/taxaRF default entra no donut normalmen
   const C=composicaoAcoes(invs);
   assert.equal(C.length,2);
   aprox(C[0].pct,60);aprox(C[1].pct,40);
+});
+
+// ── Valor líquido de RF (IR regressivo) ──────────────────────────────────────
+test("calcValorLiquidoRF: replica o print real do C6 (20% de IR entre 181-360 dias)", ()=>{
+  // Aplicado R$2.409,00, ~10 meses atrás, rende até R$2.743,88 bruto (como no print);
+  // simulamos a taxa via ajuste fino, o que importa é a FAIXA e o cálculo do imposto.
+  const inv={tipo:"Renda Fixa",indice:"CDI",taxaRF:"1.5",rfTipo:"pct",pctIndice:101.5,valorInvestido:2409,data:"2025-09-15"};
+  const agora=new Date(2026,6,15); // 10 meses depois
+  const R=calcValorLiquidoRF(inv,agora);
+  aprox(R.imposto,R.rendimento*0.20,0.5); // faixa de 181-360 dias = 20%, dentro da tolerância do arredondamento de meses
+  aprox(R.valorLiquido,R.valorBruto-R.imposto,0.01);
+});
+test("calcValorLiquidoRF: rendimento negativo não gera imposto negativo", ()=>{
+  const inv={tipo:"Renda Fixa",indice:"Prefixado",taxaRF:"-5",valorInvestido:1000,data:"2026-01-01"};
+  const R=calcValorLiquidoRF(inv,new Date(2026,3,1));
+  assert.ok(R.rendimento<0);
+  aprox(R.imposto,0);
+  aprox(R.valorLiquido,R.valorBruto);
+});
+test("calcValorLiquidoRF: aplicação de longo prazo (>720 dias) cai na faixa de 15%", ()=>{
+  const inv={tipo:"Renda Fixa",indice:"Prefixado",taxaRF:"12",valorInvestido:10000,data:"2023-01-01"};
+  const R=calcValorLiquidoRF(inv,new Date(2026,6,15));
+  aprox(R.imposto,R.rendimento*0.15,0.5);
+});
+test("calcValorLiquidoRF: aplicação recentíssima (faixa de 22,5%)", ()=>{
+  const inv={tipo:"Renda Fixa",indice:"Prefixado",taxaRF:"12",valorInvestido:5000,data:"2026-06-01"};
+  const R=calcValorLiquidoRF(inv,new Date(2026,6,15));
+  aprox(R.imposto,R.rendimento*0.225,0.5);
 });
