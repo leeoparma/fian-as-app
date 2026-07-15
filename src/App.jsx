@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback, Component } from "react";
 import {
   CAT_INTERNAS, INDICES_RATE,
   _clampDia, _ymdC, _ddmm, faturaDeCompra, vencimentoDe, faturaAbertaHoje,
-  calcRFAnual, calcValorAtualRF, calcValorAtualRFHistorico, calcImpostoBR, calcImpostoAU,
+  calcRFAnual, calcValorAtualRF, calcValorAtualRFHistorico, mesclarIPCAcomPrevia, calcImpostoBR, calcImpostoAU,
   aporteMedio, totalProventoAgendado, diasAte,
   totaisTransacoes, saldoBanco as saldoBancoCalc, parcelaValor, parcelaData,
   calcSaldos as calcSaldosPure, calcDividas as calcDividasPure, totaisPorPessoa as totaisPorPessoaPure,
@@ -1416,13 +1416,19 @@ function InvestimentosTab({data,setData,currency,profileId}){
     const inicioParam=`${ad}/${am}/${ay}`;
     (async()=>{
       try{
-        const [rCDI,rIPCA]=await Promise.all([
+        // IPCA oficial (433) + IPCA-15 (7478, prévia do IBGE) — a prévia só
+        // preenche o mês corrente, que ainda não tem número oficial publicado
+        // (o IPCA sai só ~dia 10 do mês seguinte). Oficial sempre vence.
+        const [rCDI,rIPCA,rIPCA15]=await Promise.all([
           fetch(`${WORKER}/bcb-serie?codigo=12&inicio=${inicioParam}`),
           fetch(`${WORKER}/bcb-serie?codigo=433&inicio=${inicioParam}`),
+          fetch(`${WORKER}/bcb-serie?codigo=7478&inicio=${inicioParam}`),
         ]);
         const CDI=rCDI.ok?await rCDI.json():[];
-        const IPCA=rIPCA.ok?await rIPCA.json():[];
-        if(!Array.isArray(CDI)||!Array.isArray(IPCA)||(!CDI.length&&!IPCA.length))return;
+        const IPCAOficial=rIPCA.ok?await rIPCA.json():[];
+        const IPCA15=rIPCA15.ok?await rIPCA15.json():[];
+        const IPCA=mesclarIPCAcomPrevia(IPCAOficial,IPCA15); // testado em calc.mjs
+        if(!Array.isArray(CDI)||(!CDI.length&&!IPCA.length))return;
         const series={CDI,Selic:CDI,IPCA}; // CDI e Selic andam colados; usar CDI como proxy é honesto (diferença é centavos)
         setSeriesBCB(series);
         try{localStorage.setItem("bcb_series",JSON.stringify({series,ts:Date.now(),dataMin}));}catch{}
