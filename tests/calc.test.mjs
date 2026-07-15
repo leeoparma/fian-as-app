@@ -17,7 +17,7 @@ import {
 rentabilidadeRF,serieRentabilidadeRF,composicaoAcoes,
 rentabilidadeAcoesDesdeInicio,ganhoAcoesEntreSnapshots,rentabilidadeAcoes,isRFAtivo,calcValorLiquidoRF,
 INDICES_RATE,
-compoeFatorDiario,compoeFatorMensal,calcValorAtualRFHistorico,mesclarIPCAcomPrevia,
+compoeFatorDiario,compoeFatorMensal,calcValorAtualRFHistorico,mesclarIPCAcomPrevia,compoeFatorMensalProRata,
 } from "../src/calc.mjs";
 
 const aprox=(a,b,tol=0.01)=>assert.ok(Math.abs(a-b)<=tol,`esperado ~${b}, veio ${a}`);
@@ -918,4 +918,35 @@ test("mesclarIPCAcomPrevia: entradas vazias não quebram", ()=>{
   assert.deepEqual(mesclarIPCAcomPrevia([],[]),[]);
   assert.deepEqual(mesclarIPCAcomPrevia(null,null),[]);
   assert.deepEqual(mesclarIPCAcomPrevia([{data:"2026-01-01",valor:0.1}],null),[{data:"2026-01-01",valor:0.1}]);
+});
+
+// ── Pro-rata do mês de compra (dados reais do CDB do Leo, 06/08/2025) ───────
+test("compoeFatorMensalProRata: compra no meio do mês credita só a fração de dias", ()=>{
+  const serie=[{data:"2025-08-01",valor:-0.11},{data:"2025-09-01",valor:0.48}];
+  const f=compoeFatorMensalProRata(serie,"2025-08-06","2025-10-01");
+  // agosto: 26 de 31 dias (06 a 31) → (1-0.0011)^(26/31); setembro inteiro
+  const esperado=Math.pow(1-0.0011,26/31)*1.0048;
+  aprox(f,esperado,0.000001);
+});
+test("compoeFatorMensalProRata: compra no dia 1 é equivalente ao mês cheio (sem pro-rata)", ()=>{
+  const serie=[{data:"2025-08-01",valor:0.5}];
+  const fPro=compoeFatorMensalProRata(serie,"2025-08-01","2025-09-01");
+  const fCheio=1.005; // mês inteiro, sem desconto
+  aprox(fPro,fCheio,0.0001);
+});
+test("compoeFatorMensalProRata: mês de compra sem dado na série não credita nada (honesto, não inventa)", ()=>{
+  const serie=[{data:"2025-09-01",valor:0.48}]; // agosto ausente
+  const f=compoeFatorMensalProRata(serie,"2025-08-06","2025-10-01");
+  aprox(f,1.0048); // só setembro conta; agosto fica de fora sem fabricar número
+});
+test("compoeFatorMensalProRata: reduz (não elimina) o gap do CDB real — mais justo que excluir o mês inteiro", ()=>{
+  const serie=[{data:"2025-08-01",valor:-0.11},{data:"2025-09-01",valor:0.48},{data:"2025-10-01",valor:0.09},
+    {data:"2025-11-01",valor:0.18},{data:"2025-12-01",valor:0.33},{data:"2026-01-01",valor:0.33},
+    {data:"2026-02-01",valor:0.7},{data:"2026-03-01",valor:0.88},{data:"2026-04-01",valor:0.67},
+    {data:"2026-05-01",valor:0.58},{data:"2026-06-01",valor:0.16}];
+  const inv={indice:"IPCA",rfTipo:"mais",taxaRF:"9.75",valorInvestido:7500,data:"2025-08-06"};
+  const fator=compoeFatorMensalProRata(serie,"2025-08-06","2026-07-15");
+  const anos=(new Date(2026,6,15)-new Date("2025-08-06"))/(1000*60*60*24*365);
+  const valor=7500*fator*Math.pow(1+9.75/100,anos);
+  aprox(valor,8544.43,0.5); // reproduz o número real verificado à mão
 });
