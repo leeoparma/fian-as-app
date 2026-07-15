@@ -1668,15 +1668,20 @@ function InvestimentosTab({data,setData,currency,profileId}){
       const rf=data.investimentos.filter(isRFAtivo);
       if(!rf.length)return null;
       const hoje=new Date();
-      const R=rentabilidadeRF(rf,hoje);
+      const R=rentabilidadeRF(rf,hoje,seriesBCB);
       const PERIODOS={dia:{lbl:"1 dia",ini:new Date(hoje.getFullYear(),hoje.getMonth(),hoje.getDate()-1)},mes:{lbl:"No mês",ini:new Date(hoje.getFullYear(),hoje.getMonth(),1)},ano:{lbl:"No ano",ini:new Date(hoje.getFullYear(),0,1)},inicio:{lbl:"Desde o início",ini:new Date(Math.min(...rf.map(i=>new Date(i.data).getTime())))}};
       const p=PERIODOS[perRF];
-      const serie=serieRentabilidadeRF(rf,p.ini,hoje);
+      const serie=serieRentabilidadeRF(rf,p.ini,hoje,seriesBCB);
       const info=perRF==="inicio"?R.desdeInicio:R[perRF];
       const maxAbs=Math.max(...serie.map(s=>Math.abs(s.pct)),0.01);
       const pts=serie.map((s,i)=>`${8+(i/Math.max(1,serie.length-1))*284},${64-(s.pct/maxAbs)*50}`).join(" ");
       return <Card>
-        <p style={{fontSize:11,color:D.text3,margin:"0 0 2px",letterSpacing:0.5}}>RENTABILIDADE · RENDA FIXA</p>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+          <p style={{fontSize:11,color:D.text3,margin:"0 0 2px",letterSpacing:0.5}}>RENTABILIDADE · RENDA FIXA</p>
+          {R.fonte==="historico"&&<Badge color={D.blue}>📊 histórico real</Badge>}
+          {R.fonte==="misto"&&<Badge color={D.text3}>≈ parcialmente estimado</Badge>}
+          {R.fonte==="formula"&&<Badge color={D.text3}>≈ taxa fixa aproximada</Badge>}
+        </div>
         <p style={{fontSize:20,fontWeight:800,color:D.text,margin:"0 0 2px"}}>{fmtM(R.valorTotal,currency)}</p>
         {(()=>{const totalLiq=rf.reduce((a,i)=>a+calcValorLiquidoRF(i).valorLiquido,0);const totalIR=rf.reduce((a,i)=>a+calcValorLiquidoRF(i).imposto,0);return <p style={{fontSize:11,color:D.text3,margin:"0 0 10px"}}>líquido de IR: <span style={{color:D.text2,fontWeight:600}}>{fmtM(totalLiq,currency)}</span> {totalIR>0.005&&<span>(IR estimado: {fmtM(totalIR,currency)})</span>}</p>;})()}
         <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
