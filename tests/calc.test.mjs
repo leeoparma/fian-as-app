@@ -848,3 +848,37 @@ test("calcValorAtualRFHistorico: IPCA+spread compõe correção real + spread an
   const anos=(new Date(2026,1,1)-new Date("2026-01-01"))/(1000*60*60*24*365);
   aprox(R.valor,1000*1.005*Math.pow(1.09,anos),0.5);
 });
+
+// ── Rentabilidade RF agregada com série histórica (fonte: historico/formula/misto) ──
+test("rentabilidadeRF: sem série (comportamento antigo intacto) → fonte 'formula'", ()=>{
+  const inv={tipo:"Renda Fixa",indice:"Prefixado",taxaRF:"12",valorInvestido:10000,data:"2025-01-01"};
+  const R=rentabilidadeRF([inv],new Date(2026,6,14));
+  assert.equal(R.fonte,"formula");
+});
+test("rentabilidadeRF: série cobre TODOS os ativos → fonte 'historico'", ()=>{
+  const serie={CDI:[{data:"2026-01-01",valor:0.04},{data:"2026-01-02",valor:0.04}]};
+  const inv={tipo:"Renda Fixa",indice:"CDI",rfTipo:"pct",pctIndice:100,valorInvestido:1000,data:"2026-01-01"};
+  const R=rentabilidadeRF([inv],new Date(2026,0,3),serie);
+  assert.equal(R.fonte,"historico");
+  aprox(R.valorTotal,1000*Math.pow(1.0004,2),0.01);
+});
+test("rentabilidadeRF: carteira mista (1 com cobertura, 1 sem) → fonte 'misto'", ()=>{
+  const serie={CDI:[{data:"2026-01-01",valor:0.04}]}; // não cobre o Prefixado nem importaria (índice diferente)
+  const comCobertura={tipo:"Renda Fixa",indice:"CDI",rfTipo:"pct",pctIndice:100,valorInvestido:1000,data:"2026-01-01"};
+  const semCobertura={tipo:"Renda Fixa",indice:"Prefixado",taxaRF:"10",valorInvestido:500,data:"2025-01-01"};
+  const R=rentabilidadeRF([comCobertura,semCobertura],new Date(2026,0,1),serie);
+  assert.equal(R.fonte,"misto");
+});
+test("serieRentabilidadeRF: com série real, a curva reflete o índice de verdade (não a flat)", ()=>{
+  const serie={CDI:[{data:"2026-01-01",valor:0.10},{data:"2026-01-02",valor:0.10},{data:"2026-01-03",valor:0.10}]};
+  const inv={tipo:"Renda Fixa",indice:"CDI",rfTipo:"pct",pctIndice:100,valorInvestido:1000,data:"2026-01-01"};
+  const s=serieRentabilidadeRF([inv],new Date(2026,0,1),new Date(2026,0,3),serie);
+  assert.equal(s[0].pct,0);
+  aprox(s[2].valor,1000*Math.pow(1.001,3),0.01); // 3 dias a 0,10%/dia compostos de verdade
+});
+test("serieRentabilidadeRF: sem série, comportamento antigo (flat) intacto", ()=>{
+  const inv={tipo:"Renda Fixa",indice:"Prefixado",taxaRF:"12",valorInvestido:10000,data:"2026-01-01"};
+  const s=serieRentabilidadeRF([inv],new Date(2026,5,30),new Date(2026,6,10));
+  assert.equal(s[0].pct,0);
+  assert.equal(s.length,11);
+});
