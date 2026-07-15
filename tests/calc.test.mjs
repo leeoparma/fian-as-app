@@ -16,6 +16,7 @@ import {
   ocorrenciasSWAte,pendentesRecorrenciaSW,relatorioMensal,compararMeses,serieGastoAcumulado,extratoComSaldo,
 rentabilidadeRF,serieRentabilidadeRF,composicaoAcoes,
 rentabilidadeAcoesDesdeInicio,ganhoAcoesEntreSnapshots,rentabilidadeAcoes,isRFAtivo,calcValorLiquidoRF,
+INDICES_RATE,
 } from "../src/calc.mjs";
 
 const aprox=(a,b,tol=0.01)=>assert.ok(Math.abs(a-b)<=tol,`esperado ~${b}, veio ${a}`);
@@ -127,11 +128,11 @@ test("cascata: pagamento exato zera a fatura sem sobra", ()=>{
 test("RF anual: prefixado devolve a própria taxa", ()=>{
   assert.equal(calcRFAnual({indice:"Prefixado",taxaRF:"12"}),12);
 });
-test("RF anual: 102% do CDI (10.5) = 10.71", ()=>{
-  aprox(calcRFAnual({indice:"CDI",rfTipo:"pct",pctIndice:"102"}),10.71);
+test("RF anual: 102% do CDI = 102% da taxa vigente (referencia INDICES_RATE, não hardcoded)", ()=>{
+  aprox(calcRFAnual({indice:"CDI",rfTipo:"pct",pctIndice:"102"}),INDICES_RATE.CDI*1.02);
 });
-test("RF anual: IPCA (4.62) + 9 = 13.62", ()=>{
-  aprox(calcRFAnual({indice:"IPCA",rfTipo:"mais",taxaRF:"9"}),13.62);
+test("RF anual: IPCA + 9 = taxa vigente do IPCA + 9 (referencia INDICES_RATE)", ()=>{
+  aprox(calcRFAnual({indice:"IPCA",rfTipo:"mais",taxaRF:"9"}),INDICES_RATE.IPCA+9);
 });
 test("RF valor atual: 1000 prefixado 10% após 1 ano ≈ 1100", ()=>{
   const agora=new Date(2027,0,1);
@@ -312,7 +313,7 @@ test("simulador: último ponto do gráfico é o mês final", ()=>{
 });
 test("taxa mensal: fixa 1% → 0.01; 102% CDI vira taxa mensal equivalente", ()=>{
   aprox(taxaMensalSim("fixo","1"),0.01);
-  aprox(taxaMensalSim("pct",null,"CDI","102"),Math.pow(1+10.71/100,1/12)-1,0.0001);
+  aprox(taxaMensalSim("pct",null,"CDI","102"),Math.pow(1+(INDICES_RATE.CDI*1.02)/100,1/12)-1,0.0001);
 });
 
 // ── Backup: fotos fora do snapshot, de volta ao restaurar ────────────────────
@@ -773,7 +774,7 @@ test("calcValorLiquidoRF: replica o print real do C6 (20% de IR entre 181-360 di
   const agora=new Date(2026,6,15); // 10 meses depois
   const R=calcValorLiquidoRF(inv,agora);
   aprox(R.imposto,R.rendimento*0.20,0.5); // faixa de 181-360 dias = 20%, dentro da tolerância do arredondamento de meses
-  aprox(R.valorLiquido,R.valorBruto-R.imposto,0.01);
+  aprox(R.valorLiquido,R.valorBruto-R.imposto,0.02); // tolerância de 1 centavo por arredondamento independente
 });
 test("calcValorLiquidoRF: rendimento negativo não gera imposto negativo", ()=>{
   const inv={tipo:"Renda Fixa",indice:"Prefixado",taxaRF:"-5",valorInvestido:1000,data:"2026-01-01"};
