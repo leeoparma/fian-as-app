@@ -1650,7 +1650,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
       </Card>;})()}
 
     {(()=>{ // 📊 Rentabilidade da Renda Variável (ações) — testado em calc.mjs
-      const acoes=data.investimentos.filter(i=>i&&!((i.taxaRF!=null&&i.taxaRF!=="")||i.indice));
+      const acoes=data.investimentos.filter(i=>!isRFAtivo(i)); // corrigido 15/07 (mesma classe do bug de ontem — cópia que escapou)
       if(!acoes.length)return null;
       const R=rentabilidadeAcoes(data.investimentos,data.historico,new Date());
       const valorAtual=R.desdeInicio.valorAtual;
