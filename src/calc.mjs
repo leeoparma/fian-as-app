@@ -603,3 +603,61 @@ export function rentabilidadeAcoes(investimentos,historico,hoje=new Date()){
     ano:ganhoAcoesEntreSnapshots(investimentos,snapAno,iniAnoStr,fimStr),
   };
 }
+
+// ── Renda fixa com série histórica REAL (BCB) ────────────────────────────────
+// Em vez de uma taxa única fixa aplicada a todo o período (calcValorAtualRF),
+// usa a taxa REAL de cada dia/mês publicada pelo Banco Central. Sempre que a
+// série não cobrir o período (sem internet, ativo mais antigo que os dados
+// buscados, etc.), cai de volta para calcValorAtualRF — nunca finge precisão
+// que não tem.
+
+// Composição diária (CDI/Selic): convenção ANBIMA — "X% do índice" eleva CADA
+// fator diário a (pct/100). Dias sem registro na série (feriados/fins de
+// semana) são pulados — o índice diário só existe em dia útil.
+export function compoeFatorDiario(serieDiaria,dataIniStr,dataFimStr,pct=100){
+  let fator=1;
+  for(const p of (serieDiaria||[])){
+    if(!p||!p.data||p.data<dataIniStr||p.data>dataFimStr)continue;
+    fator*=Math.pow(1+(p.valor||0)/100,pct/100);
+  }
+  return fator;
+}
+
+// Composição mensal (IPCA): só meses CHEIOS dentro do período contam — é a
+// convenção usual de correção de CDBs/NTN-B IPCA+ (aplica no aniversário mensal).
+export function compoeFatorMensal(serieMensal,dataIniStr,dataFimStr){
+  let fator=1;
+  for(const p of (serieMensal||[])){
+    if(!p||!p.data||p.data<dataIniStr||p.data>=dataFimStr)continue;
+    fator*=(1+(p.valor||0)/100);
+  }
+  return fator;
+}
+
+// Valor atual usando série histórica real. `series` = {CDI:[{data,valor}],
+// IPCA:[{data,valor}]} (datas em "YYYY-MM-DD", valor em % — cru do BCB).
+// Devolve {valor, fonte:"historico"|"formula"} — o app SEMPRE sabe e mostra
+// qual dos dois está usando, nunca mistura em silêncio.
+export function calcValorAtualRFHistorico(inv,series,agora=new Date()){
+  const investido=inv.valorInvestido||inv.valor||0;
+  const indice=inv.indice||"CDI";
+  if(indice==="Prefixado")return {valor:calcValorAtualRF(inv,agora),fonte:"formula"};
+  const dataIni=inv.data,dataFim=_ymdC(agora);
+  const serie=series&&series[indice];
+  if(!dataIni||!serie||!serie.length||serie[0].data>dataIni){
+    return {valor:calcValorAtualRF(inv,agora),fonte:"formula"};
+  }
+  const anos=Math.max(0,(agora-new Date(dataIni))/(1000*60*60*24*365));
+  const pct=parseFloat(inv.pctIndice)||100,taxaAd=parseFloat(inv.taxaRF)||0;
+  let fator;
+  if(indice==="IPCA"){
+    fator=compoeFatorMensal(serie,dataIni,dataFim);
+    if(inv.rfTipo==="mais")fator*=Math.pow(1+taxaAd/100,anos);
+    else fator*=Math.pow(pct/100,1); // "% do IPCA" é raro, mas mantém consistência
+  }else{ // CDI / Selic — diário
+    fator=inv.rfTipo==="pct"
+      ?compoeFatorDiario(serie,dataIni,dataFim,pct)
+      :compoeFatorDiario(serie,dataIni,dataFim,100)*Math.pow(1+taxaAd/100,anos);
+  }
+  return {valor:investido*fator,fonte:"historico"};
+}
