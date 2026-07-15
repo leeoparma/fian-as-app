@@ -1389,18 +1389,29 @@ function InvestimentosTab({data,setData,currency,profileId}){
   const [view,setView]=useState("classe");
   const [perRF,setPerRF]=useState("mes");
   // Série histórica REAL do BCB (CDI diário + IPCA mensal) — busca 1x, cacheada
-  // 12h em localStorage. Se falhar (offline, worker fora do ar), fica null e
-  // TODO cálculo de RF cai automaticamente para a fórmula fixa — sem quebrar
-  // nada e sem fingir precisão que não tem.
-  const [seriesBCB,setSeriesBCB]=useState(()=>{
-    try{const c=JSON.parse(localStorage.getItem("bcb_series")||"null");if(c&&Date.now()-c.ts<12*60*60*1000)return c.series;}catch{}
+  // 12h em localStorage. IMPORTANTE: o cache não vale só por TEMPO — também
+  // precisa continuar COBRINDO a data mais antiga que a carteira precisa hoje.
+  // Sem isso, um CDB novo (ou editado) com data mais antiga que a já buscada
+  // ficava preso mostrando "fórmula" até o cache vencer sozinho, 12h depois
+  // (bug real, achado em 15/07/2026 comparando com o extrato do C6).
+  function _dataMinRF(investimentos){
+    const rfAtivos=(investimentos||[]).filter(i=>i&&(i.tipo==="Renda Fixa"||i.tipo==="Tesouro Direto")&&i.indice!=="Prefixado"&&i.data);
+    if(!rfAtivos.length)return null;
+    return rfAtivos.reduce((min,i)=>i.data<min?i.data:min,rfAtivos[0].data);
+  }
+  function _cacheServeBCB(dataMinAtual){
+    if(!dataMinAtual)return null;
+    try{
+      const c=JSON.parse(localStorage.getItem("bcb_series")||"null");
+      if(c&&Date.now()-c.ts<12*60*60*1000&&c.dataMin&&c.dataMin<=dataMinAtual)return c.series;
+    }catch{}
     return null;
-  });
+  }
+  const [seriesBCB,setSeriesBCB]=useState(()=>_cacheServeBCB(_dataMinRF(data.investimentos)));
   useEffect(()=>{
-    try{const c=JSON.parse(localStorage.getItem("bcb_series")||"null");if(c&&Date.now()-c.ts<12*60*60*1000)return;}catch{}
-    const rfAtivos=(data.investimentos||[]).filter(i=>i&&(i.tipo==="Renda Fixa"||i.tipo==="Tesouro Direto")&&i.indice!=="Prefixado"&&i.data);
-    if(!rfAtivos.length)return;
-    const dataMin=rfAtivos.reduce((min,i)=>i.data<min?i.data:min,rfAtivos[0].data);
+    const dataMin=_dataMinRF(data.investimentos);
+    if(!dataMin)return;
+    if(_cacheServeBCB(dataMin))return; // cache ainda cobre a data mais antiga necessária — não busca de novo
     const [ay,am,ad]=dataMin.split("-");
     const inicioParam=`${ad}/${am}/${ay}`;
     (async()=>{
@@ -1414,7 +1425,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
         if(!Array.isArray(CDI)||!Array.isArray(IPCA)||(!CDI.length&&!IPCA.length))return;
         const series={CDI,Selic:CDI,IPCA}; // CDI e Selic andam colados; usar CDI como proxy é honesto (diferença é centavos)
         setSeriesBCB(series);
-        try{localStorage.setItem("bcb_series",JSON.stringify({series,ts:Date.now()}));}catch{}
+        try{localStorage.setItem("bcb_series",JSON.stringify({series,ts:Date.now(),dataMin}));}catch{}
       }catch{} // falha silenciosa de propósito: fórmula fixa assume automaticamente
     })();
   },[data.investimentos]);
