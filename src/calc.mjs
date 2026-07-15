@@ -674,3 +674,19 @@ export function calcValorAtualRFHistorico(inv,series,agora=new Date()){
   }
   return {valor:investido*fator,fonte:"historico"};
 }
+
+// ── IPCA-15 como prévia do mês corrente ──────────────────────────────────────
+// O IPCA oficial (série 433) só é publicado por volta do dia 10 do mês
+// seguinte — enquanto isso, calcValorAtualRFHistorico simplesmente NÃO conta
+// o mês corrente (correto, mas subestima o rendimento real, já que o banco
+// costuma projetar a correção antes da publicação oficial). O IPCA-15 (série
+// 7478, prévia da inflação, publicada no MEIO do próprio mês) preenche essa
+// lacuna com dado real do IBGE — nunca inventado.
+// Regra: o oficial SEMPRE tem prioridade. A prévia só entra nos meses em que
+// o oficial ainda não foi publicado.
+export function mesclarIPCAcomPrevia(serieOficial,serieIPCA15){
+  const oficial=(serieOficial||[]).filter(Boolean);
+  const chavesOficiais=new Set(oficial.map(p=>p.data));
+  const previaExtra=(serieIPCA15||[]).filter(p=>p&&p.data&&!chavesOficiais.has(p.data));
+  return [...oficial,...previaExtra].sort((a,b)=>a.data.localeCompare(b.data));
+}
