@@ -17,7 +17,7 @@ import {
 rentabilidadeRF,serieRentabilidadeRF,composicaoAcoes,
 rentabilidadeAcoesDesdeInicio,ganhoAcoesEntreSnapshots,rentabilidadeAcoes,isRFAtivo,calcValorLiquidoRF,
 INDICES_RATE,
-compoeFatorDiario,compoeFatorMensal,calcValorAtualRFHistorico,
+compoeFatorDiario,compoeFatorMensal,calcValorAtualRFHistorico,mesclarIPCAcomPrevia,
 } from "../src/calc.mjs";
 
 const aprox=(a,b,tol=0.01)=>assert.ok(Math.abs(a-b)<=tol,`esperado ~${b}, veio ${a}`);
@@ -881,4 +881,41 @@ test("serieRentabilidadeRF: sem série, comportamento antigo (flat) intacto", ()
   const s=serieRentabilidadeRF([inv],new Date(2026,5,30),new Date(2026,6,10));
   assert.equal(s[0].pct,0);
   assert.equal(s.length,11);
+});
+
+// ── Mesclagem IPCA oficial + prévia (IPCA-15) ────────────────────────────────
+test("mesclarIPCAcomPrevia: oficial tem prioridade — prévia do mesmo mês é ignorada", ()=>{
+  const oficial=[{data:"2026-05-01",valor:0.30}];
+  const previa=[{data:"2026-05-01",valor:0.99}]; // valor diferente, mas o mês já é oficial
+  const m=mesclarIPCAcomPrevia(oficial,previa);
+  assert.equal(m.length,1);
+  aprox(m[0].valor,0.30); // oficial venceu
+});
+test("mesclarIPCAcomPrevia: mês sem oficial ainda usa a prévia (preenche o buraco)", ()=>{
+  const oficial=[{data:"2026-05-01",valor:0.30}];
+  const previa=[{data:"2026-05-01",valor:0.99},{data:"2026-06-01",valor:0.45}]; // junho ainda não saiu oficial
+  const m=mesclarIPCAcomPrevia(oficial,previa);
+  assert.equal(m.length,2);
+  const junho=m.find(p=>p.data==="2026-06-01");
+  aprox(junho.valor,0.45);
+});
+test("mesclarIPCAcomPrevia: resultado sempre ordenado por data", ()=>{
+  const oficial=[{data:"2026-03-01",valor:0.1}];
+  const previa=[{data:"2026-05-01",valor:0.2},{data:"2026-04-01",valor:0.15}];
+  const m=mesclarIPCAcomPrevia(oficial,previa);
+  assert.deepEqual(m.map(p=>p.data),["2026-03-01","2026-04-01","2026-05-01"]);
+});
+test("mesclarIPCAcomPrevia: entra direto na composição mensal (compoeFatorMensal) sem mudar nada nela", ()=>{
+  const oficial=[{data:"2026-01-01",valor:0.5}]; // fevereiro ainda não saiu oficial
+  const previa=[{data:"2026-02-01",valor:0.3}];  // mas a prévia já tem
+  const serieMesclada=mesclarIPCAcomPrevia(oficial,previa);
+  const fSemPrevia=compoeFatorMensal(oficial,"2026-01-01","2026-03-01");
+  const fComPrevia=compoeFatorMensal(serieMesclada,"2026-01-01","2026-03-01");
+  aprox(fSemPrevia,1.005); // só janeiro conta
+  aprox(fComPrevia,1.005*1.003); // janeiro + fevereiro (via prévia)
+});
+test("mesclarIPCAcomPrevia: entradas vazias não quebram", ()=>{
+  assert.deepEqual(mesclarIPCAcomPrevia([],[]),[]);
+  assert.deepEqual(mesclarIPCAcomPrevia(null,null),[]);
+  assert.deepEqual(mesclarIPCAcomPrevia([{data:"2026-01-01",valor:0.1}],null),[{data:"2026-01-01",valor:0.1}]);
 });
