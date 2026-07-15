@@ -9,7 +9,16 @@
 // Movimentos internos: não são receita nem despesa de verdade (não entram nos totais)
 export const CAT_INTERNAS=["Transferência","Aplicação","Resgate","Pagamento de fatura"];
 // Taxas anuais de referência usadas na renda fixa e no simulador (estáticas)
-export const INDICES_RATE={CDI:10.5,Selic:10.5,IPCA:4.62,IGPM:5.1};
+// Taxas anuais aproximadas (%). Atualizado manualmente — não há fonte ao vivo.
+// Verificado em 15/07/2026: Selic 14,25% (Copom, reunião de 17/06/2026), CDI
+// ~14,15% (acompanha a Selic de perto), IPCA 4,64% (acum. 12m, IBGE, jun/2026).
+// LIMITE HONESTO: isto é uma taxa ÚNICA e FIXA aplicada a todo o período da
+// aplicação — não reconstrói a trajetória real (o CDI variou ao longo do
+// tempo, inclusive antes desta atualização). Quanto mais antiga a aplicação,
+// maior o desvio possível entre o valor calculado aqui e o extrato real do
+// banco. Reveja este valor periodicamente (o antigo, 10.5%, ficou defasado
+// por meses e foi a causa raiz de uma divergência real relatada em 15/07/2026).
+export const INDICES_RATE={CDI:14.15,Selic:14.25,IPCA:4.64,IGPM:5.1};
 
 // ── Cartão de crédito — ciclo de fatura ──────────────────────────────────────
 // Regra: compra NO DIA do fechamento (ou antes) entra naquela fatura; depois, na próxima.
