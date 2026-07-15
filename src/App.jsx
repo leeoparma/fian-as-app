@@ -1569,8 +1569,15 @@ function InvestimentosTab({data,setData,currency,profileId}){
   function InvList({invs,emptyMsg}){
     return invs.length===0?<p style={{fontSize:13,color:D.text3,padding:"12px 0"}}>{emptyMsg}</p>:<div style={{display:"flex",flexDirection:"column",gap:8}}>
       {invs.map(inv=>{
-        const custo=inv.valorInvestido||inv.valor||0,atual=inv.valorAtual||custo,lucro=inv.lucro!==undefined?inv.lucro:atual-custo,lpct=custo>0?(lucro/custo*100):0;
+        // RF é função pura do tempo (sem preço de mercado a buscar) — recalcula
+        // SEMPRE ao vivo, nunca usa o snapshot congelado de valorAtual, que só
+        // era atualizado quando o ativo era editado/salvo de novo (bug real:
+        // o número ficava parado, divergindo cada vez mais do banco real).
         const isRFItem=inv.tipo==="Renda Fixa"||inv.tipo==="Tesouro Direto";
+        const custo=inv.valorInvestido||inv.valor||0;
+        const atual=isRFItem?calcValorAtualRF(inv):(inv.valorAtual||custo);
+        const lucro=isRFItem?(atual-custo):(inv.lucro!==undefined?inv.lucro:atual-custo);
+        const lpct=custo>0?(lucro/custo*100):0;
         return <div key={inv.id} style={{background:D.bg3,borderRadius:10,padding:"12px 14px",border:`1px solid ${lucro>0?D.green+"33":lucro<0?D.red+"33":D.border}`}}>
           <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:8}}>
             <div style={{flex:1}}>
