@@ -349,8 +349,13 @@ async function askClaude(prompt,maxTokens=900,images=[]){
   try{
     const content=images.length>0?[...images.map(({base64,mediaType})=>({type:"image",source:{type:"base64",media_type:mediaType||"image/jpeg",data:base64}})),{type:"text",text:prompt}]:[{type:"text",text:prompt}];
     const res=await fetch(WORKER,{method:"POST",headers:{"Content-Type":"application/json",...authHdr()},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:maxTokens,messages:[{role:"user",content}]})});
-    if(!res.ok)throw new Error(`HTTP ${res.status}`);
-    const d=await res.json();if(d.error)throw new Error(d.error.message);
+    // Lê o corpo ANTES de decidir o erro — o worker sempre devolve {error:{message}}
+    // com o motivo real (ex.: "Gemini falhou (cota excedida) e o Claude também...").
+    // Jogar isso fora e mostrar só "HTTP 502" escondia o diagnóstico de verdade.
+    let d=null;
+    try{d=await res.json();}catch{} // corpo pode vir vazio/não-JSON numa falha de infraestrutura crua
+    if(!res.ok)throw new Error(d?.error?.message||`HTTP ${res.status}`);
+    if(d.error)throw new Error(d.error.message);
     return d.content.filter(b=>b.type==="text").map(b=>b.text).join("").replace(/```json|```/g,"").trim();
   }catch(e){console.error("askClaude:",e);throw e;}
 }
