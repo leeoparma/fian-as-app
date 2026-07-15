@@ -17,6 +17,7 @@ import {
 rentabilidadeRF,serieRentabilidadeRF,composicaoAcoes,
 rentabilidadeAcoesDesdeInicio,ganhoAcoesEntreSnapshots,rentabilidadeAcoes,isRFAtivo,calcValorLiquidoRF,
 INDICES_RATE,
+compoeFatorDiario,compoeFatorMensal,calcValorAtualRFHistorico,
 } from "../src/calc.mjs";
 
 const aprox=(a,b,tol=0.01)=>assert.ok(Math.abs(a-b)<=tol,`esperado ~${b}, veio ${a}`);
@@ -792,4 +793,58 @@ test("calcValorLiquidoRF: aplicação recentíssima (faixa de 22,5%)", ()=>{
   const inv={tipo:"Renda Fixa",indice:"Prefixado",taxaRF:"12",valorInvestido:5000,data:"2026-06-01"};
   const R=calcValorLiquidoRF(inv,new Date(2026,6,15));
   aprox(R.imposto,R.rendimento*0.225,0.5);
+});
+
+// ── RF com série histórica real (BCB) ────────────────────────────────────────
+test("compoeFatorDiario: 3 dias de CDI a 0,05%/dia, 100% do índice", ()=>{
+  const serie=[{data:"2026-01-01",valor:0.05},{data:"2026-01-02",valor:0.05},{data:"2026-01-03",valor:0.05}];
+  const f=compoeFatorDiario(serie,"2026-01-01","2026-01-03",100);
+  aprox(f,Math.pow(1.0005,3),0.000001);
+});
+test("compoeFatorDiario: 101,5% do CDI eleva cada fator diário (convenção ANBIMA)", ()=>{
+  const serie=[{data:"2026-01-01",valor:0.05}];
+  const f=compoeFatorDiario(serie,"2026-01-01","2026-01-01",101.5);
+  aprox(f,Math.pow(1.0005,1.015),0.000001);
+});
+test("compoeFatorDiario: dias fora do período ou sem registro (fim de semana) são ignorados", ()=>{
+  const serie=[{data:"2025-12-31",valor:0.05},{data:"2026-01-01",valor:0.05},{data:"2026-01-05",valor:0.05}];
+  const f=compoeFatorDiario(serie,"2026-01-01","2026-01-03",100); // só o dia 1 está no intervalo
+  aprox(f,1.0005,0.000001);
+});
+test("compoeFatorMensal: 2 meses cheios de IPCA compõem; mês parcial (fim) não entra", ()=>{
+  const serie=[{data:"2026-01-01",valor:0.5},{data:"2026-02-01",valor:0.3},{data:"2026-03-01",valor:0.4}];
+  const f=compoeFatorMensal(serie,"2026-01-01","2026-03-01"); // até 01/03 exclusive
+  aprox(f,1.005*1.003,0.000001);
+});
+test("calcValorAtualRFHistorico: usa série real quando cobre o período (CDI % do índice)", ()=>{
+  const serie={CDI:[{data:"2026-01-01",valor:0.04},{data:"2026-01-02",valor:0.04}]};
+  const inv={indice:"CDI",rfTipo:"pct",pctIndice:100,valorInvestido:1000,data:"2026-01-01"};
+  const R=calcValorAtualRFHistorico(inv,serie,new Date(2026,0,3));
+  assert.equal(R.fonte,"historico");
+  aprox(R.valor,1000*Math.pow(1.0004,2),0.01);
+});
+test("calcValorAtualRFHistorico: sem série disponível (offline), cai para a fórmula fixa", ()=>{
+  const inv={indice:"CDI",rfTipo:"pct",pctIndice:100,valorInvestido:1000,data:"2026-01-01"};
+  const R=calcValorAtualRFHistorico(inv,null,new Date(2026,1,1));
+  assert.equal(R.fonte,"formula");
+  aprox(R.valor,calcValorAtualRF(inv,new Date(2026,1,1)));
+});
+test("calcValorAtualRFHistorico: série existe mas NÃO cobre a data de início do ativo, cai para fórmula", ()=>{
+  const serie={CDI:[{data:"2026-06-01",valor:0.04}]}; // começa depois do ativo
+  const inv={indice:"CDI",rfTipo:"pct",pctIndice:100,valorInvestido:1000,data:"2026-01-01"};
+  const R=calcValorAtualRFHistorico(inv,serie,new Date(2026,6,1));
+  assert.equal(R.fonte,"formula");
+});
+test("calcValorAtualRFHistorico: Prefixado nunca usa série (não depende de índice)", ()=>{
+  const inv={indice:"Prefixado",taxaRF:"10",valorInvestido:1000,data:"2026-01-01"};
+  const R=calcValorAtualRFHistorico(inv,{CDI:[{data:"2020-01-01",valor:0.04}]},new Date(2026,5,1));
+  assert.equal(R.fonte,"formula");
+});
+test("calcValorAtualRFHistorico: IPCA+spread compõe correção real + spread anual composto", ()=>{
+  const serie={IPCA:[{data:"2026-01-01",valor:0.5}]};
+  const inv={indice:"IPCA",rfTipo:"mais",taxaRF:"9",valorInvestido:1000,data:"2026-01-01"};
+  const R=calcValorAtualRFHistorico(inv,serie,new Date(2026,1,1)); // 1 mês depois
+  assert.equal(R.fonte,"historico");
+  const anos=(new Date(2026,1,1)-new Date("2026-01-01"))/(1000*60*60*24*365);
+  aprox(R.valor,1000*1.005*Math.pow(1.09,anos),0.5);
 });
