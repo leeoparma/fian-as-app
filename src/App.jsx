@@ -850,9 +850,15 @@ function LoginScreen({onLogin}){
   const [loading,setLoading]=useState(false);const [erro,setErro]=useState("");const [msg,setMsg]=useState("");
   const [estrelas]=useState(()=>Array.from({length:34},()=>({top:Math.random()*100,left:Math.random()*100,size:Math.random()*1.6+0.8,delay:Math.random()*4,dur:2+Math.random()*3})));
   const lembrado=!!lsGet("last_email");
+  // Checagem de erro robusta a formato: este projeto Supabase usa
+  // {code,error_code,msg} (confirmado pelo 403 real do bug de logout,
+  // 16/07/2026), não {error,error_description}. `if(r.error)` nunca disparava
+  // — login errado devolvia access_token undefined e o app entrava mesmo
+  // assim, com o dashboard todo zerado (bug real, achado em 18/07/2026).
+  // Cobre os dois formatos + para login, confirma access_token de verdade.
   async function handle(){if(!email||!pass){setErro("Preencha email e senha.");return;}setLoading(true);setErro("");setMsg("");
-    try{if(mode==="register"){const r=await supa.signUp(email,pass);if(r.error)setErro(r.error.message);else{setMsg("✅ Conta criada! Verifique seu email.");setMode("login");}}
-    else{const r=await supa.signIn(email,pass);if(r.error)setErro("Email ou senha incorretos.");else{lsSet("last_email",email);onLogin(r.access_token,r.user,r.refresh_token);}}}catch{setErro("Erro de conexão.");}setLoading(false);}
+    try{if(mode==="register"){const r=await supa.signUp(email,pass);if(r.error_code||r.error)setErro(r.msg||r.error?.message||"Não foi possível criar a conta.");else{setMsg("✅ Conta criada! Verifique seu email.");setMode("login");}}
+    else{const r=await supa.signIn(email,pass);if(r.error_code||r.error||!r.access_token)setErro("Email ou senha incorretos.");else{lsSet("last_email",email);onLogin(r.access_token,r.user,r.refresh_token);}}}catch{setErro("Erro de conexão.");}setLoading(false);}
   return <div style={{position:"relative",minHeight:"100vh",overflow:"hidden",background:`radial-gradient(ellipse at top,${D.bg2} 0%,${D.bg} 70%)`,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
     <style>{`
       @keyframes flLogoFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
