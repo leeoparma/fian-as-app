@@ -43,6 +43,19 @@ const supa={
     if(d)d.__updated_at=row.updated_at; // usado só para a proteção local×nuvem no boot; nunca é salvo de volta
     return d;
   },
+  // Igual a load(), mas só pede updated_at — usado pelo polling (puxar) para
+  // decidir SE precisa buscar o payload completo, sem baixar o JSON inteiro
+  // a cada 25s só pra descobrir que nada mudou (custo real de egress: bug
+  // achado em 17/07/2026, ~16KB por poll × 2-3 pessoas × dia inteiro de aba
+  // aberta).
+  async loadTs(t,id){
+    const resp=await fetch(`${SUPA_URL}/rest/v1/profiles?id=eq.${id}&select=updated_at`,{headers:supa.ah(t)});
+    if(!resp.ok){const e=new Error("Supabase loadTs HTTP "+resp.status);e.status=resp.status;throw e;}
+    const r=await resp.json();
+    if(!Array.isArray(r)) throw new Error("Resposta inesperada do servidor");
+    const row=r?.[0];
+    return row?row.updated_at:null; // null = conta sem dados na nuvem ainda
+  },
   async save(t,id,d){const resp=await fetch(`${SUPA_URL}/rest/v1/profiles`,{method:"POST",headers:{...supa.ah(t),"Prefer":"resolution=merge-duplicates"},body:JSON.stringify({id,data:d,updated_at:new Date().toISOString()})});if(!resp.ok){const e=new Error("Supabase save HTTP "+resp.status);e.status=resp.status;throw e;}},
   // Backups automáticos (tabela public.backups — ver backups.sql)
   async backupInsert(t,data){const resp=await fetch(`${SUPA_URL}/rest/v1/backups`,{method:"POST",headers:supa.ah(t),body:JSON.stringify({data})});if(!resp.ok){const e=new Error("backup insert HTTP "+resp.status);e.status=resp.status;throw e;}},
@@ -90,7 +103,7 @@ let _pendenteDeSalvar=false; // true enquanto existir uma gravação que ainda n
 async function salvarComRetry(id,dados){
   const t=lsGet("session")?.token;
   if(!t)return;
-  const marcarLocal=()=>{try{lsSet("all_profiles_ts",String(Date.now()));}catch{}};
+  const marcarLocal=()=>{try{lsSet(kAllProfilesTs(id),String(Date.now()));}catch{}};
   try{
     await supa.save(t,id,dados);
     marcarLocal();setSaveErro("");_pendenteDeSalvar=false;
@@ -124,7 +137,7 @@ function iniciarVigiaDeSalvamento(getSessionId){
     const id=getSessionId();
     if(!id){timer=setTimeout(tentar,ESPERAS[0]);return;}
     rodando=true;
-    const dados=lsGet("all_profiles");
+    const dados=lsGet(kAllProfiles(id));
     try{if(dados)await salvarComRetry(id,dados);tentativa=0;}
     catch{tentativa=Math.min(tentativa+1,ESPERAS.length-1);}
     rodando=false;
@@ -258,6 +271,14 @@ const EMPTY={transacoes:[],faturas:[],investimentos:[],metas:[],bancos:[],orcame
 const EMPTY_ALL={br:{...EMPTY},au:{...EMPTY}};
 const lsGet=k=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch{return null;}};
 const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch{}};
+// Chaves de cache de perfil ESCOPADAS por user_id — sem isso, trocar de conta no
+// mesmo navegador podia ler/gravar o perfil da conta ANTERIOR por cima da nova
+// (bug real, 16/07/2026: perfil da conta A foi salvo na nuvem da conta B). Toda
+// leitura/escrita de all_profiles/all_profiles_ts/active_profile passa por aqui
+// — nunca usar a chave "crua" (sem :uid) direto de novo.
+const kAllProfiles=userId=>`all_profiles:${userId}`;
+const kAllProfilesTs=userId=>`all_profiles_ts:${userId}`;
+const kActiveProfile=userId=>`active_profile:${userId}`;
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,5);
 const fmtM=(v,cur="R$")=>cur+" "+Number(v||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtPct=v=>v!=null?Number(v).toFixed(2)+"%":"—";
@@ -628,10 +649,15 @@ function ChartModal({ticker,onClose,currency="A$",market="au",dyAlvo=6}){
           {newsLoading&&<p style={{fontSize:12,color:D.text3,padding:"20px 0",textAlign:"center"}}>⏳ Buscando notícias...</p>}
           {fatos&&fatos.length>0&&<div style={{marginBottom:14}}>
             <p style={{fontSize:12,fontWeight:700,color:D.gold,margin:"0 0 8px"}}>📢 Fatos Relevantes</p>
-            {fatos.map((f,i)=><a key={i} href={f.link} target="_blank" rel="noopener noreferrer" style={{display:"block",padding:"11px 13px",background:D.gold+"11",borderRadius:10,marginBottom:7,textDecoration:"none",border:`1px solid ${D.gold}33`}}>
-              <p style={{margin:0,fontSize:13,color:D.text,fontWeight:600,lineHeight:1.35}}>{f.titulo}</p>
-              {f.data&&<p style={{margin:"4px 0 0",fontSize:10,color:D.text3}}>{f.data}</p>}
-            </a>)}
+            {fatos.map((f,i)=>{
+              // Sem link, não finge ser clicável — renderiza como texto puro (cosmético, pendência 15/07/2026)
+              const Tag=f.link?"a":"div";
+              const linkProps=f.link?{href:f.link,target:"_blank",rel:"noopener noreferrer"}:{};
+              return <Tag key={i} {...linkProps} style={{display:"block",padding:"11px 13px",background:D.gold+"11",borderRadius:10,marginBottom:7,textDecoration:"none",border:`1px solid ${D.gold}33`,cursor:f.link?"pointer":"default"}}>
+                <p style={{margin:0,fontSize:13,color:D.text,fontWeight:600,lineHeight:1.35}}>{f.titulo}</p>
+                {f.data&&<p style={{margin:"4px 0 0",fontSize:10,color:D.text3}}>{f.data}</p>}
+              </Tag>;
+            })}
           </div>}
           {fatos&&fatos.length>0&&news&&news.length>0&&<p style={{fontSize:12,fontWeight:700,color:D.text2,margin:"0 0 8px"}}>📰 Notícias</p>}
           {news&&news.length===0&&(!fatos||fatos.length===0)&&<p style={{fontSize:12,color:D.text3,padding:"20px 0",textAlign:"center"}}>Nenhuma notícia recente encontrada.</p>}
@@ -1501,7 +1527,10 @@ function InvestimentosTab({data,setData,currency,profileId}){
   }
 
   const isBR=profileId==="br";
-  const totalInvest=data.investimentos.reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0);
+  // RF ao vivo com a série real do BCB (mesmo caminho do card/totalRF); RV usa
+  // b.valorAtual normalmente (ali é preço de mercado buscado, não fórmula
+  // congelada — problema achado em 15/07/2026 era só nos ativos de RF).
+  const totalInvest=data.investimentos.reduce((a,b)=>a+(isRFAtivo(b)?calcValorAtualRFHistorico(b,seriesBCB,new Date()).valor:(b.valorAtual||b.valorInvestido||b.valor||0)),0);
   const totalInvestido=data.investimentos.reduce((a,b)=>a+(b.valorInvestido||b.valor||0),0);
   const totalLucro=totalInvest-totalInvestido;
   const rentTotal=totalInvestido>0?((totalInvest-totalInvestido)/totalInvestido)*100:0;
@@ -1536,7 +1565,9 @@ function InvestimentosTab({data,setData,currency,profileId}){
 
   async function buscarDados(inv){
     if(inv.tipo==="Renda Fixa"||inv.tipo==="Tesouro Direto"){
-      const va=calcValorAtualRF(inv);
+      // Série real do BCB quando disponível (mesmo caminho do card) — corrige na ORIGEM
+      // o campo inv.valorAtual, em vez de cada tela que o lê ter que saber disso.
+      const va=calcValorAtualRFHistorico(inv,seriesBCB,new Date()).valor;
       setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,valorAtual:va,lucro:va-(inv.valorInvestido||inv.valor||0),preco_atual:va/(inv.quantidade||1)}:x)}));
       return;
     }
@@ -1599,7 +1630,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
     const isRF=form.tipo==="Renda Fixa"||form.tipo==="Tesouro Direto";
     const vi=parseFloat(form.valorInvestido)||parseFloat(form.precoMedio||0)*parseFloat(form.quantidade||1)||0;
     const i={id:form.editId||uid(),tipo:form.tipo||"Ações",descricao:form.descricao||"",ticker:(form.ticker||"").toUpperCase(),quantidade:parseFloat(form.quantidade)||1,precoMedio:parseFloat(form.precoMedio)||0,valorInvestido:vi,valor:vi,data:form.data||hoje.toISOString().slice(0,10),bancoId:form.bancoId||null,indice:form.indice||"CDI",taxaRF:parseFloat(form.taxaRF)||0,pctIndice:parseFloat(form.pctIndice)||100,rfTipo:form.rfTipo||"pct",vencimento:form.vencimento||""};
-    if(isRF){i.valorAtual=calcValorAtualRF(i);i.lucro=i.valorAtual-vi;}
+    if(isRF){i.valorAtual=calcValorAtualRFHistorico(i,seriesBCB,new Date()).valor;i.lucro=i.valorAtual-vi;}
     const corretagem=parseFloat(form.corretagem)||0;
     if(corretagem>0)i.corretagemCompra=corretagem; // guardado p/ base de custo fiscal futura
     const debita=!form.editId&&form.bancoId&&form.debitarBanco!==false&&vi>0;
@@ -4221,7 +4252,7 @@ class ErrorBoundary extends Component{
           <p style={{color:"#94a3b8",fontSize:13,marginTop:8}}>Os seus dados estão seguros. Tente o "Modo seguro" abaixo — ele recarrega o app numa tela simples. Se não resolver, tire um print desta tela e envie.</p>
           <div style={{display:"flex",gap:8,flexWrap:"wrap",margin:"12px 0"}}>
             <button onClick={()=>{try{location.reload();}catch{}}} style={{padding:"10px 16px",background:"#00d084",color:"#000",border:"none",borderRadius:8,fontWeight:700,cursor:"pointer"}}>🔄 Recarregar</button>
-            <button onClick={()=>{try{localStorage.setItem("active_profile","br");localStorage.setItem("force_tab","0");location.reload();}catch{}}} style={{padding:"10px 16px",background:"#3b82f6",color:"#fff",border:"none",borderRadius:8,fontWeight:700,cursor:"pointer"}}>🛡️ Modo seguro</button>
+            <button onClick={()=>{try{const uid2=lsGet("session")?.user?.id;if(uid2)lsSet(kActiveProfile(uid2),"br");localStorage.setItem("force_tab","0");location.reload();}catch{}}} style={{padding:"10px 16px",background:"#3b82f6",color:"#fff",border:"none",borderRadius:8,fontWeight:700,cursor:"pointer"}}>🛡️ Modo seguro</button>
           </div>
           <pre style={{whiteSpace:"pre-wrap",wordBreak:"break-word",background:"#111827",border:"1px solid #1e2d4a",borderRadius:8,padding:"12px",fontSize:11,color:"#f59e0b",marginTop:8}}>{msg}</pre>
           <pre style={{whiteSpace:"pre-wrap",wordBreak:"break-word",background:"#111827",border:"1px solid #1e2d4a",borderRadius:8,padding:"12px",fontSize:10,color:"#64748b",marginTop:8,maxHeight:300,overflow:"auto"}}>{stack}</pre>
@@ -4247,9 +4278,10 @@ function AppInner(){
     if(!("serviceWorker" in navigator))return;
     navigator.serviceWorker.register("/sw.js").then(r=>{try{r.update();}catch{}}).catch(()=>{});
   },[]);
-  const [allData,setAllData]=useState(()=>lsGet("all_profiles")||EMPTY_ALL);
+  // Escopado por user_id (session já foi lida acima) — nunca lê o cache de OUTRA conta.
+  const [allData,setAllData]=useState(()=>{const u=session?.user?.id;return(u&&lsGet(kAllProfiles(u)))||EMPTY_ALL;});
   const [syncing,setSyncing]=useState(false);
-  const [profileId,setProfileId]=useState(()=>lsGet("active_profile")||"br");
+  const [profileId,setProfileId]=useState(()=>{const u=session?.user?.id;return(u&&lsGet(kActiveProfile(u)))||"br";});
   const [tab,setTab]=useState(0);
   const [mes,setMes]=useState(MES_ATUAL);
   const [grafico,setGrafico]=useState("barras");
@@ -4324,16 +4356,21 @@ function AppInner(){
       try{
         const sess=lsGet("session")||session;
         console.log("[puxar] consultando a nuvem…");
-        const r=await supa.load(sess.token,sess.user.id);
-        if(cancelado||!r){console.log("[puxar] sem dados na nuvem");return;}
-        const cloudTs=parseSupaTs(r.__updated_at);
-        delete r.__updated_at;
-        const localTs=parseInt(lsGet("all_profiles_ts")||"0",10);
+        // Só pede o timestamp primeiro (~200 bytes) — o payload completo (~16KB)
+        // só é buscado se a nuvem realmente estiver mais nova que o local.
+        const cloudUpdatedAt=await supa.loadTs(sess.token,sess.user.id);
+        if(cancelado)return;
+        if(!cloudUpdatedAt){console.log("[puxar] sem dados na nuvem");return;}
+        const cloudTs=parseSupaTs(cloudUpdatedAt);
+        const localTs=parseInt(lsGet(kAllProfilesTs(sess.user.id))||"0",10);
         console.log("[puxar] nuvem:",new Date(cloudTs).toISOString(),"local:",new Date(localTs).toISOString(),cloudTs>localTs?"→ TRAZENDO":"→ já atualizado");
-        if(cloudTs>localTs){ // outro aparelho salvou algo mais novo — traz para cá
+        if(cloudTs>localTs){ // outro aparelho salvou algo mais novo — busca o payload completo agora
+          const r=await supa.load(sess.token,sess.user.id);
+          if(cancelado||!r)return;
+          delete r.__updated_at;
           setAllData(r);
-          lsSet("all_profiles",r);
-          lsSet("all_profiles_ts",String(cloudTs));
+          lsSet(kAllProfiles(sess.user.id),r);
+          lsSet(kAllProfilesTs(sess.user.id),String(cloudTs));
         }
       }catch(e){console.log("[puxar] ERRO:",e?.message||e);} // logado por enquanto para diagnóstico
     }
@@ -4376,25 +4413,25 @@ function AppInner(){
           // localmente DEPOIS do último save aceito pela nuvem (ex.: a nuvem
           // ficou fora de ar por dias e você seguiu lançando), o local é a
           // verdade — a nuvem velha NUNCA sobrescreve o local mais novo.
-          const localTs=parseInt(lsGet("all_profiles_ts")||"0",10);
+          const localTs=parseInt(lsGet(kAllProfilesTs(sess.user.id))||"0",10);
           const cloudTs=parseSupaTs(r.__updated_at);
           delete r.__updated_at; // nunca deixa esse carimbo entrar em all_profiles / na nuvem
           const localMaisNovo=localTs>0&&cloudTs>0&&localTs>cloudTs;
           if(editouSemNuvem.current||localMaisNovo){
             loadOk.current=true;
-            const local=lsGet("all_profiles");
+            const local=lsGet(kAllProfiles(sess.user.id));
             if(local){try{await salvarComRetry(sess.user.id,local);}catch{}}
           }else{
             setAllData(r);
-            lsSet("all_profiles",r);
-            lsSet("all_profiles_ts",String(cloudTs||Date.now()));
+            lsSet(kAllProfiles(sess.user.id),r);
+            lsSet(kAllProfilesTs(sess.user.id),String(cloudTs||Date.now()));
             loadOk.current=true;
             backupAutomatico(r); // 1×/dia, silencioso
             sincronizarAgendaPush(r); // push: agenda dos próximos 7 dias
           }
         }else{
           // load retornou null = conta sem dados na nuvem.
-          const local=lsGet("all_profiles");
+          const local=lsGet(kAllProfiles(sess.user.id));
           const temConteudo=local&&Object.values(local).some(p=>p&&((p.transacoes?.length)||(p.investimentos?.length)||(p.bancos?.length)));
           loadOk.current=true;
           if(temConteudo){
@@ -4466,7 +4503,7 @@ function AppInner(){
       try{await com401(t=>supa.backupInsert(t,semFotos(allData)));}catch{}
       const restaurado=mesclarFotos(bkp,allData);
       setAllData(restaurado);
-      lsSet("all_profiles",restaurado);
+      if(session?.user?.id)lsSet(kAllProfiles(session.user.id),restaurado);
       loadOk.current=true;
       if(session){clearTimeout(saveTimer.current);saveTimer.current=setTimeout(()=>salvarComRetry(session.user.id,restaurado).catch(()=>{}),1500);}
       setModalBk(null);
@@ -4496,7 +4533,7 @@ function AppInner(){
       const txsPara=[...(pPara.transacoes||[]),
         {id:uid(),tipo:"receita",descricao:`Transf. ← ${labelDe}${obs}`,valor:vRec,categoria:"Transferência",data:dt,bancoId:transfForm.bancoPara||null,transfId}];
       const updated={...all,[de]:{...pDe,transacoes:txsDe},[para]:{...pPara,transacoes:txsPara}};
-      lsSet("all_profiles",updated);
+      if(session?.user?.id)lsSet(kAllProfiles(session.user.id),updated);
       if(session&&loadOk.current){
         clearTimeout(saveTimer.current);
         saveTimer.current=setTimeout(()=>salvarComRetry(session.user.id,updated).catch(()=>{}),1500);
@@ -4510,7 +4547,7 @@ function AppInner(){
     const prev=all[profileId]||{...EMPTY};
     const next=typeof upd==="function"?upd(prev):{...prev,...upd};
     const updated={...all,[profileId]:next};
-    lsSet("all_profiles",updated);
+    if(session?.user?.id)lsSet(kAllProfiles(session.user.id),updated);
     // Só envia ao Supabase se a leitura inicial tiver dado certo (loadOk).
     // Assim nunca salvamos vazio por cima de dados bons quando a nuvem está fora.
     if(session&&loadOk.current){
@@ -4519,13 +4556,36 @@ function AppInner(){
     }else if(session){editouSemNuvem.current=true;}
     return updated;
   });}
-  function handleLogin(t,u,rt){const s={token:t,user:u,refresh:rt||null,ts:Date.now()};setSession(s);lsSet("session",s);}
+  function handleLogin(t,u,rt){
+    const s={token:t,user:u,refresh:rt||null,ts:Date.now()};
+    setSession(s);lsSet("session",s);
+    // React não remonta o componente só porque a sessão mudou — sem isto, a
+    // tela continuava mostrando allData da conta ANTERIOR até a sincronização
+    // com a nuvem terminar (bug real, 16/07/2026). Troca já para o cache
+    // DESTE usuário (ou vazio, se for a 1ª vez).
+    const uid2=u?.id;
+    setAllData((uid2&&lsGet(kAllProfiles(uid2)))||EMPTY_ALL);
+    setProfileId((uid2&&lsGet(kActiveProfile(uid2)))||"br");
+  }
   async function handleLogout(){
     // Logout local imediato — não trava se o Supabase estiver fora
     try{ if(session) supa.signOut(session.token).catch(()=>{}); }catch{}
-    setSession(null);lsSet("session",null);
+    // Limpa o cache DESTA conta e a sessão, sempre — independente da resposta
+    // do servidor (bug real, 16/07/2026: 403 no signOut deixava a tela antiga
+    // no ar). Reload garante estado limpo (nada de allData velho em memória).
+    try{
+      const uid2=session?.user?.id;
+      if(uid2){
+        localStorage.removeItem(kAllProfiles(uid2));
+        localStorage.removeItem(kAllProfilesTs(uid2));
+        localStorage.removeItem(kActiveProfile(uid2));
+      }
+      localStorage.removeItem("session");
+      localStorage.removeItem("last_email");
+    }catch{}
+    window.location.reload();
   }
-  useEffect(()=>{lsSet("active_profile",profileId);setTab(0);},[profileId]);
+  useEffect(()=>{if(session?.user?.id)lsSet(kActiveProfile(session.user.id),profileId);setTab(0);},[profileId,session?.user?.id]);
 
   useEffect(()=>{
     if(!session)return;
@@ -4567,7 +4627,7 @@ function AppInner(){
   },[profileId,session]);
 
   function exportar(){const p={version:4,exportedAt:new Date().toISOString(),all_profiles:allData,watchlist_br:lsGet("watchlist_br")||[],watchlist_au:lsGet("watchlist_au")||[]};const b=new Blob([JSON.stringify(p,null,2)],{type:"application/json"});const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download=`financas_${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(u);}
-  function importar(e){const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=ev=>{try{const p=JSON.parse(ev.target.result);if(!p.all_profiles){alert("Arquivo inválido.");return;}if(!window.confirm("Substituir todos os dados?"))return;lsSet("all_profiles",p.all_profiles);if(p.watchlist_br)lsSet("watchlist_br",p.watchlist_br);if(p.watchlist_au)lsSet("watchlist_au",p.watchlist_au);setAllData(p.all_profiles);if(session)salvarComRetry(session.user.id,p.all_profiles).catch(()=>{});alert("✅ Dados restaurados!");}catch{alert("Arquivo inválido.");}};r.readAsText(file);e.target.value="";}
+  function importar(e){const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=ev=>{try{const p=JSON.parse(ev.target.result);if(!p.all_profiles){alert("Arquivo inválido.");return;}if(!window.confirm("Substituir todos os dados?"))return;if(session?.user?.id)lsSet(kAllProfiles(session.user.id),p.all_profiles);if(p.watchlist_br)lsSet("watchlist_br",p.watchlist_br);if(p.watchlist_au)lsSet("watchlist_au",p.watchlist_au);setAllData(p.all_profiles);if(session)salvarComRetry(session.user.id,p.all_profiles).catch(()=>{});alert("✅ Dados restaurados!");}catch{alert("Arquivo inválido.");}};r.readAsText(file);e.target.value="";}
 
   if(!session)return <><style>{GS}</style><style>{GS2}</style><LoginScreen onLogin={handleLogin}/></>;
 

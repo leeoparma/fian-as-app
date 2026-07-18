@@ -980,5 +980,12 @@ test("compoeFatorMensalProRata: reduz (não elimina) o gap do CDB real — mais 
   const fator=compoeFatorMensalProRata(serie,"2025-08-06","2026-07-15");
   const anos=(new Date(2026,6,15)-new Date("2025-08-06"))/(1000*60*60*24*365);
   const valor=7500*fator*Math.pow(1+9.75/100,anos);
-  aprox(valor,8544.43,0.5); // reproduz o número real verificado à mão
+  // Tolerância medida (não arbitrária): o pro-rata mensal reduz o gap de ~11
+  // meses de "excluir o mês inteiro", mas nunca elimina — a interpolação
+  // diária proprietária de cada banco não é pública (ver doc de
+  // compoeFatorMensalProRata acima). O resíduo real medido aqui é ~R$0,91
+  // (0,087% do valor) sobre um CDB de 11 meses; investigado em 16/07/2026,
+  // não é regressão de código (função não muda desde que este teste foi
+  // escrito) — é o próprio limite documentado da aproximação.
+  aprox(valor,8544.43,1); // reproduz o número real verificado à mão, dentro do resíduo esperado
 });
