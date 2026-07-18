@@ -30,6 +30,20 @@ const supa={
   async signUp(e,p){return(await fetch(`${SUPA_URL}/auth/v1/signup`,{method:"POST",headers:supa.h,body:JSON.stringify({email:e,password:p})})).json();},
   async signIn(e,p){return(await fetch(`${SUPA_URL}/auth/v1/token?grant_type=password`,{method:"POST",headers:supa.h,body:JSON.stringify({email:e,password:p})})).json();},
   async signOut(t){await fetch(`${SUPA_URL}/auth/v1/logout`,{method:"POST",headers:supa.ah(t)});},
+  // Dispara o email de "esqueci minha senha" (GoTrue: sempre 200, mesmo se o
+  // email não existir — não dá pra saber, por desenho, evita enumeração de
+  // contas). redirectTo vira query param; o link do email volta com
+  // #access_token=...&type=recovery anexado a essa URL.
+  async recover(e,redirectTo){
+    const resp=await fetch(`${SUPA_URL}/auth/v1/recover?redirect_to=${encodeURIComponent(redirectTo)}`,{method:"POST",headers:supa.h,body:JSON.stringify({email:e})});
+    if(!resp.ok){const err=new Error("Supabase recover HTTP "+resp.status);err.status=resp.status;throw err;}
+  },
+  // Troca a senha usando o access_token temporário do link de recovery
+  // (não o token de sessão normal — supa.ah funciona igual, é só um Bearer).
+  async updatePassword(t,novaSenha){
+    const resp=await fetch(`${SUPA_URL}/auth/v1/user`,{method:"PUT",headers:supa.ah(t),body:JSON.stringify({password:novaSenha})});
+    if(!resp.ok){const err=new Error("Supabase updatePassword HTTP "+resp.status);err.status=resp.status;throw err;}
+  },
   // Troca o refresh_token por um access_token novo (o access dura ~1h)
   async refresh(rt){const r=await fetch(`${SUPA_URL}/auth/v1/token?grant_type=refresh_token`,{method:"POST",headers:supa.h,body:JSON.stringify({refresh_token:rt})});if(!r.ok)return null;return r.json();},
   async load(t,id){
@@ -845,9 +859,9 @@ function ScoreCard({data}){
 }
 
 // ── Login ─────────────────────────────────────────────────────────────────────
-function LoginScreen({onLogin}){
+function LoginScreen({onLogin,initialMsg}){
   const [mode,setMode]=useState("login");const [email,setEmail]=useState(()=>lsGet("last_email")||"");const [pass,setPass]=useState("");
-  const [loading,setLoading]=useState(false);const [erro,setErro]=useState("");const [msg,setMsg]=useState("");
+  const [loading,setLoading]=useState(false);const [erro,setErro]=useState("");const [msg,setMsg]=useState(()=>initialMsg||"");
   const [estrelas]=useState(()=>Array.from({length:34},()=>({top:Math.random()*100,left:Math.random()*100,size:Math.random()*1.6+0.8,delay:Math.random()*4,dur:2+Math.random()*3})));
   const lembrado=!!lsGet("last_email");
   // Checagem de erro robusta a formato: este projeto Supabase usa
@@ -859,6 +873,13 @@ function LoginScreen({onLogin}){
   async function handle(){if(!email||!pass){setErro("Preencha email e senha.");return;}setLoading(true);setErro("");setMsg("");
     try{if(mode==="register"){const r=await supa.signUp(email,pass);if(r.error_code||r.error)setErro(r.msg||r.error?.message||"Não foi possível criar a conta.");else{setMsg("✅ Conta criada! Verifique seu email.");setMode("login");}}
     else{const r=await supa.signIn(email,pass);if(r.error_code||r.error||!r.access_token)setErro("Email ou senha incorretos.");else{lsSet("last_email",email);onLogin(r.access_token,r.user,r.refresh_token);}}}catch{setErro("Erro de conexão.");}setLoading(false);}
+  // Mensagem SEMPRE genérica no sucesso, exista ou não o email na base — o
+  // GoTrue já se comporta assim (200 silencioso), então isso só reforça a
+  // mesma prática do lado do texto exibido (evita dar dica de que emails
+  // estão cadastrados).
+  async function handleRecover(){if(!email){setErro("Digite seu email.");return;}setLoading(true);setErro("");setMsg("");
+    try{await supa.recover(email,window.location.origin);setMsg("Se esse email estiver cadastrado, você vai receber um link para redefinir a senha em instantes. Confira também o spam.");}
+    catch{setErro("Erro de conexão. Tente novamente.");}setLoading(false);}
   return <div style={{position:"relative",minHeight:"100vh",overflow:"hidden",background:`radial-gradient(ellipse at top,${D.bg2} 0%,${D.bg} 70%)`,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
     <style>{`
       @keyframes flLogoFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
@@ -891,13 +912,59 @@ function LoginScreen({onLogin}){
       <div className="fl-glass" style={{borderRadius:20,padding:"2rem"}}>
         {erro&&<div style={{background:D.red+"22",border:`1px solid ${D.red}44`,borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:12,color:D.red}}>{erro}</div>}
         {msg&&<div style={{background:D.green+"22",border:`1px solid ${D.green}44`,borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:12,color:D.green}}>{msg}</div>}
-        <div style={{display:"flex",gap:4,marginBottom:"1.5rem",background:D.bg3,borderRadius:10,padding:4}}>
-          {[["login","Entrar"],["register","Criar conta"]].map(([v,l])=><button key={v} onClick={()=>{setMode(v);setErro("");setMsg("");}} style={{flex:1,padding:"9px",borderRadius:8,border:"none",cursor:"pointer",fontSize:13,fontWeight:mode===v?700:400,background:mode===v?D.green:"transparent",color:mode===v?"#000":D.text3,transition:"all .2s"}}>{l}</button>)}
-        </div>
-        <label style={{fontSize:12,color:D.text3,display:"block",marginBottom:12}}>Email<input type="email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handle()} placeholder="seu@email.com" style={{marginTop:6}}/></label>
-        <label style={{fontSize:12,color:D.text3,display:"block",marginBottom:20}}>Senha<input type="password" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handle()} placeholder="••••••••" style={{marginTop:6}}/></label>
-        <Btn onClick={handle} disabled={loading} style={{width:"100%",padding:"12px",fontSize:14,borderRadius:10}}>{loading?"Aguarde...":(mode==="login"?"Entrar →":"Criar conta →")}</Btn>
+        {mode==="reset-request"?<>
+          <p style={{fontSize:14,fontWeight:700,color:D.text,margin:"0 0 4px"}}>Redefinir senha</p>
+          <p style={{fontSize:12,color:D.text3,margin:"0 0 16px",lineHeight:1.5}}>Digite o email da sua conta — enviamos um link para você criar uma senha nova.</p>
+          <label style={{fontSize:12,color:D.text3,display:"block",marginBottom:20}}>Email<input type="email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleRecover()} placeholder="seu@email.com" style={{marginTop:6}}/></label>
+          <Btn onClick={handleRecover} disabled={loading} style={{width:"100%",padding:"12px",fontSize:14,borderRadius:10}}>{loading?"Aguarde...":"Enviar link de redefinição"}</Btn>
+          <p style={{textAlign:"center",marginTop:16}}><button onClick={()=>{setMode("login");setErro("");setMsg("");}} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:12,textDecoration:"underline"}}>← Voltar para login</button></p>
+        </>:<>
+          <div style={{display:"flex",gap:4,marginBottom:"1.5rem",background:D.bg3,borderRadius:10,padding:4}}>
+            {[["login","Entrar"],["register","Criar conta"]].map(([v,l])=><button key={v} onClick={()=>{setMode(v);setErro("");setMsg("");}} style={{flex:1,padding:"9px",borderRadius:8,border:"none",cursor:"pointer",fontSize:13,fontWeight:mode===v?700:400,background:mode===v?D.green:"transparent",color:mode===v?"#000":D.text3,transition:"all .2s"}}>{l}</button>)}
+          </div>
+          <label style={{fontSize:12,color:D.text3,display:"block",marginBottom:12}}>Email<input type="email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handle()} placeholder="seu@email.com" style={{marginTop:6}}/></label>
+          <label style={{fontSize:12,color:D.text3,display:"block",marginBottom:mode==="login"?8:20}}>Senha<input type="password" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handle()} placeholder="••••••••" style={{marginTop:6}}/></label>
+          {mode==="login"&&<p style={{textAlign:"right",margin:"0 0 16px"}}><button onClick={()=>{setMode("reset-request");setErro("");setMsg("");}} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:11,textDecoration:"underline"}}>Esqueceu a senha?</button></p>}
+          <Btn onClick={handle} disabled={loading} style={{width:"100%",padding:"12px",fontSize:14,borderRadius:10}}>{loading?"Aguarde...":(mode==="login"?"Entrar →":"Criar conta →")}</Btn>
+        </>}
         <p style={{fontSize:11,color:D.text3,textAlign:"center",marginTop:16}}>🔒 Dados sincronizados em todos os dispositivos</p>
+      </div>
+    </div>
+  </div>;
+}
+
+// ── Tela de nova senha (link de "esqueci a senha") ────────────────────────────
+// Renderizada em vez de LoginScreen/dashboard quando a URL chega com
+// #access_token=...&type=recovery (link do email do Supabase). `token` é uma
+// sessão temporária, válida só pra essa troca — não é a sessão normal do app.
+function ResetPasswordScreen({token,onDone,onCancel}){
+  const [senha,setSenha]=useState("");const [confirmar,setConfirmar]=useState("");
+  const [loading,setLoading]=useState(false);const [erro,setErro]=useState("");
+  async function handle(){
+    if(senha.length<6){setErro("A senha precisa ter pelo menos 6 caracteres.");return;}
+    if(senha!==confirmar){setErro("As senhas não coincidem.");return;}
+    setLoading(true);setErro("");
+    try{
+      await supa.updatePassword(token,senha);
+      onDone("✅ Senha atualizada! Faça login com a senha nova.");
+    }catch(e){
+      setErro(e?.status===401||e?.status===403?"Link inválido ou expirado. Solicite um novo.":"Não foi possível atualizar a senha. Tente novamente.");
+    }
+    setLoading(false);
+  }
+  return <div style={{position:"relative",minHeight:"100vh",overflow:"hidden",background:`radial-gradient(ellipse at top,${D.bg2} 0%,${D.bg} 70%)`,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
+    <div style={{position:"relative",width:"min(100%,400px)",zIndex:1}}>
+      <div style={{textAlign:"center",marginBottom:"2rem"}}>
+        <div style={{marginBottom:12}}><img src="/logo.svg" alt="logo" style={{width:84,height:84,borderRadius:20,filter:`drop-shadow(0 0 24px ${D.green}77)`}}/></div>
+        <h1 style={{fontSize:24,fontWeight:800,color:D.text,margin:0}}>Controle Financeiro</h1>
+        <p style={{color:D.text3,fontSize:13,marginTop:4}}>Escolha sua nova senha</p>
+      </div>
+      <div style={{background:"rgba(255,255,255,.045)",backdropFilter:"blur(18px)",WebkitBackdropFilter:"blur(18px)",border:"1px solid rgba(255,255,255,.09)",boxShadow:"0 24px 64px rgba(0,0,0,.5)",borderRadius:20,padding:"2rem"}}>
+        {erro&&<div style={{background:D.red+"22",border:`1px solid ${D.red}44`,borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:12,color:D.red}}>{erro}</div>}
+        <label style={{fontSize:12,color:D.text3,display:"block",marginBottom:12}}>Nova senha<input type="password" value={senha} onChange={e=>setSenha(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handle()} placeholder="••••••••" style={{marginTop:6}}/></label>
+        <label style={{fontSize:12,color:D.text3,display:"block",marginBottom:20}}>Confirmar nova senha<input type="password" value={confirmar} onChange={e=>setConfirmar(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handle()} placeholder="••••••••" style={{marginTop:6}}/></label>
+        <Btn onClick={handle} disabled={loading} style={{width:"100%",padding:"12px",fontSize:14,borderRadius:10}}>{loading?"Aguarde...":"Salvar nova senha"}</Btn>
+        <p style={{textAlign:"center",marginTop:16}}><button onClick={onCancel} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:12,textDecoration:"underline"}}>Cancelar</button></p>
       </div>
     </div>
   </div>;
@@ -4272,6 +4339,18 @@ class ErrorBoundary extends Component{
 // ── App Principal ─────────────────────────────────────────────────────────────
 function AppInner(){
   const [session,setSession]=useState(()=>lsGet("session"));
+  // Link de "esqueci a senha": o GoTrue devolve #access_token=...&type=recovery
+  // anexado na URL de redirect. Lido uma vez no boot; a hash é removida da
+  // barra de endereço na hora (não fica exposta nem sobrevive a um reload).
+  const [recoveryToken,setRecoveryToken]=useState(()=>{
+    if(typeof window==="undefined"||!window.location.hash)return null;
+    const params=new URLSearchParams(window.location.hash.slice(1));
+    const t=params.get("access_token");
+    if(params.get("type")!=="recovery"||!t)return null;
+    try{history.replaceState(null,"",window.location.pathname+window.location.search);}catch{}
+    return t;
+  });
+  const [postResetMsg,setPostResetMsg]=useState("");
   // Mantém o token vivo enquanto o app está aberto (o access dura ~1h; renova a cada 45 min)
   useEffect(()=>{
     if(!session?.refresh)return;
@@ -4635,7 +4714,10 @@ function AppInner(){
   function exportar(){const p={version:4,exportedAt:new Date().toISOString(),all_profiles:allData,watchlist_br:lsGet("watchlist_br")||[],watchlist_au:lsGet("watchlist_au")||[]};const b=new Blob([JSON.stringify(p,null,2)],{type:"application/json"});const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download=`financas_${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(u);}
   function importar(e){const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=ev=>{try{const p=JSON.parse(ev.target.result);if(!p.all_profiles){alert("Arquivo inválido.");return;}if(!window.confirm("Substituir todos os dados?"))return;if(session?.user?.id)lsSet(kAllProfiles(session.user.id),p.all_profiles);if(p.watchlist_br)lsSet("watchlist_br",p.watchlist_br);if(p.watchlist_au)lsSet("watchlist_au",p.watchlist_au);setAllData(p.all_profiles);if(session)salvarComRetry(session.user.id,p.all_profiles).catch(()=>{});alert("✅ Dados restaurados!");}catch{alert("Arquivo inválido.");}};r.readAsText(file);e.target.value="";}
 
-  if(!session)return <><style>{GS}</style><style>{GS2}</style><LoginScreen onLogin={handleLogin}/></>;
+  // Link de recovery tem prioridade sobre uma sessão já existente — o usuário
+  // clicou no link com a intenção explícita de trocar a senha.
+  if(recoveryToken)return <><style>{GS}</style><style>{GS2}</style><ResetPasswordScreen token={recoveryToken} onDone={m=>{setPostResetMsg(m);setRecoveryToken(null);}} onCancel={()=>setRecoveryToken(null)}/></>;
+  if(!session)return <><style>{GS}</style><style>{GS2}</style><LoginScreen onLogin={handleLogin} initialMsg={postResetMsg}/></>;
 
   const profile=PROFILES.find(p=>p.id===profileId);
   const currency=profile.currency;
