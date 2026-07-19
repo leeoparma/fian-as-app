@@ -879,7 +879,12 @@ function LoginScreen({onLogin,initialMsg}){
   // estão cadastrados).
   async function handleRecover(){if(!email){setErro("Digite seu email.");return;}setLoading(true);setErro("");setMsg("");
     try{await supa.recover(email,window.location.origin);setMsg("Se esse email estiver cadastrado, você vai receber um link para redefinir a senha em instantes. Confira também o spam.");}
-    catch{setErro("Erro de conexão. Tente novamente.");}setLoading(false);}
+    // 429 = rate limit de envio de email do Supabase (bem restritivo no plano
+    // Free) — achado em 18/07/2026 quando testes seguidos (inclusive
+    // diagnóstico via curl) estouraram a cota e mascararam como "erro de
+    // conexão" genérico. Distinguir aqui evita confundir rate limit com
+    // problema de rede/config de verdade.
+    catch(e){setErro(e?.status===429?"Muitas tentativas em pouco tempo. Aguarde alguns minutos e tente de novo.":"Erro de conexão. Tente novamente.");}setLoading(false);}
   return <div style={{position:"relative",minHeight:"100vh",overflow:"hidden",background:`radial-gradient(ellipse at top,${D.bg2} 0%,${D.bg} 70%)`,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
     <style>{`
       @keyframes flLogoFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
