@@ -153,7 +153,7 @@ function iniciarVigiaDeSalvamento(getSessionId){
     rodando=true;
     const dados=lsGet(kAllProfiles(id));
     try{if(dados)await salvarComRetry(id,dados);tentativa=0;}
-    catch{tentativa=Math.min(tentativa+1,ESPERAS.length-1);}
+    catch(erro){console.error("[vigia] falha ao salvar:",erro?.status,erro?.message||erro);tentativa=Math.min(tentativa+1,ESPERAS.length-1);}
     rodando=false;
     timer=setTimeout(tentar,ESPERAS[tentativa]);
   }
@@ -4396,6 +4396,7 @@ function AppInner(){
   const [saveErro,setSaveErroUI]=useState("");
   useEffect(()=>{const fn=m=>setSaveErroUI(m);_saveErroOuvintes.add(fn);setSaveErroUI(_saveErroGlobal);return()=>_saveErroOuvintes.delete(fn);},[]);
   const [syncErro,setSyncErro]=useState(false);
+  const [syncEsgotado,setSyncEsgotado]=useState(false); // true depois de MAX_TENTATIVAS falhas seguidas — para de tentar sozinho
   const [cambio,setCambio]=useState(null);          // {brl,usd,aud} valor de cada moeda em BRL
   const [moedaCons,setMoedaCons]=useState(()=>lsGet("moeda_cons")||"BRL"); // moeda de exibição do consolidado
   const [cambioErro,setCambioErro]=useState(false);
@@ -4476,9 +4477,11 @@ function AppInner(){
     loadOk.current=false;
     editouSemNuvem.current=false;
     setSyncErro(false);
+    setSyncEsgotado(false); // sessão/token novo — recomeça do zero
     let cancelado=false;
     let timer=null;
     const ESPERAS=[3000,8000,20000,30000]; // reconexão automática: 3s→8s→20s→30s (repete)
+    const MAX_TENTATIVAS=20; // depois disso, para de tentar sozinho — pede reload em vez de martelar a nuvem pra sempre
     let tentativa=0;
     async function tentar(){
       if(cancelado)return;
@@ -4531,15 +4534,22 @@ function AppInner(){
         }
         setSyncErro(false);
         setSyncing(false);
-      }catch{
+      }catch(erro){
         if(cancelado)return;
         // Falhou (rede/Supabase instável). Nada é sobrescrito, os dados ficam
         // no aparelho, e a reconexão é AUTOMÁTICA — sem precisar recarregar.
+        // Log real do erro (achado em 19/07/2026: o catch mudo escondia até
+        // o status HTTP, impossível diagnosticar qualquer vazamento/loop depois).
+        console.error("[tentar] falha ao sincronizar:",erro?.status,erro?.message||erro);
         setSyncErro(true);
         loadOk.current=false;
         setSyncing(false);
         const espera=ESPERAS[Math.min(tentativa,ESPERAS.length-1)];
         tentativa++;
+        if(tentativa>=MAX_TENTATIVAS){
+          setSyncEsgotado(true);
+          return; // desiste de tentar sozinho — só reload ou nova sessão recomeça (backoff intocado até aqui)
+        }
         timer=setTimeout(tentar,espera);
       }
     }
@@ -4756,7 +4766,7 @@ function AppInner(){
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%"}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
           <img src="/logo.svg" alt="logo" style={{width:34,height:34,borderRadius:9,filter:`drop-shadow(0 0 8px ${D.green}66)`}}/>
-          <div><p style={{margin:0,fontSize:15,fontWeight:800,color:D.text}}>Controle Financeiro</p>{syncing&&<p style={{margin:0,fontSize:10,color:D.green}}>● sincronizando...</p>}{!syncing&&syncErro&&<p style={{margin:0,fontSize:10,color:D.gold}}>⚠ sem nuvem — suas alterações estão salvas no aparelho · reconectando…</p>}{!syncing&&!syncErro&&saveErro&&<p style={{margin:0,fontSize:10,color:D.red}}>⚠ {saveErro}</p>}</div>
+          <div><p style={{margin:0,fontSize:15,fontWeight:800,color:D.text}}>Controle Financeiro</p>{syncing&&<p style={{margin:0,fontSize:10,color:D.green}}>● sincronizando...</p>}{!syncing&&syncEsgotado&&<p style={{margin:0,fontSize:10,color:D.red}}>⚠ Não foi possível sincronizar. Recarregue a página.</p>}{!syncing&&syncErro&&!syncEsgotado&&<p style={{margin:0,fontSize:10,color:D.gold}}>⚠ sem nuvem — suas alterações estão salvas no aparelho · reconectando…</p>}{!syncing&&!syncErro&&saveErro&&<p style={{margin:0,fontSize:10,color:D.red}}>⚠ {saveErro}</p>}</div>
           </div>
           <button onClick={handleLogout} style={{padding:"5px 12px",borderRadius:16,fontSize:11,cursor:"pointer",background:D.red+"22",border:`1px solid ${D.red}44`,color:D.red,flexShrink:0}}>Sair</button>
         </div>
