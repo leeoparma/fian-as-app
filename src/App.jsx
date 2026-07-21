@@ -4480,6 +4480,13 @@ function AppInner(){
     setSyncEsgotado(false); // sessão/token novo — recomeça do zero
     let cancelado=false;
     let timer=null;
+    // Espelha syncEsgotado, mas lido/escrito por variável de closure comum
+    // (igual cancelado/timer/tentativa) — NÃO por state. `retomar` e `tentar`
+    // são definidos uma única vez por efeito; se dependessem do state
+    // syncEsgotado aqui dentro, leriam pra sempre o valor de quando o efeito
+    // montou (closure obsoleto) e o teto de tentativas não bloquearia nada
+    // vindo de foco/online (bug real, achado em 19/07/2026).
+    let esgotado=false;
     const ESPERAS=[3000,8000,20000,30000]; // reconexão automática: 3s→8s→20s→30s (repete)
     const MAX_TENTATIVAS=20; // depois disso, para de tentar sozinho — pede reload em vez de martelar a nuvem pra sempre
     let tentativa=0;
@@ -4547,13 +4554,14 @@ function AppInner(){
         const espera=ESPERAS[Math.min(tentativa,ESPERAS.length-1)];
         tentativa++;
         if(tentativa>=MAX_TENTATIVAS){
-          setSyncEsgotado(true);
+          esgotado=true; // bloqueia retomar() de verdade — ver comentário acima
+          setSyncEsgotado(true); // só pra UI
           return; // desiste de tentar sozinho — só reload ou nova sessão recomeça (backoff intocado até aqui)
         }
         timer=setTimeout(tentar,espera);
       }
     }
-    const retomar=()=>{if(!cancelado&&!loadOk.current){if(timer)clearTimeout(timer);tentar();}};
+    const retomar=()=>{if(!cancelado&&!loadOk.current&&!esgotado){if(timer)clearTimeout(timer);tentar();}};
     const aoVisivel=()=>{if(document.visibilityState==="visible")retomar();};
     window.addEventListener("online",retomar);
     document.addEventListener("visibilitychange",aoVisivel);
