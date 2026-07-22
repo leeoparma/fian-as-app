@@ -4701,13 +4701,19 @@ function AppInner(){
         localStorage.removeItem(kSwNome(uid2));
         localStorage.removeItem(kSwSolicitado(uid2));
       }
-      // Chaves órfãs de antes do fix de 16/07/2026 (nunca escopadas por
+      // Chaves órfãs de antes dos fixes de 16-19/07/2026 (nunca escopadas por
       // user_id) — não são mais lidas por nenhum código atual, mas ainda
-      // apareciam no DevTools de quem usou o app antes dessa data.
+      // apareciam no DevTools de quem usou o app antes dessas datas.
+      // sw_codigo é órfã ainda mais antiga (nome usado antes de virar sw_ativo).
       localStorage.removeItem("all_profiles");
       localStorage.removeItem("all_profiles_ts");
       localStorage.removeItem("active_profile");
       localStorage.removeItem("financas_data");
+      localStorage.removeItem("sw_grupos");
+      localStorage.removeItem("sw_ativo");
+      localStorage.removeItem("sw_nome");
+      localStorage.removeItem("sw_solicitado");
+      localStorage.removeItem("sw_codigo");
       localStorage.removeItem("session");
       localStorage.removeItem("last_email");
     }catch{}
