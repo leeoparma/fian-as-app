@@ -293,6 +293,13 @@ const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch{}};
 const kAllProfiles=userId=>`all_profiles:${userId}`;
 const kAllProfilesTs=userId=>`all_profiles_ts:${userId}`;
 const kActiveProfile=userId=>`active_profile:${userId}`;
+// Mesma classe de bug, achada em 19/07/2026: identidade do Splitwise (quais
+// grupos você participa, seu nome nos grupos, convite pendente) também
+// vazava entre contas no mesmo navegador, sem escopo por user_id.
+const kSwGrupos=userId=>`sw_grupos:${userId}`;
+const kSwAtivo=userId=>`sw_ativo:${userId}`;
+const kSwNome=userId=>`sw_nome:${userId}`;
+const kSwSolicitado=userId=>`sw_solicitado:${userId}`;
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,5);
 const fmtM=(v,cur="R$")=>cur+" "+Number(v||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtPct=v=>v!=null?Number(v).toFixed(2)+"%":"—";
@@ -2144,17 +2151,17 @@ function MetasTab({data,setData,currency}){
 }
 
 // ── Splitwise Tab ─────────────────────────────────────────────────────────────
-function SplitwiseTab({currency,userEmail}){
+function SplitwiseTab({currency,userEmail,userId}){
   // Multi-grupo: lista de códigos que participo + qual está ativo
-  const [grupos,setGrupos]=useState(()=>{try{return JSON.parse(lsGet("sw_grupos")||"[]");}catch{return [];}});
-  const [ativo,setAtivo]=useState(()=>lsGet("sw_ativo")||"");
-  const [nomeUser,setNomeUser]=useState(()=>lsGet("sw_nome")||"");
+  const [grupos,setGrupos]=useState(()=>{try{return JSON.parse(lsGet(kSwGrupos(userId))||"[]");}catch{return [];}});
+  const [ativo,setAtivo]=useState(()=>lsGet(kSwAtivo(userId))||"");
+  const [nomeUser,setNomeUser]=useState(()=>lsGet(kSwNome(userId))||"");
   const [swData,setSwData]=useState(null);
   const [loading,setLoading]=useState(false);
   const [modal,setModal]=useState(null);
   const [form,setForm]=useState({});
   const [inputCod,setInputCod]=useState("");
-  const [solicitado,setSolicitado]=useState(()=>lsGet("sw_solicitado")||null);
+  const [solicitado,setSolicitado]=useState(()=>lsGet(kSwSolicitado(userId))||null);
   // Se existe solicitação pendente, verifica em silêncio a cada abertura:
   // quando o admin aprovar, o grupo entra sozinho.
   useEffect(()=>{if(solicitado&&!ativo)entrarGrupo(solicitado,true);},[]);
@@ -2267,14 +2274,14 @@ function SplitwiseTab({currency,userEmail}){
     if(!nome){alert("Informe seu nome.");return;}
     if(!form.nomeGrupo?.trim()){alert("Dê um nome ao grupo.");return;}
     const cod=(form.nomeGrupo.trim().toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,12)||"GRUPO")+"-"+Math.random().toString(36).slice(2,6).toUpperCase();
-    if(!nomeUser){lsSet("sw_nome",nome);setNomeUser(nome);}
+    if(!nomeUser){lsSet(kSwNome(userId),nome);setNomeUser(nome);}
     const d={codigo:cod,nome:form.nomeGrupo.trim(),membros:[{nome,email:userEmail||nome}],pendentes:[],admin:userEmail||null,despesas:[],pagamentos:[]};
     const dn=normalizaSW(d);
     try{await supa.saveShared(cod,dn);}                      // erro deixa de ser silencioso
     catch(e){alert("Não consegui criar o grupo na nuvem: "+(e?.message||e));return;}
     lsSet(`sw_${cod}`,dn);
-    const ng=[...new Set([...grupos,cod])];setGrupos(ng);lsSet("sw_grupos",JSON.stringify(ng));
-    lsSet("sw_ativo",cod);setAtivo(cod);
+    const ng=[...new Set([...grupos,cod])];setGrupos(ng);lsSet(kSwGrupos(userId),JSON.stringify(ng));
+    lsSet(kSwAtivo(userId),cod);setAtivo(cod);
     setForm({});setSetupNome("");setModal(null);
   }
 
@@ -2292,7 +2299,7 @@ function SplitwiseTab({currency,userEmail}){
     if(!window.confirm(`Sair do grupo ${cod}?\n\nVocê deixa de ver e receber avisos desse grupo. O histórico continua para os outros membros.`))return;
     try{
       await supa.rpcGrupo("sair_grupo",cod);
-      lsSet("sw_solicitado","");setSolicitado(null);
+      lsSet(kSwSolicitado(userId),"");setSolicitado(null);
       sairDaLista(cod);
       alert("Você saiu do grupo.");
     }catch(e){alert("Erro ao sair: "+(e?.message||e));}
@@ -2302,7 +2309,7 @@ function SplitwiseTab({currency,userEmail}){
     const bruto=(typeof codArg==="string"?codArg:inputCod).trim();
     if(!bruto||!(nomeUser||setupNome.trim()))return;
     const cod=bruto.toUpperCase(),nome=(nomeUser||setupNome.trim());
-    if(!nomeUser){lsSet("sw_nome",nome);setNomeUser(nome);}
+    if(!nomeUser){lsSet(kSwNome(userId),nome);setNomeUser(nome);}
     let st=null;
     try{
       st=await com401(async t=>{
@@ -2312,29 +2319,29 @@ function SplitwiseTab({currency,userEmail}){
       });
     }catch{if(!silencioso)alert("Não consegui falar com o servidor — tente de novo.");return;}
     if(st==="nao_existe"){
-      lsSet("sw_solicitado","");setSolicitado(null);
+      lsSet(kSwSolicitado(userId),"");setSolicitado(null);
       if(!silencioso)alert("Grupo não encontrado — confira o código (ou crie um novo grupo).");
       return;
     }
     if(st==="pendente"){
-      lsSet("sw_solicitado",cod);setSolicitado(cod);
+      lsSet(kSwSolicitado(userId),cod);setSolicitado(cod);
       if(!silencioso)alert("📨 Solicitação enviada! O administrador do grupo precisa aprovar sua entrada. Ao abrir o app, eu verifico sozinho — quando aprovar, o grupo aparece.");
       setInputCod("");setSetupNome("");setModal(null);
       return;
     }
     // 'membro' — entrada liberada
-    lsSet("sw_solicitado","");setSolicitado(null);
-    const ng=[...new Set([...grupos,cod])];setGrupos(ng);lsSet("sw_grupos",JSON.stringify(ng));
-    lsSet("sw_ativo",cod);setAtivo(cod);
+    lsSet(kSwSolicitado(userId),"");setSolicitado(null);
+    const ng=[...new Set([...grupos,cod])];setGrupos(ng);lsSet(kSwGrupos(userId),JSON.stringify(ng));
+    lsSet(kSwAtivo(userId),cod);setAtivo(cod);
     setInputCod("");setSetupNome("");setModal(null);
   }
 
   function sairDaLista(cod){
-    const ng=grupos.filter(g=>g!==cod);setGrupos(ng);lsSet("sw_grupos",JSON.stringify(ng));
-    if(ativo===cod){setAtivo("");lsSet("sw_ativo","");setSwData(null);}
+    const ng=grupos.filter(g=>g!==cod);setGrupos(ng);lsSet(kSwGrupos(userId),JSON.stringify(ng));
+    if(ativo===cod){setAtivo("");lsSet(kSwAtivo(userId),"");setSwData(null);}
   }
 
-  function voltarLista(){setAtivo("");lsSet("sw_ativo","");setSwData(null);}
+  function voltarLista(){setAtivo("");lsSet(kSwAtivo(userId),"");setSwData(null);}
 
   function addMembro(){
     if(!form.novoMembro?.trim())return;
@@ -2449,7 +2456,7 @@ function SplitwiseTab({currency,userEmail}){
         const info=saldosGrupos[cod]||{saldo:0,nome:cod,membros:0};
         const s=info.saldo;
         return <Card key={cod} style={{cursor:"pointer",transition:"border .15s"}} >
-          <div onClick={()=>{lsSet("sw_ativo",cod);setAtivo(cod);}} style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div onClick={()=>{lsSet(kSwAtivo(userId),cod);setAtivo(cod);}} style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{display:"flex",alignItems:"center",gap:12}}>
               <div style={{width:44,height:44,borderRadius:12,background:D.bg3,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>👥</div>
               <div>
@@ -4687,7 +4694,20 @@ function AppInner(){
         localStorage.removeItem(kAllProfiles(uid2));
         localStorage.removeItem(kAllProfilesTs(uid2));
         localStorage.removeItem(kActiveProfile(uid2));
+        // Identidade do Splitwise tem o mesmo risco de vazamento entre contas
+        // que all_profiles tinha — mesma classe de bug, achada em 19/07/2026.
+        localStorage.removeItem(kSwGrupos(uid2));
+        localStorage.removeItem(kSwAtivo(uid2));
+        localStorage.removeItem(kSwNome(uid2));
+        localStorage.removeItem(kSwSolicitado(uid2));
       }
+      // Chaves órfãs de antes do fix de 16/07/2026 (nunca escopadas por
+      // user_id) — não são mais lidas por nenhum código atual, mas ainda
+      // apareciam no DevTools de quem usou o app antes dessa data.
+      localStorage.removeItem("all_profiles");
+      localStorage.removeItem("all_profiles_ts");
+      localStorage.removeItem("active_profile");
+      localStorage.removeItem("financas_data");
       localStorage.removeItem("session");
       localStorage.removeItem("last_email");
     }catch{}
@@ -4941,7 +4961,7 @@ function AppInner(){
       {tab===4&&<InvestimentosTab data={data} setData={setData} currency={currency} profileId={profileId}/>}
       {tab===5&&<MetasTab data={data} setData={setData} currency={currency}/>}
       {tab===6&&<AnaliseTab data={data} setData={setData} investimentos={data.investimentos} profileId={profileId} market={profileId} currency={currency}/>}
-      {tab===7&&<SplitwiseTab currency={currency} userEmail={session?.user?.email}/>}
+      {tab===7&&<SplitwiseTab currency={currency} userEmail={session?.user?.email} userId={session?.user?.id}/>}
       {tab===8&&<RelatoriosTab data={data} setData={setData} currency={currency}/>}
       {modalPush&&<Modal title="🔔 Notificações" onClose={()=>setModalPush(false)}>
         <p style={{fontSize:12,color:D.text2,marginTop:0,lineHeight:1.6}}>Receba um aviso na manhã do dia em que houver <b>provento a receber</b> ou <b>conta recorrente</b>. Ative em cada aparelho que quiser avisar.</p>
