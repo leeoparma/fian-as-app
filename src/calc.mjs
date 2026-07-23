@@ -381,6 +381,25 @@ export function vendaAcao(qtdAtual,pm,qtdVendida,preco,corretagem){
   const custoVendido=(pm||0)*q;
   return {qtdRestante:(qtdAtual||0)-q,recebidoBruto,recebidoLiquido,custoVendido,resultado:recebidoBruto-custoVendido,vendeuTudo:((qtdAtual||0)-q)<=1e-9};
 }
+// Posição de renda variável — a fonte da verdade do card. O custo é SEMPRE
+// quantidade × PM ponderado; o campo gravado valorInvestido é IGNORADO
+// quando existe PM: ele podia ficar podre depois de uma edição manual
+// (saveInv preservava o valor antigo ao editar ação — bug real, 23/07/2026,
+// CXSE3 mostrando +34,8% quando os próprios números do card davam 24,6%).
+// Fallback: ativo legado SEM PM/quantidade (ex: tipo "Outros" só com valor)
+// continua usando valorInvestido||valor, como sempre foi.
+export function posicaoRV(inv){
+  const qtd=inv?.quantidade||0,pm=inv?.precoMedio||0;
+  const custo=qtd*pm>0?qtd*pm:(inv?.valorInvestido||inv?.valor||0);
+  const atual=inv?.valorAtual!=null?inv.valorAtual:custo;
+  const lucro=atual-custo;
+  return {
+    custo:Math.round(custo*100)/100,
+    atual:Math.round(atual*100)/100,
+    lucro:Math.round(lucro*100)/100,
+    pct:custo>0?lucro/custo*100:0,
+  };
+}
 
 // ── Splitwise: despesas recorrentes ──────────────────────────────────────────
 // Datas de ocorrência de uma recorrência, do início até hoje (inclusive).

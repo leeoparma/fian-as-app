@@ -10,7 +10,7 @@ import {
   salarioMensal, converteMoeda, taxaMensalSim, simularJuros,
   semFotos, mesclarFotos, projetarFluxo, addDias, marcarDuplicatas, montarAgendaPush,
   compraAcao, vendaAcao, pendentesRecorrenciaSW, relatorioMensal, compararMeses, serieGastoAcumulado, extratoComSaldo,
-  totalPagoFatura, calcFaturaPagamentos,
+  totalPagoFatura, calcFaturaPagamentos, posicaoRV,
 rentabilidadeRF, serieRentabilidadeRF, composicaoAcoes,
 rentabilidadeAcoesDesdeInicio, rentabilidadeAcoes,
 isRFAtivo,
@@ -1616,7 +1616,10 @@ function InvestimentosTab({data,setData,currency,profileId}){
   // b.valorAtual normalmente (ali é preço de mercado buscado, não fórmula
   // congelada — problema achado em 15/07/2026 era só nos ativos de RF).
   const totalInvest=data.investimentos.reduce((a,b)=>a+(isRFAtivo(b)?calcValorAtualRFHistorico(b,seriesBCB,new Date()).valor:(b.valorAtual||b.valorInvestido||b.valor||0)),0);
-  const totalInvestido=data.investimentos.reduce((a,b)=>a+(b.valorInvestido||b.valor||0),0);
+  // Custo de RV vem de qtd×PM (posicaoRV), NUNCA do campo gravado valorInvestido
+  // — mesmo motivo do card (bug real, 23/07/2026: valorInvestido podre depois de
+  // edição manual contaminava a % geral da carteira aqui também).
+  const totalInvestido=data.investimentos.reduce((a,b)=>a+(isRFAtivo(b)?(b.valorInvestido||b.valor||0):posicaoRV(b).custo),0);
   const totalLucro=totalInvest-totalInvestido;
   const rentTotal=totalInvestido>0?((totalInvest-totalInvestido)/totalInvestido)*100:0;
 
@@ -1713,7 +1716,14 @@ function InvestimentosTab({data,setData,currency,profileId}){
 
   function saveInv(){
     const isRF=form.tipo==="Renda Fixa"||form.tipo==="Tesouro Direto";
-    const vi=parseFloat(form.valorInvestido)||parseFloat(form.precoMedio||0)*parseFloat(form.quantidade||1)||0;
+    // RF: o campo "Valor investido" do formulário é a verdade (é digitado).
+    // RV (ações etc.): o custo é SEMPRE PM×quantidade — o form.valorInvestido
+    // aqui é o valor VELHO herdado do {...inv} da edição (o campo nem aparece
+    // no modal de ações), e usá-lo preservava dado podre pra sempre (bug real,
+    // 23/07/2026: CXSE3 com % errada porque uma edição antiga congelou o custo).
+    const vi=isRF
+      ?(parseFloat(form.valorInvestido)||parseFloat(form.precoMedio||0)*parseFloat(form.quantidade||1)||0)
+      :(parseFloat(form.precoMedio||0)*parseFloat(form.quantidade||1)||parseFloat(form.valorInvestido)||0);
     const i={id:form.editId||uid(),tipo:form.tipo||"Ações",descricao:form.descricao||"",ticker:(form.ticker||"").toUpperCase(),quantidade:parseFloat(form.quantidade)||1,precoMedio:parseFloat(form.precoMedio)||0,valorInvestido:vi,valor:vi,data:form.data||hoje.toISOString().slice(0,10),bancoId:form.bancoId||null,indice:form.indice||"CDI",taxaRF:parseFloat(form.taxaRF)||0,pctIndice:parseFloat(form.pctIndice)||100,rfTipo:form.rfTipo||"pct",vencimento:form.vencimento||""};
     if(isRF){i.valorAtual=calcValorAtualRFHistorico(i,seriesBCB,new Date()).valor;i.lucro=i.valorAtual-vi;}
     const corretagem=parseFloat(form.corretagem)||0;
@@ -1744,11 +1754,15 @@ function InvestimentosTab({data,setData,currency,profileId}){
         // período do ativo; senão cai para a fórmula de taxa fixa, sem avisos
         // falsos de precisão (calcValorAtualRFHistorico já decide isso sozinho).
         const isRFItem=inv.tipo==="Renda Fixa"||inv.tipo==="Tesouro Direto";
-        const custo=inv.valorInvestido||inv.valor||0;
         const rfCalc=isRFItem?calcValorAtualRFHistorico(inv,seriesBCB,new Date()):null;
-        const atual=isRFItem?rfCalc.valor:(inv.valorAtual||custo);
-        const lucro=isRFItem?(atual-custo):(inv.lucro!==undefined?inv.lucro:atual-custo);
-        const lpct=custo>0?(lucro/custo*100):0;
+        // RV: custo/ganho/% SEMPRE de qtd×PM (posicaoRV, testado em calc.mjs) —
+        // nunca do campo gravado valorInvestido, que podia estar podre depois de
+        // uma edição manual (bug real, 23/07/2026: CXSE3 com % errada no card).
+        const rvCalc=isRFItem?null:posicaoRV(inv);
+        const custo=isRFItem?(inv.valorInvestido||inv.valor||0):rvCalc.custo;
+        const atual=isRFItem?rfCalc.valor:rvCalc.atual;
+        const lucro=isRFItem?(atual-custo):rvCalc.lucro;
+        const lpct=isRFItem?(custo>0?(lucro/custo*100):0):rvCalc.pct;
         return <div key={inv.id} style={{background:D.bg3,borderRadius:10,padding:"12px 14px",border:`1px solid ${lucro>0?D.green+"33":lucro<0?D.red+"33":D.border}`}}>
           <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:8}}>
             <div style={{flex:1}}>

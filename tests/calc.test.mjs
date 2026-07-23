@@ -18,6 +18,7 @@ rentabilidadeRF,serieRentabilidadeRF,composicaoAcoes,
 rentabilidadeAcoesDesdeInicio,ganhoAcoesEntreSnapshots,rentabilidadeAcoes,isRFAtivo,calcValorLiquidoRF,
 INDICES_RATE,
 compoeFatorDiario,compoeFatorMensal,calcValorAtualRFHistorico,mesclarIPCAcomPrevia,compoeFatorMensalProRata,
+posicaoRV,
 } from "../src/calc.mjs";
 
 const aprox=(a,b,tol=0.01)=>assert.ok(Math.abs(a-b)<=tol,`esperado ~${b}, veio ${a}`);
@@ -464,6 +465,44 @@ test("compra sem corretagem = preço médio clássico (compatível com aporteMed
 test("venda maior que a posição: vende só o que existe", ()=>{
   const r=vendaAcao(5,10,99,10,0);
   aprox(r.qtdRestante,0);aprox(r.recebidoBruto,50);
+});
+
+// ── Posição de renda variável: uma fonte da verdade pro card ─────────────────
+// Bug real, 23/07/2026 (CXSE3): o card mostrava +34,8% quando os próprios
+// números do card davam 24,6%. O ganho em R$ usava qtd×PM (certo), mas a %
+// dividia pelo campo GRAVADO valorInvestido — que ficava podre depois de uma
+// edição manual (saveInv preservava o valorInvestido antigo ao editar ação).
+// posicaoRV ignora valorInvestido de propósito: custo de RV é SEMPRE qtd×PM.
+test("posicaoRV: reproduz o card do CXSE3 — % correta mesmo com valorInvestido podre", ()=>{
+  const inv={quantidade:140,precoMedio:17.99,valorAtual:3138.80,valorInvestido:1782.18};
+  // Sanidade do diagnóstico: o cálculo ANTIGO (lucro ÷ valorInvestido gravado)
+  // dava exatamente os 34,8% da tela — confirma a engenharia reversa.
+  const lucro=3138.80-140*17.99;
+  aprox(lucro/inv.valorInvestido*100,34.8,0.05);
+  // Comportamento correto: denominador é qtd×PM, sempre.
+  const P=posicaoRV(inv);
+  aprox(P.custo,2518.60);
+  aprox(P.atual,3138.80);
+  aprox(P.lucro,620.20);
+  aprox(P.pct,24.6,0.05);
+});
+test("posicaoRV: os outros 4 ativos reais continuam com a % de hoje (regressão)", ()=>{
+  aprox(posicaoRV({quantidade:385,precoMedio:20.00,valorAtual:385*21.09}).pct,5.45,0.05); // BBAS3
+  aprox(posicaoRV({quantidade:15,precoMedio:6.88,valorAtual:15*5.38}).pct,-21.8,0.05);    // CSNA3
+  aprox(posicaoRV({quantidade:57,precoMedio:40.39,valorAtual:57*42.90}).pct,6.2,0.05);    // ITUB4
+  aprox(posicaoRV({quantidade:300,precoMedio:14.70,valorAtual:300*14.95}).pct,1.7,0.05);  // CPLE3
+});
+test("posicaoRV: sem valorAtual (preço nunca buscado), atual=custo e ganho zero", ()=>{
+  const P=posicaoRV({quantidade:10,precoMedio:5});
+  aprox(P.custo,50);aprox(P.atual,50);aprox(P.lucro,0);aprox(P.pct,0);
+});
+test("posicaoRV: ativo legado sem PM (tipo 'Outros' só com valor) usa o fallback antigo", ()=>{
+  const P=posicaoRV({quantidade:1,precoMedio:0,valorInvestido:5000,valorAtual:5300});
+  aprox(P.custo,5000);aprox(P.lucro,300);aprox(P.pct,6,0.01);
+});
+test("posicaoRV: quantidade/PM zerados e sem valorInvestido não dividem por zero", ()=>{
+  const P=posicaoRV({quantidade:0,precoMedio:0,valorAtual:100});
+  aprox(P.custo,0);aprox(P.pct,0);
 });
 
 // ── Splitwise recorrente ─────────────────────────────────────────────────────
