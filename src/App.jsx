@@ -4694,12 +4694,10 @@ function AppInner(){
         localStorage.removeItem(kAllProfiles(uid2));
         localStorage.removeItem(kAllProfilesTs(uid2));
         localStorage.removeItem(kActiveProfile(uid2));
-        // Identidade do Splitwise tem o mesmo risco de vazamento entre contas
-        // que all_profiles tinha — mesma classe de bug, achada em 19/07/2026.
-        localStorage.removeItem(kSwGrupos(uid2));
-        localStorage.removeItem(kSwAtivo(uid2));
-        localStorage.removeItem(kSwNome(uid2));
-        localStorage.removeItem(kSwSolicitado(uid2));
+        // Chaves do Splitwise (kSwGrupos etc.) NÃO são limpas aqui de propósito
+        // (decisão do Leo, 19/07/2026): o escopo por user_id já impede vazamento
+        // entre contas — cada conta só lê a própria chave. Limpar no logout só
+        // forçava reingressar pelo código toda vez, sem ganho de segurança.
       }
       // Chaves órfãs de antes dos fixes de 16-19/07/2026 (nunca escopadas por
       // user_id) — não são mais lidas por nenhum código atual, mas ainda
