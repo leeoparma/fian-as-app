@@ -47,7 +47,7 @@ async function fetchIndicadoresBrapi(yfTicker, env) {
     // Plano grátis: só o quote básico funciona. NÃO pede módulos pagos nem dividends
     // (o DY é calculado no /raiox pelo histórico do Yahoo, que não depende da brapi).
     const r = await fetch(
-      `https://brapi.dev/api/quote/${tk}?token=${env?.BRAPI_TOKEN || ""}`,
+      `https://brapi.dev/api/quote/${encodeURIComponent(tk)}?token=${env?.BRAPI_TOKEN || ""}`,
       { headers: { "Accept": "application/json" } }
     );
     const d = await r.json();
@@ -72,7 +72,7 @@ async function fetchFundamentus(ticker) {
   try {
     const papel = ticker.replace(/\.SA$/i, "").toUpperCase();
     const r = await fetch(
-      `https://www.fundamentus.com.br/detalhes.php?papel=${papel}`,
+      `https://www.fundamentus.com.br/detalhes.php?papel=${encodeURIComponent(papel)}`,
       {
         headers: {
           "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -140,7 +140,7 @@ async function fetchFatosRelevantes(ticker) {
     const papel = ticker.replace(/\.SA$/i, "").toLowerCase();
     const base = "https://www.fundamentus.com.br";
     const r = await fetch(
-      `${base}/fatos_relevantes.php?papel=${papel}`,
+      `${base}/fatos_relevantes.php?papel=${encodeURIComponent(papel)}`,
       {
         headers: {
           "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -236,7 +236,7 @@ async function fetchIndicadoresYahoo(yfTicker) {
     const ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
     const modules = "defaultKeyStatistics,financialData,summaryDetail,assetProfile";
     const r = await fetch(
-      `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${yfTicker}?modules=${modules}&crumb=${encodeURIComponent(_yahooCrumb)}`,
+      `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(yfTicker)}?modules=${modules}&crumb=${encodeURIComponent(_yahooCrumb)}`,
       { headers: { "User-Agent": ua, "Cookie": _yahooCookie, "Accept": "application/json" } }
     );
     const d = await r.json();
@@ -278,7 +278,7 @@ async function fetchIndicadoresYahoo(yfTicker) {
 async function fetchRaioX(yfTicker) {
   try {
     const r = await fetch(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${yfTicker}?range=3y&interval=1d&events=div`,
+      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yfTicker)}?range=3y&interval=1d&events=div`,
       { headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "Accept": "application/json" } }
     );
     const d = await r.json();
@@ -339,7 +339,7 @@ async function fetchCotacao(ticker, market) {
     for (const t of tentativas) {
       try {
         const r = await fetch(
-          `https://query2.finance.yahoo.com/v8/finance/chart/${t}?interval=1d&range=1d&includePrePost=false`,
+          `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(t)}?interval=1d&range=1d&includePrePost=false`,
           { headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "Accept": "application/json", "Accept-Language": "en-US,en;q=0.9" } }
         );
         const d = await r.json();
@@ -614,6 +614,15 @@ export default {
       return new Response(null, { headers: CORS });
     }
 
+    // ⚠️ Decisão consciente: as rotas GET de dados de mercado abaixo (/cambio,
+    // /fundamentus, /fatos, /news, /indice, /raiox, /quote, /bcb-serie) NÃO exigem
+    // sessão Supabase, ao contrário do proxy de IA (POST /) e das rotas de push.
+    // São dados não-sensíveis (cotação, notícias públicas) e o app as chama sem
+    // Authorization. Isso significa que qualquer um com a URL do Worker pode
+    // consumir a cota do BRAPI_TOKEN e gerar tráfego de scraping — risco aceito
+    // para um app pessoal de baixo tráfego. Se o abuso virar problema, revisar
+    // (auth obrigatória ou rate-limit por IP) antes de simplesmente travar tudo.
+
     // GET /cambio — taxas de câmbio BRL/AUD/USD para consolidar patrimônio
     if (request.method === "GET" && url.pathname === "/cambio") {
       const fx = await fetchCambio();
@@ -700,7 +709,8 @@ export default {
           headers: { "Content-Type": "application/json; charset=utf-8", ...CORS }
         });
       } catch (e) {
-        return new Response(JSON.stringify({ error: String(e) }), {
+        console.error("Erro em /indice:", e);
+        return new Response(JSON.stringify({ error: "Falha ao buscar variação do índice." }), {
           status: 500, headers: { "Content-Type": "application/json; charset=utf-8", ...CORS }
         });
       }
@@ -779,10 +789,9 @@ export default {
     // 📈 Série histórica do Banco Central (CDI diário = série 12, IPCA mensal = série 433)
     // Proxy simples (evita CORS) com cache de 12h no edge — não temos motivo
     // para bater no BCB a cada abertura do app, a série de ontem não muda.
-    if (new URL(request.url).pathname === "/bcb-serie" && request.method === "GET") {
-      const u=new URL(request.url);
-      const codigo=u.searchParams.get("codigo");
-      const inicio=u.searchParams.get("inicio"); // dd/MM/aaaa
+    if (url.pathname === "/bcb-serie" && request.method === "GET") {
+      const codigo=url.searchParams.get("codigo");
+      const inicio=url.searchParams.get("inicio"); // dd/MM/aaaa
       if(!codigo||!/^\d+$/.test(codigo))return new Response(JSON.stringify({error:{message:"código de série inválido"}}),{status:400,headers:{"Content-Type":"application/json; charset=utf-8",...CORS}});
       const cache=caches.default;
       const cacheKey=new Request(request.url,{method:"GET"});
@@ -802,17 +811,19 @@ export default {
         await cache.put(cacheKey,resp.clone());
         return resp;
       }catch(e){
-        return new Response(JSON.stringify({error:{message:e.message||"erro ao buscar série do BCB"}}),{status:500,headers:{"Content-Type":"application/json; charset=utf-8",...CORS}});
+        console.error("Erro em /bcb-serie:", e);
+        return new Response(JSON.stringify({error:{message:"erro ao buscar série do BCB"}}),{status:500,headers:{"Content-Type":"application/json; charset=utf-8",...CORS}});
       }
     }
 
     // 💸 Push com conteúdo (Splitwise): usuário logado avisa os membros do grupo
-    if (new URL(request.url).pathname === "/push-send" && request.method === "POST") {
+    if (url.pathname === "/push-send" && request.method === "POST") {
       const ah=request.headers.get("Authorization")||"";
       if(!ah.startsWith("Bearer "))return new Response(JSON.stringify({error:{message:"Não autorizado."}}),{status:401,headers:{"Content-Type":"application/json; charset=utf-8",...CORS}});
       try{
         const ur=await fetch(`${SUPA_URL}/auth/v1/user`,{headers:{"apikey":SUPA_ANON,"Authorization":ah}});
         if(!ur.ok)return new Response(JSON.stringify({error:{message:"Sessão inválida."}}),{status:401,headers:{"Content-Type":"application/json; charset=utf-8",...CORS}});
+        const user=await ur.json();
         const {msgs}=await request.json();
         if(!Array.isArray(msgs)||!msgs.length)return new Response(JSON.stringify({enviados:0}),{status:200,headers:{"Content-Type":"application/json; charset=utf-8",...CORS}});
         const lim=s=>String(s||"").slice(0,180);
@@ -830,12 +841,13 @@ export default {
         }
         return new Response(JSON.stringify({enviados}),{status:200,headers:{"Content-Type":"application/json; charset=utf-8",...CORS}});
       }catch(e){
-        return new Response(JSON.stringify({error:{message:e.message||"erro"}}),{status:500,headers:{"Content-Type":"application/json; charset=utf-8",...CORS}});
+        console.error("Erro em /push-send:", e);
+        return new Response(JSON.stringify({error:{message:"Falha ao enviar avisos."}}),{status:500,headers:{"Content-Type":"application/json; charset=utf-8",...CORS}});
       }
     }
 
     // 🔔 Teste de push: envia uma notificação para os aparelhos do usuário logado
-    if (new URL(request.url).pathname === "/push-test" && request.method === "POST") {
+    if (url.pathname === "/push-test" && request.method === "POST") {
       const ah=request.headers.get("Authorization")||"";
       if(!ah.startsWith("Bearer "))return new Response(JSON.stringify({error:{message:"Não autorizado."}}),{status:401,headers:{"Content-Type":"application/json; charset=utf-8",...CORS}});
       try{
@@ -849,7 +861,8 @@ export default {
         const enviados=await pushParaLista(env,subs);
         return new Response(JSON.stringify({enviados}),{status:200,headers:{"Content-Type":"application/json; charset=utf-8",...CORS}});
       }catch(e){
-        return new Response(JSON.stringify({error:{message:e.message||"erro"}}),{status:500,headers:{"Content-Type":"application/json; charset=utf-8",...CORS}});
+        console.error("Erro em /push-test:", e);
+        return new Response(JSON.stringify({error:{message:"Falha ao enviar notificação de teste."}}),{status:500,headers:{"Content-Type":"application/json; charset=utf-8",...CORS}});
       }
     }
 
@@ -929,7 +942,8 @@ export default {
       return new Response(JSON.stringify({ error: { message: `IA indisponível. ${gemFail ? "Gemini: " + gemFail : "Nenhuma chave configurada."}` } }), { status: 502, headers: JH });
 
     } catch (error) {
-      return new Response(JSON.stringify({ error: error.message }), {
+      console.error("Erro no proxy de IA:", error);
+      return new Response(JSON.stringify({ error: { message: "Falha ao processar a requisição." } }), {
         status: 500, headers: { "Content-Type": "application/json; charset=utf-8", ...CORS }
       });
     }
