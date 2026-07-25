@@ -11,7 +11,7 @@ App de controle financeiro pessoal usado por Leo e sua parceira Carol. Suporta p
 - **Frontend:** React em arquivo único — `src/App.jsx` (~4.200+ linhas). Não modularizar sem discussão prévia com o Leo. Há um plano futuro de extrair funções puras de cálculo para módulos testáveis, mas isso deve ser feito de forma incremental e combinada.
 - **Cálculos financeiros:** `calc.mjs` — funções puras com testes (`compraAcao`, `vendaAcao`, etc.). **Sempre rodar os testes antes de qualquer commit que toque em cálculo.**
 - **Deploy:** Vercel (`fian-as-app.vercel.app`), automático via push no GitHub (`leeoparma/fian-as-app`).
-- **Proxy/API:** Cloudflare Worker (`controlfinanceiro.leeo-parms.workers.dev`). ATENÇÃO: o Worker NÃO faz deploy via git — exige clicar em "Deploy" manualmente no painel da Cloudflare. Se uma mudança envolver o Worker, avisar o Leo explicitamente que ele precisa fazer esse deploy manual.
+- **Proxy/API:** Cloudflare Worker (`controlfinanceiro.leeo-parms.workers.dev`). O código está versionado em `worker/worker.js` desde 25/07/2026 (antes só existia no painel). ATENÇÃO: o Worker continua SEM deploy via git — editar `worker/worker.js` NÃO muda nada em produção; exige colar o código e clicar em "Deploy" manualmente no painel da Cloudflare. Se uma mudança envolver o Worker, avisar o Leo explicitamente que ele precisa fazer esse deploy manual. Segredos (BRAPI_TOKEN, GEMINI_KEY, ANTHROPIC_KEY, CRON_SECRET, VAPID_PRIVATE_JWK) vêm de env/secrets do Cloudflare — nunca hardcodar no arquivo.
 - **Backend/dados:** Supabase (`llpzdrqgvkpxjnecttkb.supabase.co`) — auth e dados. Acesso via `fetch` cru na API REST (objeto `supa` no topo do arquivo) — **não** usa o SDK `supabase-js`. Formato de erro do GoTrue neste projeto é `{code, error_code, msg}` (confirmado em 2 bugs reais: 403 de logout em 16/07 e login silenciosamente aceito com senha errada em 18/07) — **não** `{error, error_description}`. Qualquer checagem de erro de auth deve considerar `error_code`/`msg`, nunca só `.error`.
 - **Cotações:** brapi (apenas módulos gratuitos — NÃO usar módulos pagos) com fallback para Yahoo Finance.
 - **Cartões de crédito:** não são uma entidade própria — são `bancos` com `tipo==="cartão"` (`limite`, `diaFecha`, `diaVence`). As faturas são calculadas na hora em `CartaoTab`, agrupando despesas por `faturaDeCompra()` — não existem persistidas (o array `data.faturas` é um recurso aposentado do modelo antigo, não usar).
@@ -39,7 +39,8 @@ App de controle financeiro pessoal usado por Leo e sua parceira Carol. Suporta p
 
 ## Pendências abertas (baixo risco, fazer quando solicitado)
 
-- Rotacionar o token brapi hardcoded no Worker. **Fora do alcance do Claude**: o Worker não está neste repositório git (deploy manual, ver Arquitetura acima) — exige o Leo gerar um token novo no brapi e trocar direto no painel da Cloudflare.
+- Token brapi: o hardcode foi resolvido (código atual do Worker lê de `env.BRAPI_TOKEN`, secret no Cloudflare — confirmado ao versionar `worker/worker.js` em 25/07/2026). **Falta confirmar se o token antigo exposto foi ROTACIONADO** (gerar um novo no brapi e trocar o secret) — mover pra env não invalida o token que já vazou em versões antigas. Fora do alcance do Claude: painel do brapi + painel da Cloudflare.
+- **Bug latente no Worker (`/push-send`)**: achado ao versionar o código em 25/07/2026 — o endpoint usa `user.email` mas nunca define `user` (falta o `const user=await ur.json()` que o `/push-test` tem). Todo push de Splitwise via `/push-send` deve estar retornando 500 ("user is not defined") silenciosamente. Corrigir exige editar `worker/worker.js` E fazer o deploy manual no painel da Cloudflare.
 
 ## Estado das features
 
