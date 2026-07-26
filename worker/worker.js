@@ -50,6 +50,9 @@ async function fetchIndicadoresBrapi(yfTicker, env) {
       `https://brapi.dev/api/quote/${encodeURIComponent(tk)}?token=${env?.BRAPI_TOKEN || ""}`,
       { headers: { "Accept": "application/json" } }
     );
+    // 429 (rate limit) e 401 (token inválido) devolvem JSON de erro sem lançar
+    // exceção — sem este log viram o mesmo "null" de um ticker inexistente.
+    if (!r.ok) console.error("[fetchIndicadoresBrapi] HTTP", r.status, "para", tk);
     const d = await r.json();
     const a = d?.results?.[0];
     if (!a) return null;
@@ -60,7 +63,8 @@ async function fetchIndicadoresBrapi(yfTicker, env) {
       // Campos abaixo dependem de módulos pagos da brapi — indisponíveis no plano grátis
       dy: null, pvp: null, roe: null, roa: null, margem_liquida: null, divida_ebitda: null, vpa: null,
     };
-  } catch {
+  } catch (erro) {
+    console.error("[fetchIndicadoresBrapi] falha:", erro?.status, erro?.message || erro);
     return null;
   }
 }
@@ -81,7 +85,7 @@ async function fetchFundamentus(ticker) {
         },
       }
     );
-    if (!r.ok) return null;
+    if (!r.ok) { console.error("[fetchFundamentus] HTTP", r.status, "para", papel); return null; }
     const html = await lerHtml(r);   // detecta UTF-8 ou Latin-1 automaticamente
 
     // Ancora no LABEL dentro do <span class="txt">, pula o que houver no meio,
@@ -127,7 +131,8 @@ async function fetchFundamentus(ticker) {
       setor_fund: repararMojibake(setor) || null,
       subsetor_fund: repararMojibake(subsetor) || null,
     };
-  } catch {
+  } catch (erro) {
+    console.error("[fetchFundamentus] falha:", erro?.status, erro?.message || erro);
     return null;
   }
 }
@@ -149,7 +154,7 @@ async function fetchFatosRelevantes(ticker) {
         },
       }
     );
-    if (!r.ok) return [];
+    if (!r.ok) { console.error("[fetchFatosRelevantes] HTTP", r.status, "para", papel); return []; }
     const html = await lerHtml(r);   // detecta UTF-8 ou Latin-1 automaticamente
 
     const fatos = [];
@@ -199,7 +204,8 @@ async function fetchFatosRelevantes(ticker) {
     }
 
     return fatos.slice(0, 12);
-  } catch {
+  } catch (erro) {
+    console.error("[fetchFatosRelevantes] falha:", erro?.status, erro?.message || erro);
     return [];
   }
 }
@@ -215,16 +221,17 @@ async function getYahooCrumb() {
     const c = await fetch("https://fc.yahoo.com", { headers: { "User-Agent": ua } });
     let cookie = c.headers.get("set-cookie") || "";
     cookie = cookie.split(";")[0];
-    if (!cookie) return false;
+    if (!cookie) { console.error("[getYahooCrumb] Yahoo não devolveu cookie — HTTP", c.status); return false; }
     // 2) pega crumb usando o cookie
     const cr = await fetch("https://query1.finance.yahoo.com/v1/test/getcrumb", {
       headers: { "User-Agent": ua, "Cookie": cookie, "Accept": "text/plain" }
     });
     const crumb = await cr.text();
-    if (!crumb || crumb.includes("<") || crumb.length > 30) return false;
+    if (!crumb || crumb.includes("<") || crumb.length > 30) { console.error("[getYahooCrumb] crumb inválido — HTTP", cr.status, JSON.stringify(crumb).slice(0, 80)); return false; }
     _yahooCrumb = crumb; _yahooCookie = cookie; _crumbTime = Date.now();
     return true;
-  } catch {
+  } catch (erro) {
+    console.error("[getYahooCrumb] falha:", erro?.status, erro?.message || erro);
     return false;
   }
 }
@@ -239,9 +246,11 @@ async function fetchIndicadoresYahoo(yfTicker) {
       `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(yfTicker)}?modules=${modules}&crumb=${encodeURIComponent(_yahooCrumb)}`,
       { headers: { "User-Agent": ua, "Cookie": _yahooCookie, "Accept": "application/json" } }
     );
+    if (!r.ok) console.error("[fetchIndicadoresYahoo] HTTP", r.status, "para", yfTicker);
     const d = await r.json();
     const res = d?.quoteSummary?.result?.[0];
-    if (!res) { _yahooCrumb = null; return null; } // invalida crumb se falhou
+    // invalida crumb se falhou (força renovação na próxima chamada)
+    if (!res) { console.error("[fetchIndicadoresYahoo] sem resultado para", yfTicker, "— invalidando crumb"); _yahooCrumb = null; return null; }
     const ks = res.defaultKeyStatistics || {};
     const fd = res.financialData || {};
     const sd = res.summaryDetail || {};
@@ -269,7 +278,8 @@ async function fetchIndicadoresYahoo(yfTicker) {
       pais: ap.country || null,
       funcionarios: ap.fullTimeEmployees || null,
     };
-  } catch {
+  } catch (erro) {
+    console.error("[fetchIndicadoresYahoo] falha:", erro?.status, erro?.message || erro);
     return null;
   }
 }
@@ -281,9 +291,10 @@ async function fetchRaioX(yfTicker) {
       `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yfTicker)}?range=3y&interval=1d&events=div`,
       { headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "Accept": "application/json" } }
     );
+    if (!r.ok) console.error("[fetchRaioX] HTTP", r.status, "para", yfTicker);
     const d = await r.json();
     const res = d?.chart?.result?.[0];
-    if (!res) return null;
+    if (!res) { console.error("[fetchRaioX] sem resultado para", yfTicker); return null; }
     const meta = res.meta || {};
     const closes = (res.indicators?.quote?.[0]?.close || []).filter(v => v != null);
     const ts = res.timestamp || [];
@@ -317,7 +328,8 @@ async function fetchRaioX(yfTicker) {
       var_ano: varPct(precoEm(365)),
       hist_dividendos: histDiv,
     };
-  } catch {
+  } catch (erro) {
+    console.error("[fetchRaioX] falha:", erro?.status, erro?.message || erro);
     return null;
   }
 }
@@ -342,6 +354,7 @@ async function fetchCotacao(ticker, market) {
           `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(t)}?interval=1d&range=1d&includePrePost=false`,
           { headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "Accept": "application/json", "Accept-Language": "en-US,en;q=0.9" } }
         );
+        if (!r.ok) console.error("[fetchCotacao] HTTP", r.status, "na tentativa", t);
         const d = await r.json();
         const meta = d?.chart?.result?.[0]?.meta;
         if (meta?.regularMarketPrice) {
@@ -362,10 +375,15 @@ async function fetchCotacao(ticker, market) {
             dy: null,
           };
         }
-      } catch {}
+      } catch (erro) {
+        console.error("[fetchCotacao] falha na tentativa", t, ":", erro?.status, erro?.message || erro);
+      }
     }
+    console.error("[fetchCotacao] nenhuma tentativa funcionou para", ticker, "— tentadas:", tentativas.join(", "));
     return null;
-  } catch {}
+  } catch (erro) {
+    console.error("[fetchCotacao] falha:", erro?.status, erro?.message || erro);
+  }
   return null;
 }
 
@@ -380,15 +398,18 @@ async function fetchCambio() {
         `https://query2.finance.yahoo.com/v8/finance/chart/${p}?interval=1d&range=1d`,
         { headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "Accept": "application/json" } }
       );
+      if (!r.ok) console.error("[fetchCambio] HTTP", r.status, "para", p);
       const d = await r.json();
       const px = d?.chart?.result?.[0]?.meta?.regularMarketPrice;
       if (px) out[p] = px;
-    } catch {}
+    } catch (erro) {
+      console.error("[fetchCambio] falha em", p, ":", erro?.status, erro?.message || erro);
+    }
   }));
   // Monta taxas em relação ao BRL como base
   const usdbrl = out["USDBRL=X"];   // 1 USD = X BRL
   const audbrl = out["AUDBRL=X"];   // 1 AUD = X BRL
-  if (!usdbrl || !audbrl) return null;
+  if (!usdbrl || !audbrl) { console.error("[fetchCambio] par faltando — USDBRL:", usdbrl, "AUDBRL:", audbrl); return null; }
   // valor de 1 unidade de cada moeda em BRL
   return {
     base: "BRL",
@@ -408,7 +429,7 @@ async function fetchNoticiasYahoo(ticker, market) {
     const yf = market === "br" ? base + ".SA" : market === "us" ? base : base + ".AX";
     const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(yf)}&newsCount=8&quotesCount=0`;
     const res = await fetch(url, { headers: { "User-Agent": ua, "Accept": "application/json" } });
-    if (!res.ok) return [];
+    if (!res.ok) { console.error("[fetchNoticiasYahoo] HTTP", res.status, "para", yf); return []; }
     const d = await res.json();
     const news = Array.isArray(d?.news) ? d.news : [];
     return news.map(n => ({
@@ -417,7 +438,8 @@ async function fetchNoticiasYahoo(ticker, market) {
       pubDate: n.providerPublishTime ? new Date(n.providerPublishTime * 1000).toUTCString() : "",
       source: n.publisher || "",
     })).filter(n => n.title && n.link);
-  } catch {
+  } catch (erro) {
+    console.error("[fetchNoticiasYahoo] falha:", erro?.status, erro?.message || erro);
     return [];
   }
 }
@@ -436,6 +458,9 @@ async function fetchNoticiasGoogle(ticker, market, nome) {
   const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=${hl}&gl=${gl}&ceid=${ceid}`;
   try {
     const res = await fetch(rssUrl, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" } });
+    // O Google costuma bloquear requisições vindas de Workers (limitação já
+    // conhecida) — este log é o único jeito de medir a frequência real disso.
+    if (!res.ok) console.error("[fetchNoticiasGoogle] HTTP", res.status, "para", query);
     const xml = await res.text();
     const items = [];
     const itemRegex = /<item>([\s\S]*?)<\/item>/g;
@@ -453,7 +478,8 @@ async function fetchNoticiasGoogle(ticker, market, nome) {
       items.push({ title, pubDate, link, source });
     }
     return items;
-  } catch {
+  } catch (erro) {
+    console.error("[fetchNoticiasGoogle] falha:", erro?.status, erro?.message || erro);
     return [];
   }
 }
@@ -593,7 +619,9 @@ async function enviarPush(env,sub,payloadStr){
   let body=null;
   if(payloadStr&&sub.p256dh&&sub.auth){
     try{body=await encryptPayload(sub.p256dh,sub.auth,payloadStr);headers["Content-Encoding"]="aes128gcm";}
-    catch{body=null;} // se a cifragem falhar, cai na notificação genérica
+    // se a cifragem falhar, cai na notificação genérica — o destinatário recebe
+    // algo diferente do esperado, então isto PRECISA aparecer no log
+    catch(erro){console.error("[enviarPush] cifragem falhou, enviando push genérico:",erro?.message||erro);body=null;}
   }
   return fetch(sub.endpoint,{method:"POST",headers,body});
 }
@@ -601,7 +629,7 @@ async function pushParaLista(env,subs){
   let enviados=0;const vistos=new Set();
   for(const s of (subs||[])){
     if(!s?.endpoint||vistos.has(s.endpoint))continue;vistos.add(s.endpoint);
-    try{const r=await enviarPush(env,s);if(r.ok||r.status===201)enviados++;}catch{}
+    try{const r=await enviarPush(env,s);if(r.ok||r.status===201)enviados++;else console.error("[pushParaLista] push rejeitado — HTTP",r.status,new URL(s.endpoint).host);}catch(erro){console.error("[pushParaLista] falha:",erro?.status,erro?.message||erro);}
   }
   return enviados;
 }
@@ -836,7 +864,7 @@ export default {
         let enviados=0;
         for(const m of lista){
           for(const s of (subs||[]).filter(x=>(x.email||"").toLowerCase()===m.email)){
-            try{const r=await enviarPush(env,s,JSON.stringify({title:m.title,body:m.body,tag:m.tag||undefined}));if(r.ok||r.status===201)enviados++;}catch{}
+            try{const r=await enviarPush(env,s,JSON.stringify({title:m.title,body:m.body,tag:m.tag||undefined}));if(r.ok||r.status===201)enviados++;else console.error("[push-send] push rejeitado — HTTP",r.status,"para",m.email);}catch(erro){console.error("[push-send] falha para",m.email,":",erro?.status,erro?.message||erro);}
           }
         }
         return new Response(JSON.stringify({enviados}),{status:200,headers:{"Content-Type":"application/json; charset=utf-8",...CORS}});
@@ -890,7 +918,8 @@ export default {
           status: 401, headers: { "Content-Type": "application/json; charset=utf-8", ...CORS }
         });
       }
-    } catch {
+    } catch (erro) {
+      console.error("[proxy IA] falha ao validar sessão no Supabase:", erro?.status, erro?.message || erro);
       return new Response(JSON.stringify({ error: { message: "Falha ao validar a sessão." } }), {
         status: 502, headers: { "Content-Type": "application/json; charset=utf-8", ...CORS }
       });
@@ -911,6 +940,7 @@ export default {
           }
           gemFail = "resposta vazia";
         } catch (e) {
+          console.error("[proxy IA] Gemini falhou:", e?.status, e?.message || e);
           gemFail = e.message || "erro";
         }
       }
@@ -934,6 +964,7 @@ export default {
           const cmsg = (claudeData?.error?.message) || "sem resposta";
           return new Response(JSON.stringify({ error: { message: `IA grátis falhou (${gemFail || "—"}) e o Claude também (${cmsg}).` } }), { status: 502, headers: JH });
         } catch (e) {
+          console.error("[proxy IA] Claude falhou:", e?.status, e?.message || e);
           return new Response(JSON.stringify({ error: { message: `IA grátis falhou (${gemFail || "—"}) e o Claude também (${e.message}).` } }), { status: 502, headers: JH });
         }
       }
@@ -954,10 +985,10 @@ export default {
   async scheduled(event, env, ctx) {
     try{
       const r=await fetch(`${SUPA_URL}/rest/v1/rpc/push_jobs_due`,{method:"POST",headers:{"apikey":SUPA_ANON,"Content-Type":"application/json"},body:JSON.stringify({p_secret:env.CRON_SECRET})});
-      if(!r.ok)return;
+      if(!r.ok){console.error("[scheduled] push_jobs_due respondeu HTTP",r.status,"— nenhum aviso enviado hoje");return;}
       const subs=await r.json();
       ctx.waitUntil(pushParaLista(env,subs));
-    }catch{}
+    }catch(erro){console.error("[scheduled] falha no cron diário de push:",erro?.status,erro?.message||erro);}
   }
 
 };
