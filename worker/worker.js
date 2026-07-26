@@ -111,25 +111,95 @@ async function fetchFundamentus(ticker) {
       return Number.isFinite(n) ? n : null;
     };
 
+    // Texto puro: normaliza o "-" (célula vazia do Fundamentus) para null.
+    const txt = (s) => (!s || s === "-") ? null : s;
+
+    // ── Guarda do zero-filler no setor financeiro ────────────────────────────
+    // Bancos e parte das seguradoras não têm estrutura de custo/receita
+    // tradicional. Em vez de omitir os campos do esquema não-financeiro, o
+    // Fundamentus os preenche com ZERO — e zero é pior que vazio, porque passa
+    // por número válido (Marg. Líquida 0,0% em BBAS3/ITUB4/BBDC4/SANB11).
+    //
+    // "Marg. Bruta === '-'" é o discriminante: testado em 14 papéis, acertou
+    // 100% sem falso positivo. Alternativas descartadas por quebrarem em casos
+    // reais: Subsetor==="Seguradoras" anularia os 8,9% legítimos da PSSA3;
+    // ROIC==="-" não pega a CXSE3, que tem ROIC real e margens zeradas.
+    const layoutFinanceiro = pega("Marg. Bruta") === "-";
+    // Só desconfia de zero DENTRO do layout financeiro — assim a PSSA3, que tem
+    // Dív. Bruta 0 de verdade (seguradora sem dívida), mantém o zero dela.
+    const numF = (s) => { const n = num(s); return (layoutFinanceiro && n === 0) ? null : n; };
+
     const pvp = num(pega("P/VP"));
     const roe = num(pega("ROE"));
-    const margem = num(pega("Marg\\. Líquida"));
     const roic = num(pega("ROIC"));
-    const empresa = pega("Empresa");
-    const setor = pega("Setor");      // agora texto, não número
-    const subsetor = pega("Subsetor");
+    const pl = num(pega("P/L"));
+    const lpa = num(pega("LPA"));
+    const vpa = num(pega("VPA"));
 
-    // Se TODOS os números vieram null, o parse quebrou — retorna null
-    if (pvp == null && roe == null && margem == null && roic == null) return null;
+    // Se NENHUM indicador básico foi lido, o parse quebrou (layout mudou).
+    // Usa 6 campos que existem tanto em banco quanto em não-financeira — a
+    // checagem antiga incluía a margem, que era sempre null por causa do bug
+    // de escaping, e por isso valia menos do que aparentava.
+    if (pvp == null && roe == null && roic == null && pl == null && lpa == null && vpa == null) return null;
 
     return {
-      pvp,
-      roe,                       // já em %
-      margem_liquida: margem,    // já em %
-      roic,                      // já em %
-      empresa_fund: repararMojibake(empresa) || null,
-      setor_fund: repararMojibake(setor) || null,
-      subsetor_fund: repararMojibake(subsetor) || null,
+      // — identificação —
+      empresa_fund: repararMojibake(pega("Empresa")) || null,
+      setor_fund: repararMojibake(pega("Setor")) || null,
+      subsetor_fund: repararMojibake(pega("Subsetor")) || null,
+
+      // — múltiplos de mercado —
+      pvp, pl, psr: num(pega("PSR")),
+      p_ativos: num(pega("P/Ativos")),
+      p_cap_giro: num(pega("P/Cap. Giro")),
+      p_ebit: num(pega("P/EBIT")),
+      p_ativ_circ_liq: num(pega("P/Ativ Circ Liq")),
+      ev_ebit: num(pega("EV / EBIT")),
+      ev_ebitda: num(pega("EV / EBITDA")),
+      div_yield: num(pega("Div. Yield")),        // % — NÃO alimenta o campo `dy`
+                                                 // (metodologia diferente, ver CLAUDE.md)
+      // — por ação —
+      lpa, vpa,
+
+      // — rentabilidade e margens (em %) —
+      roe, roic,
+      margem_bruta: numF(pega("Marg. Bruta")),
+      margem_ebit: numF(pega("Marg. EBIT")),
+      margem_liquida: numF(pega("Marg. Líquida")),
+      ebit_ativo: numF(pega("EBIT / Ativo")),
+
+      // — estrutura de capital e eficiência —
+      liquidez_corrente: num(pega("Liquidez Corr")),
+      div_liq_patrim: num(pega("Dív Líq / Patrim")),   // rótulo real da página;
+                                                       // "Div.Br/Patrim" não existe
+      giro_ativos: num(pega("Giro Ativos")),
+      cres_rec_5a: num(pega("Cres. Rec (5a)")),        // % ao ano
+
+      // — cabeçalho —
+      valor_mercado: num(pega("Valor de mercado")),
+      valor_firma: num(pega("Valor da firma")),
+      nro_acoes: num(pega("Nro. Ações")),
+      vol_med_2m: num(pega("Vol $ méd (2m)")),
+      min_52_sem: num(pega("Min 52 sem")),
+      max_52_sem: num(pega("Max 52 sem")),
+      ult_balanco: txt(pega("Últ balanço processado")),
+
+      // — balanço patrimonial —
+      ativo: num(pega("Ativo")),
+      ativo_circulante: numF(pega("Ativo Circulante")),
+      disponibilidades: numF(pega("Disponibilidades")),
+      divida_bruta: numF(pega("Dív. Bruta")),
+      divida_liquida: numF(pega("Dív. Líquida")),
+      patrim_liq: num(pega("Patrim. Líq")),
+
+      // — demonstrativo de resultados —
+      // A página traz DUAS colunas (últimos 12 meses e últimos 3 meses) com o
+      // mesmo rótulo. O `pega` usa .match(), que devolve só a 1ª ocorrência —
+      // ou seja, sempre os 12 meses. O sufixo _12m torna isso explícito; a
+      // captura do trimestre exigiria matchAll + índice e ficou fora de escopo.
+      receita_liquida_12m: numF(pega("Receita Líquida")),
+      ebit_12m: numF(pega("EBIT")),
+      lucro_liquido_12m: num(pega("Lucro Líquido")),   // bancos têm de verdade
     };
   } catch (erro) {
     console.error("[fetchFundamentus] falha:", erro?.status, erro?.message || erro);
@@ -765,11 +835,15 @@ export default {
       if (isBR) {
         const fund = await fetchFundamentus(yf);
         if (fund) {
-          if (out.pvp == null && fund.pvp != null) out.pvp = fund.pvp;
-          if (out.roe == null && fund.roe != null) out.roe = fund.roe;
-          if (out.margem_liquida == null && fund.margem_liquida != null) out.margem_liquida = fund.margem_liquida;
-          if (out.roic == null && fund.roic != null) out.roic = fund.roic;
-          // perfil (aba Sobre BR)
+          // Repassa TUDO que o Fundamentus trouxe, mas só onde há buraco — o que
+          // veio do Yahoo/brapi tem prioridade. Substitui a lista manual de 4
+          // campos que existia aqui: agora um campo novo em fetchFundamentus
+          // chega ao app sozinho, sem precisar lembrar de editar este trecho.
+          for (const [k, v] of Object.entries(fund)) {
+            if (k.endsWith("_fund")) continue;   // identificação: mapeada abaixo
+            if (v != null && out[k] == null) out[k] = v;
+          }
+          // perfil (aba Sobre BR) — nomes diferentes dos dois lados
           if (!out.setor && fund.setor_fund) out.setor = fund.setor_fund;
           if (!out.industria && fund.subsetor_fund) out.industria = fund.subsetor_fund;
           out._fund = true; // flag de debug: Fundamentus respondeu
