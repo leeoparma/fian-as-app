@@ -280,6 +280,156 @@ async function fetchFatosRelevantes(ticker) {
   }
 }
 
+// ── Proventos do Fundamentus — dividendos + JCP agregados por ano ────────────
+// Fonte: proventos.php. A página tem duas tabelas; usamos a AGREGADA POR ANO
+// (id="resultado-anual"). Verificado em 27/07/2026 contra a tabela de detalhe:
+// ela soma DIVIDENDO + JRS CAP PRÓPRIO/JUROS e agrupa por DATA-EX — WEGE3 2025
+// dá 2,451 no total contra 2,054 se contasse só "DIVIDENDO". O JCP entrar é o
+// ponto: no Brasil ele é metade do provento, e o Yahoo não o separa.
+//
+// Ancora no id da tabela, não na posição — o site tem 2 tabelas e a ordem
+// poderia mudar. Mesmo princípio do `pega` no fetchFundamentus.
+// FRÁGIL: se o layout mudar, retorna null e o critério some da tela.
+async function fetchProventos(ticker) {
+  try {
+    const papel = ticker.replace(/\.SA$/i, "").toUpperCase();
+    const r = await fetch(
+      `https://www.fundamentus.com.br/proventos.php?papel=${encodeURIComponent(papel)}&tipo=2`,
+      {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "Accept": "text/html,application/xhtml+xml",
+          "Accept-Language": "pt-BR,pt;q=0.9",
+        },
+      }
+    );
+    if (!r.ok) { console.error("[fetchProventos] HTTP", r.status, "para", papel); return null; }
+    const html = await lerHtml(r);
+
+    const bloco = html.match(/<table[^>]*id="resultado-anual"[^>]*>([\s\S]*?)<\/table>/i);
+    if (!bloco) { console.error("[fetchProventos] tabela anual não encontrada para", papel); return null; }
+
+    const porAno = {};
+    for (const L of bloco[1].matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)) {
+      const tds = [...L[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map(x => x[1].replace(/<[^>]+>/g, "").trim());
+      if (tds.length < 2 || !/^\d{4}$/.test(tds[0])) continue;
+      const v = parseFloat(tds[1].replace(/\./g, "").replace(/,/g, "."));
+      if (Number.isFinite(v)) porAno[+tds[0]] = v;
+    }
+    const anos = Object.keys(porAno).map(Number).sort((a, b) => a - b);
+    if (!anos.length) { console.error("[fetchProventos] tabela anual vazia para", papel); return null; }
+
+    // O ano corrente está em curso — entra na lista bruta, mas NUNCA no cálculo
+    // de 5 anos, senão um ano pela metade derruba o CAGR artificialmente.
+    const anoAtual = new Date().getFullYear();
+    const janela = Array.from({ length: 5 }, (_, i) => anoAtual - 5 + i);  // 5 anos FECHADOS
+
+    // ⚠️ A tabela só lista ano EM QUE HOUVE provento — ano sem pagamento fica
+    // AUSENTE, não vem com zero (verificado: nenhuma linha zerada nos 3 papéis).
+    // Por isso a checagem é de PRESENÇA na janela, não de valor > 0 no que veio.
+    const pagou_todo_ano_5a = janela.every(a => (porAno[a] ?? 0) > 0);
+
+    // CAGR entre as pontas da janela (4 períodos). Exige as duas pontas e início
+    // positivo — sem isso a taxa é indefinida, não zero.
+    const ini = porAno[janela[0]], fim = porAno[janela[4]];
+    const cagr_provento_5a = (ini > 0 && fim > 0)
+      ? Math.round((Math.pow(fim / ini, 1 / 4) - 1) * 1000) / 10   // % com 1 casa
+      : null;
+
+    return {
+      provento_por_ano: anos.slice(-10).map(a => ({ ano: a, valor: porAno[a] })),
+      cagr_provento_5a,                        // %/ano; null se faltar ponta
+      pagou_todo_ano_5a,                       // pagou em TODOS os 5 anos fechados
+      proventos_janela_5a: `${janela[0]}-${janela[4]}`,  // deixa explícito o período avaliado
+    };
+  } catch (erro) {
+    console.error("[fetchProventos] falha:", erro?.status, erro?.message || erro);
+    return null;
+  }
+}
+
+// ── Idade de listagem — primeira data negociada (chart range=max) ────────────
+// Critério "mais de 5 anos de Bolsa" do checklist Buy and Hold.
+// Medido em 27/07/2026 do IP da Cloudflare: range=max custa ~41KB e o Yahoo
+// FORÇA granularidade mensal (interval=1mo e 3mo dão idêntico). Por isso esta
+// chamada NÃO substitui a de 3y do fetchRaioX, que alimenta var_semana/var_mes
+// com dado diário — é adicional.
+//
+// ⚠️ O Yahoo tem um PISO: WEGE3 e BBAS3 devolvem a MESMA primeira data
+// (2000-02-01), que não é a estreia real de nenhuma das duas. Já CXSE3 devolve
+// 2021-04-26, batendo com o IPO de abril/2021. Interpretação:
+//   data > piso  → estreia real, idade exata
+//   data = piso  → listada há PELO MENOS ~26 anos (idade exata desconhecida)
+// Para "> 5 anos" os dois casos respondem com certeza — é o que torna o
+// critério viável apesar do piso. Nunca apresentar anos_bolsa como idade exata
+// quando anos_bolsa_minimo for true.
+const PISO_YAHOO_MS = Date.parse("2000-03-01T00:00:00Z"); // folga sobre o 2000-02-01 observado
+async function fetchIdadeBolsa(yfTicker) {
+  try {
+    const r = await fetch(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yfTicker)}?range=max&interval=1mo`,
+      { headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "Accept": "application/json" } }
+    );
+    if (!r.ok) console.error("[fetchIdadeBolsa] HTTP", r.status, "para", yfTicker);
+    const d = await r.json();
+    const ts = d?.chart?.result?.[0]?.timestamp || [];
+    if (!ts.length) { console.error("[fetchIdadeBolsa] sem timestamps para", yfTicker); return null; }
+    const primeiroMs = ts[0] * 1000;
+    return {
+      primeira_data: new Date(primeiroMs).toISOString().slice(0, 10),
+      anos_bolsa: Math.round(((Date.now() - primeiroMs) / (365.25 * 86400000)) * 10) / 10,
+      anos_bolsa_minimo: primeiroMs <= PISO_YAHOO_MS,  // true = é um piso, não a idade real
+    };
+  } catch (erro) {
+    console.error("[fetchIdadeBolsa] falha:", erro?.status, erro?.message || erro);
+    return null;
+  }
+}
+
+// ── Lucro anual (quoteSummary/incomeStatementHistory) ────────────────────────
+// Critério "nunca deu prejuízo" — mas o Yahoo devolve EXATAMENTE 4 anos, então
+// o que dá para afirmar é "sem prejuízo nos últimos 4 anos". Medido em
+// 27/07/2026 nos 3 papéis: sempre 4 períodos, netIncome coerente.
+// A versão trimestral (critério "20 trimestres") NÃO é implementada de
+// propósito: o teto é 4 trimestres por três caminhos independentes — ver
+// CLAUDE.md antes de tentar de novo.
+//
+// ⚠️ Caminho NOVO para papéis BR: o fetchIndicadores roteia brasileiro direto
+// para a brapi e nunca chama o quoteSummary. A investigação confirmou que o
+// quoteSummary FUNCIONA para .SA — a suposição de que BR só tinha brapi era
+// falsa. Aproveita o crumb já cacheado por 10 min.
+async function fetchLucroAnual(yfTicker) {
+  try {
+    const ok = await getYahooCrumb();
+    if (!ok) { console.error("[fetchLucroAnual] crumb indisponível para", yfTicker); return null; }
+    const r = await fetch(
+      `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(yfTicker)}?modules=incomeStatementHistory&crumb=${encodeURIComponent(_yahooCrumb)}`,
+      { headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "Cookie": _yahooCookie, "Accept": "application/json" } }
+    );
+    if (!r.ok) console.error("[fetchLucroAnual] HTTP", r.status, "para", yfTicker);
+    const d = await r.json();
+    const hist = d?.quoteSummary?.result?.[0]?.incomeStatementHistory?.incomeStatementHistory;
+    if (!Array.isArray(hist) || !hist.length) {
+      console.error("[fetchLucroAnual] sem histórico para", yfTicker);
+      _yahooCrumb = null;   // pode ser crumb vencido — força renovação na próxima
+      return null;
+    }
+    const lucros = hist.map(x => ({
+      ano: x?.endDate?.fmt ? +String(x.endDate.fmt).slice(0, 4) : null,
+      valor: x?.netIncome?.raw ?? null,
+    })).filter(x => x.ano != null && x.valor != null).sort((a, b) => a.ano - b.ano);
+    if (!lucros.length) return null;
+    return {
+      lucro_anual: lucros,
+      lucro_anos_avaliados: lucros.length,                          // sempre 4 no Yahoo
+      anos_sem_prejuizo: lucros.filter(x => x.valor > 0).length,    // de lucro_anos_avaliados
+    };
+  } catch (erro) {
+    console.error("[fetchLucroAnual] falha:", erro?.status, erro?.message || erro);
+    return null;
+  }
+}
+
 // Yahoo quoteSummary (exige cookie+crumb desde 2023) — para AU/US
 let _yahooCrumb = null, _yahooCookie = null, _crumbTime = 0;
 async function getYahooCrumb() {
@@ -826,14 +976,22 @@ export default {
       }
       const cotacao = await fetchCotacao(ticker, market);
       const yf = cotacao?.ticker || ticker;
-      const [ind, extra] = await Promise.all([fetchIndicadores(yf, env), fetchRaioX(yf)]);
-      const out = { ...(cotacao || {}), ...(ind || {}), ...(extra || {}) };
+      // Em paralelo para não somar latência: a idade de listagem e o lucro anual
+      // são chamadas NOVAS (checklist Buy and Hold), ~41KB e ~10KB. Só rodam na
+      // abertura do raio-X de um ativo — não há polling aqui, ao contrário do
+      // `puxar()` de 25s que causou o estouro de egress em julho.
+      const [ind, extra, idade, lucro] = await Promise.all([
+        fetchIndicadores(yf, env), fetchRaioX(yf), fetchIdadeBolsa(yf), fetchLucroAnual(yf),
+      ]);
+      const out = { ...(cotacao || {}), ...(ind || {}), ...(extra || {}), ...(idade || {}), ...(lucro || {}) };
 
       // Fundamentus (só BR): complementa os campos que a brapi deixa null.
       // NÃO sobrescreve nada que já veio preenchido — só preenche buracos.
       const isBR = market === "br" || /\.SA$/i.test(yf) || /^[A-Z]{4}\d{1,2}$/.test(yf);
       if (isBR) {
-        const fund = await fetchFundamentus(yf);
+        const [fund, prov] = await Promise.all([fetchFundamentus(yf), fetchProventos(yf)]);
+        // Proventos (dividendos + JCP por ano): mesma regra de só preencher buraco.
+        if (prov) for (const [k, v] of Object.entries(prov)) { if (v != null && out[k] == null) out[k] = v; }
         if (fund) {
           // Repassa TUDO que o Fundamentus trouxe, mas só onde há buraco — o que
           // veio do Yahoo/brapi tem prioridade. Substitui a lista manual de 4
