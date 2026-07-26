@@ -1,0 +1,40 @@
+# Config do Cloudflare Worker (controlfinanceiro.leeo-parms.workers.dev).
+#
+# Este arquivo existe para que `npx wrangler deploy` substitua o copy-paste
+# manual no painel — que corrompia silenciosamente os escapes Unicode
+# invisíveis do repararMojibake (escritos como TEXTO no fonte, nunca como bytes literais) em worker/worker.js.
+#
+# ⚠️ Os 5 secrets (BRAPI_TOKEN, GEMINI_KEY, ANTHROPIC_KEY, CRON_SECRET,
+# VAPID_PRIVATE_JWK) continuam SÓ no painel, e é assim que deve ser.
+# Deploy não apaga secret — só `wrangler secret delete` apaga.
+
+name = "controlfinanceiro"
+main = "worker/worker.js"
+account_id = "26200dc63ff44a5b14f59de66786eb13"
+
+# Espelha EXATAMENTE o que roda em produção (verificado via
+# `wrangler versions view` em 26/07/2026). Não bumpar junto com outra
+# mudança: compatibility_date altera semântica de runtime, e misturar isso
+# com troca de método de deploy torna impossível saber quem quebrou o quê.
+compatibility_date = "2026-06-08"
+
+# Protege vars de texto plano criadas pelo painel. Sem isto, um deploy
+# apaga qualquer var que não esteja declarada aqui. Não afeta secrets.
+keep_vars = true
+
+# Sem isto o Wrangler cria uma URL pública POR VERSÃO. As rotas de dado de
+# mercado são abertas por decisão consciente (ver comentário no worker.js),
+# mas essa decisão foi tomada sobre UMA url conhecida — multiplicar
+# endpoints que gastam cota do BRAPI_TOKEN e ninguém monitora é outra coisa.
+preview_urls = false
+
+# O cron existia SÓ no painel. Declarado aqui porque o Wrangler substitui
+# a lista de crons do Worker pela que encontra na config — se ficasse
+# ausente, o disparo diário de push seria perdido no primeiro deploy.
+# 0 21 * * * UTC = ~7h em Sydney.
+[triggers]
+crons = ["0 21 * * *"]
+
+# Logs do console.error (auditoria de 26/07) só aparecem com isto ligado.
+[observability]
+enabled = true
