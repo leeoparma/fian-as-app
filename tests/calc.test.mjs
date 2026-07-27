@@ -19,6 +19,7 @@ rentabilidadeAcoesDesdeInicio,ganhoAcoesEntreSnapshots,rentabilidadeAcoes,isRFAt
 INDICES_RATE,
 compoeFatorDiario,compoeFatorMensal,calcValorAtualRFHistorico,mesclarIPCAcomPrevia,compoeFatorMensalProRata,
 posicaoRV,
+grahamDefensivo,numeroGraham,precoTetoBazin,cagrLucro,checklistBuyAndHold,CHECKLIST_PADRAO,
 } from "../src/calc.mjs";
 
 const aprox=(a,b,tol=0.01)=>assert.ok(Math.abs(a-b)<=tol,`esperado ~${b}, veio ${a}`);
@@ -1027,4 +1028,285 @@ test("compoeFatorMensalProRata: reduz (não elimina) o gap do CDB real — mais 
   // não é regressão de código (função não muda desde que este teste foi
   // escrito) — é o próprio limite documentado da aproximação.
   aprox(valor,8544.43,1); // reproduz o número real verificado à mão, dentro do resíduo esperado
+});
+
+// ============================================================================
+// Análise fundamentalista — Graham, Bazin e checklist Buy and Hold
+// ----------------------------------------------------------------------------
+// ⚠️ Estas contas informam decisão de COMPRA e VENDA de ação. Todo valor
+// esperado abaixo foi calculado por CAMINHO INDEPENDENTE (à mão / calculadora),
+// nunca copiado do que o código produziu. Se um teste falhar, a suspeita
+// começa no código, não no número esperado.
+// ============================================================================
+
+// ── Número de Graham ────────────────────────────────────────────────────────
+// WEGE3 real (produção, 27/07/2026): LPA 1,49 · VPA 4,49 · preço 45,99
+//   22,5 × 1,49 × 4,49 = 150,52725
+//   √150,52725         = 12,26895…  → 12,27
+//   (12,26895−45,99)/45,99 × 100 = −73,3226…% → −73,3%
+test("Graham: número da WEGE3 com dados reais bate com a conta à mão", ()=>{
+  const r=numeroGraham(1.49,4.49,45.99);
+  assert.equal(r.numero,12.27);
+  assert.equal(r.margem_seguranca_pct,-73.3);
+  assert.equal(r.aplicavel,true);
+});
+
+test("Graham: margem é positiva quando o preço está abaixo do número", ()=>{
+  // LPA 2 · VPA 8 → 22,5×2×8 = 360 → √360 = 18,97366…  → 18,97
+  // preço 10 → (18,97366−10)/10 = +89,7366% → +89,7
+  const r=numeroGraham(2,8,10);
+  assert.equal(r.numero,18.97);
+  assert.equal(r.margem_seguranca_pct,89.7);
+});
+
+test("Graham: LPA negativo devolve null e motivo, NUNCA NaN", ()=>{
+  const r=numeroGraham(-1.5,4.49,45.99);
+  assert.equal(r.numero,null);
+  assert.equal(r.margem_seguranca_pct,null);
+  assert.equal(r.aplicavel,false);
+  assert.ok(/LPA/.test(r.motivo));
+  // a prova de que o NaN não vazou: NaN !== null e é "number"
+  assert.ok(!Number.isNaN(r.numero));
+});
+
+test("Graham: VPA negativo (patrimônio negativo) também é inaplicável", ()=>{
+  const r=numeroGraham(1.49,-4.49,45.99);
+  assert.equal(r.numero,null);
+  assert.equal(r.aplicavel,false);
+  assert.ok(/patrim/i.test(r.motivo));
+});
+
+test("Graham: LPA ou VPA ausente devolve null, não zero", ()=>{
+  for(const r of [numeroGraham(null,4.49,45.99),numeroGraham(1.49,null,45.99),numeroGraham(undefined,undefined,45.99)]){
+    assert.equal(r.numero,null);
+    assert.equal(r.aplicavel,false);
+  }
+});
+
+// ── Critério defensivo de Graham ────────────────────────────────────────────
+test("Graham defensivo: WEGE3 reprova — 30,87 × 10,23 = 315,80", ()=>{
+  const r=grahamDefensivo(30.87,10.23);
+  assert.equal(r.produto,315.8);
+  assert.equal(r.aprovado,false);
+  assert.equal(r.pl_ok,false);
+  assert.equal(r.pvp_ok,false);
+});
+
+test("Graham defensivo: BBAS3 aprova — 9,18 × 0,63 = 5,78", ()=>{
+  const r=grahamDefensivo(9.18,0.63);
+  assert.equal(r.produto,5.78);
+  assert.equal(r.aprovado,true);
+  assert.equal(r.pl_ok,true);
+  assert.equal(r.pvp_ok,true);
+});
+
+test("Graham defensivo: o veredito é o PRODUTO, não os dois testes isolados", ()=>{
+  // P/L 20 (falha o <15) mas P/VP 0,5 → produto 10 < 22,5 → aprova mesmo assim.
+  // É assim que Graham aplicava: o produto permite compensação.
+  const r=grahamDefensivo(20,0.5);
+  assert.equal(r.pl_ok,false);
+  assert.equal(r.pvp_ok,true);
+  assert.equal(r.produto,10);
+  assert.equal(r.aprovado,true);
+});
+
+test("Graham defensivo: P/L negativo NÃO vira 'barato' pelo produto negativo", ()=>{
+  // ARMADILHA: −10 × 1 = −10, que é < 22,5. Sem a guarda, empresa com prejuízo
+  // apareceria como aprovada no critério de preço.
+  const r=grahamDefensivo(-10,1);
+  assert.equal(r.aprovado,false);
+  assert.equal(r.produto,null);
+  assert.ok(/prejuízo/i.test(r.motivo));
+});
+
+test("Graham defensivo: P/VP negativo também é barrado", ()=>{
+  const r=grahamDefensivo(10,-2);
+  assert.equal(r.aprovado,false);
+  assert.equal(r.produto,null);
+});
+
+// ── Preço-teto de Bazin ─────────────────────────────────────────────────────
+test("Bazin: série cheia de 5 anos — média 1,00 ÷ 0,06 = 16,67", ()=>{
+  // 1,00+1,20+0,80+1,10+0,90 = 5,00 → ÷5 = 1,00 → ÷0,06 = 16,6666… → 16,67
+  const serie=[{ano:2021,valor:1.00},{ano:2022,valor:1.20},{ano:2023,valor:0.80},
+               {ano:2024,valor:1.10},{ano:2025,valor:0.90}];
+  const r=precoTetoBazin(serie,true,0.06,2026);
+  assert.equal(r.media_provento,1);
+  assert.equal(r.teto,16.67);
+  assert.equal(r.anos_com_provento,5);
+  assert.equal(r.historico_com_buraco,false);
+});
+
+test("Bazin: ano sem provento entra como ZERO na média (divide por 5, não por 4)", ()=>{
+  // Sem 2023: 1,00+1,20+1,10+0,90 = 4,20 → ÷5 = 0,84 → ÷0,06 = 14,00
+  // Se dividisse pelos PRESENTES daria 4,20/4/0,06 = 17,50 — teto 25% inflado
+  // para uma empresa que deixou de pagar. É o erro que esta asserção trava.
+  const serie=[{ano:2021,valor:1.00},{ano:2022,valor:1.20},
+               {ano:2024,valor:1.10},{ano:2025,valor:0.90}];
+  const r=precoTetoBazin(serie,false,0.06,2026);
+  assert.equal(r.media_provento,0.84);
+  assert.equal(r.teto,14);
+  assert.notEqual(r.teto,17.5);          // o teto inflado NÃO pode aparecer
+  assert.equal(r.anos_com_provento,4);
+  assert.equal(r.historico_com_buraco,true);   // o teto vem, mas sinalizado
+});
+
+test("Bazin: ano corrente (incompleto) fica fora da janela", ()=>{
+  // 2026 tem só 0,10 pago até agora; se entrasse, derrubaria a média
+  const serie=[{ano:2021,valor:1.00},{ano:2022,valor:1.20},{ano:2023,valor:0.80},
+               {ano:2024,valor:1.10},{ano:2025,valor:0.90},{ano:2026,valor:0.10}];
+  const r=precoTetoBazin(serie,true,0.06,2026);
+  assert.equal(r.media_provento,1);       // idêntico ao teste da série cheia
+  assert.equal(r.teto,16.67);
+  assert.equal(r.janela,"2021-2025");
+});
+
+test("Bazin: sem nenhum provento na janela devolve null, não zero", ()=>{
+  const r=precoTetoBazin([{ano:2026,valor:0.5}],false,0.06,2026);
+  assert.equal(r.teto,null);
+  assert.equal(r.media_provento,null);
+  assert.equal(r.historico_com_buraco,true);
+});
+
+test("Bazin: DY alvo configurável muda o teto proporcionalmente", ()=>{
+  const serie=[{ano:2021,valor:1},{ano:2022,valor:1},{ano:2023,valor:1},
+               {ano:2024,valor:1},{ano:2025,valor:1}];
+  assert.equal(precoTetoBazin(serie,true,0.06,2026).teto,16.67);   // 1/0,06
+  assert.equal(precoTetoBazin(serie,true,0.08,2026).teto,12.5);    // 1/0,08
+});
+
+// ── CAGR do lucro (4 anos = 3 períodos) ─────────────────────────────────────
+test("CAGR lucro: WEGE3 real 4,208→6,376 bi em 3 períodos = +14,9%/ano", ()=>{
+  // (6376219000/4208084000)^(1/3) − 1 = 0,1485757… → 14,9
+  const r=cagrLucro([{ano:2022,valor:4208084000},{ano:2023,valor:5731670000},
+                     {ano:2024,valor:6042593000},{ano:2025,valor:6376219000}]);
+  assert.equal(r,14.9);
+});
+
+test("CAGR lucro: BBAS3 real 31,011→17,808 bi = −16,9%/ano", ()=>{
+  const r=cagrLucro([{ano:2022,valor:31011000000},{ano:2023,valor:33818951000},
+                     {ano:2024,valor:35439890000},{ano:2025,valor:17808000000}]);
+  assert.equal(r,-16.9);
+});
+
+test("CAGR lucro: partir de prejuízo devolve null, nunca Infinity", ()=>{
+  assert.equal(cagrLucro([{ano:2022,valor:-100},{ano:2025,valor:500}]),null);
+  assert.equal(cagrLucro([{ano:2022,valor:500},{ano:2025,valor:-100}]),null);
+  assert.equal(cagrLucro([{ano:2022,valor:0},{ano:2025,valor:500}]),null);
+});
+
+test("CAGR lucro: menos de 2 anos não dá taxa", ()=>{
+  assert.equal(cagrLucro([{ano:2025,valor:100}]),null);
+  assert.equal(cagrLucro([]),null);
+  assert.equal(cagrLucro(null),null);
+});
+
+// ── Checklist Buy and Hold ──────────────────────────────────────────────────
+const BASE_OK={
+  anos_bolsa:26.5, anos_bolsa_minimo:true,
+  anos_sem_prejuizo:4, lucro_anos_avaliados:4,
+  cagr_provento_5a:41.3, pagou_todo_ano_5a:true,
+  roe:33.2, div_liq_patrim:-0.2, cres_rec_5a:11.2,
+  lucro_anual:[{ano:2022,valor:4208084000},{ano:2025,valor:6376219000}],
+  vol_med_2m:362006000,
+};
+const cri=(r,id)=>r.criterios.find(c=>c.id===id);
+
+test("checklist: são 8 critérios (payout e 20 trimestres ficaram fora)", ()=>{
+  const r=checklistBuyAndHold(BASE_OK,null);
+  assert.equal(r.criterios.length,8);
+  assert.equal(r.avaliados,8);
+  assert.ok(!r.criterios.some(c=>/payout/i.test(c.id)));
+});
+
+test("checklist: empresa boa aprova nos 8", ()=>{
+  const r=checklistBuyAndHold(BASE_OK,null);
+  assert.equal(r.aprovados,8);
+  assert.equal(r.sem_dado,0);
+});
+
+// ⚠️ A ARMADILHA DO PROVENTO — o teste mais importante deste bloco
+test("checklist: CAGR positivo COM ano pulado REPROVA no provento", ()=>{
+  // A tabela do Fundamentus omite o ano sem pagamento, então uma empresa que
+  // falhou em pagar ainda produz CAGR positivo (+8,8% no caso medido). Se o
+  // critério olhasse só o CAGR, ela apareceria como "dividendos crescentes".
+  const r=checklistBuyAndHold({...BASE_OK,cagr_provento_5a:8.8,pagou_todo_ano_5a:false},null);
+  assert.equal(cri(r,"provento_crescente").passou,false);
+  assert.equal(r.aprovados,7);
+  assert.ok(/deixou de pagar/.test(cri(r,"provento_crescente").detalhe));
+});
+
+test("checklist: CAGR positivo E pagou todo ano aprova", ()=>{
+  const r=checklistBuyAndHold({...BASE_OK,cagr_provento_5a:0.1,pagou_todo_ano_5a:true},null);
+  assert.equal(cri(r,"provento_crescente").passou,true);
+});
+
+test("checklist: CAGR negativo reprova mesmo pagando todo ano (BBAS3 −15,2%)", ()=>{
+  const r=checklistBuyAndHold({...BASE_OK,cagr_provento_5a:-15.2,pagou_todo_ano_5a:true},null);
+  assert.equal(cri(r,"provento_crescente").passou,false);
+});
+
+test("checklist: anos_bolsa_minimo chega à tela para ela não mentir a idade", ()=>{
+  // 26,5 é PISO do Yahoo, não a idade da WEG. A tela precisa do booleano para
+  // escrever "mais de 26 anos" em vez de "26,5 anos".
+  const r=checklistBuyAndHold(BASE_OK,null);
+  const c=cri(r,"anos_bolsa");
+  assert.equal(c.e_minimo,true);
+  assert.equal(c.passou,true);
+  assert.ok(/mais de/.test(c.detalhe));
+});
+
+test("checklist: CXSE3 com 5,3 anos passa, mas está na fronteira", ()=>{
+  const r=checklistBuyAndHold({...BASE_OK,anos_bolsa:5.3,anos_bolsa_minimo:false},null);
+  assert.equal(cri(r,"anos_bolsa").passou,true);
+  assert.equal(cri(r,"anos_bolsa").e_minimo,false);
+  // e 4,9 anos reprova — a régua é 5
+  assert.equal(cri(checklistBuyAndHold({...BASE_OK,anos_bolsa:4.9},null),"anos_bolsa").passou,false);
+});
+
+test("checklist: 'sem prejuízo' é sobre 4 anos, não 'nunca'", ()=>{
+  const r=checklistBuyAndHold(BASE_OK,null);
+  assert.ok(/4 anos/.test(cri(r,"sem_prejuizo").nome));
+  assert.ok(!/nunca/i.test(cri(r,"sem_prejuizo").nome));
+  // 3 de 4 anos com lucro reprova
+  const r2=checklistBuyAndHold({...BASE_OK,anos_sem_prejuizo:3},null);
+  assert.equal(cri(r2,"sem_prejuizo").passou,false);
+});
+
+test("checklist: 'lucro crescente' é rotulado 4 anos (limite da fonte)", ()=>{
+  const r=checklistBuyAndHold(BASE_OK,null);
+  assert.ok(/4 anos/.test(cri(r,"cresc_lucro").nome));
+});
+
+test("checklist: critério desligado sai do denominador do placar", ()=>{
+  const cfg={criterios:{...CHECKLIST_PADRAO.criterios,roe:false,liquidez:false}};
+  const r=checklistBuyAndHold(BASE_OK,cfg);
+  assert.equal(r.avaliados,6);          // 8 − 2 desligados
+  assert.equal(r.aprovados,6);
+  assert.equal(r.criterios.length,8);   // continuam na lista, só não contam
+  assert.equal(cri(r,"roe").ligado,false);
+});
+
+test("checklist: corte de liquidez é configurável e respeitado", ()=>{
+  const dados={...BASE_OK,vol_med_2m:2000000};
+  assert.equal(cri(checklistBuyAndHold(dados,null),"liquidez").passou,true);          // padrão 1M
+  assert.equal(cri(checklistBuyAndHold(dados,{corte_liquidez:11000000}),"liquidez").passou,false); // corte Investidor10
+  assert.equal(checklistBuyAndHold(dados,{corte_liquidez:11000000}).corte_liquidez,11000000);
+});
+
+test("checklist: campo ausente vira 'sem dado' (null), não reprovação silenciosa", ()=>{
+  // Banco não tem div_liq_patrim no Fundamentus — não pode virar "reprovado"
+  const r=checklistBuyAndHold({...BASE_OK,div_liq_patrim:null,roe:null},null);
+  assert.equal(cri(r,"divida").passou,null);
+  assert.equal(cri(r,"roe").passou,null);
+  assert.equal(r.sem_dado,2);
+  assert.equal(r.aprovados,6);   // null não conta como aprovado
+  assert.equal(r.avaliados,8);   // mas continua ligado, então segue no denominador
+});
+
+test("checklist: dados vazios não explodem", ()=>{
+  const r=checklistBuyAndHold({},null);
+  assert.equal(r.aprovados,0);
+  assert.equal(r.sem_dado,8);
+  assert.ok(r.criterios.every(c=>c.passou===null));
 });

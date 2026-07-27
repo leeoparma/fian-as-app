@@ -736,3 +736,195 @@ export function compoeFatorMensalProRata(serieMensal,dataIniStr,dataFimStr){
   fator*=compoeFatorMensal(serieMensal,proxMesStr,dataFimStr);
   return fator;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Análise fundamentalista — eixo PREÇO (Graham) e eixo QUALIDADE (Buy & Hold)
+// ═══════════════════════════════════════════════════════════════════════════
+// ⚠️ Diferente do resto deste arquivo, errar aqui não produz número feio na
+// tela: produz decisão de compra ou venda errada, com dinheiro real. Todo
+// teste destas funções confere contra conta feita à mão, nunca contra o que
+// o código produziu.
+
+// ── Critério defensivo de Graham ────────────────────────────────────────────
+// Graham pedia P/L < 15 E P/VP < 1,5, mas o teste que ele de fato aplicava é o
+// PRODUTO: P/L × P/VP < 22,5 (= 15 × 1,5). O produto permite compensação — P/L
+// alto com P/VP bem baixo ainda passa. Devolvemos os três para a tela mostrar
+// a conta, não só o veredito.
+export function grahamDefensivo(pl,pvp){
+  const n=v=>(typeof v==="number"&&Number.isFinite(v))?v:null;
+  const _pl=n(pl),_pvp=n(pvp);
+  const vazio={pl:_pl,pvp:_pvp,pl_ok:null,pvp_ok:null,produto:null,produto_ok:null,aprovado:null};
+  if(_pl==null||_pvp==null) return {...vazio,motivo:"P/L ou P/VP ausente"};
+  // ⚠️ ARMADILHA: com P/L ou P/VP negativo o PRODUTO fica negativo e passaria
+  // no teste "< 22,5" — uma empresa com prejuízo ou patrimônio negativo seria
+  // classificada como barata. Múltiplo negativo não é múltiplo baixo.
+  if(_pl<=0) return {...vazio,pl_ok:false,pvp_ok:_pvp<1.5,aprovado:false,motivo:"P/L não positivo (prejuízo) — múltiplo inaplicável"};
+  if(_pvp<=0) return {...vazio,pl_ok:_pl<15,pvp_ok:false,aprovado:false,motivo:"P/VP não positivo (patrimônio negativo) — múltiplo inaplicável"};
+  const produto=_pl*_pvp;
+  return {
+    pl:_pl,pvp:_pvp,
+    pl_ok:_pl<15,pvp_ok:_pvp<1.5,
+    produto:Math.round(produto*100)/100,
+    produto_ok:produto<22.5,
+    aprovado:produto<22.5,   // o veredito é o PRODUTO, como Graham usava
+    motivo:null,
+  };
+}
+
+// ── Número de Graham ────────────────────────────────────────────────────────
+//   número = √(22,5 × LPA × VPA)   ·   margem = (número − preço) / preço
+// A margem é positiva quando o papel está ABAIXO do valor intrínseco estimado.
+export function numeroGraham(lpa,vpa,preco){
+  const n=v=>(typeof v==="number"&&Number.isFinite(v))?v:null;
+  const _lpa=n(lpa),_vpa=n(vpa),_preco=n(preco);
+  const na=m=>({numero:null,margem_seguranca_pct:null,aplicavel:false,motivo:m});
+  if(_lpa==null||_vpa==null) return na("LPA ou VPA ausente");
+  // ⚠️ Graham foi desenhado para empresa LUCRATIVA. Com LPA ou VPA negativo o
+  // radicando fica negativo, a raiz não existe nos reais e Math.sqrt devolve
+  // NaN — que vazaria para a tela como "NaN". A fórmula é INAPLICÁVEL nesse
+  // caso, o que é diferente de dizer que a ação está "cara".
+  if(_lpa<=0) return na("empresa sem lucro (LPA ≤ 0) — fórmula inaplicável");
+  if(_vpa<=0) return na("patrimônio líquido negativo (VPA ≤ 0) — fórmula inaplicável");
+  const numero=Math.sqrt(22.5*_lpa*_vpa);
+  // margem calculada com o número SEM arredondar, senão o erro de 2 casas
+  // se propaga para o percentual
+  const margem=(_preco!=null&&_preco>0)?((numero-_preco)/_preco*100):null;
+  return {
+    numero:Math.round(numero*100)/100,
+    margem_seguranca_pct:margem==null?null:Math.round(margem*10)/10,
+    aplicavel:true,motivo:null,
+  };
+}
+
+// ── Preço-teto de Bazin ─────────────────────────────────────────────────────
+//   teto = provento médio anual / DY desejado   (padrão do método: 6%)
+// A média é sobre os 5 anos FECHADOS — o ano corrente está pela metade e
+// derrubaria a média.
+// ⚠️ Ano SEM provento entra na média como ZERO, não é descartado. A tabela do
+// Fundamentus omite o ano sem pagamento, e dividir só pelos anos presentes
+// inflaria o teto de uma empresa que deixou de pagar — exatamente o erro que
+// o método de Bazin não perdoa. Dividir por 5 é a leitura correta e a
+// conservadora.
+export function precoTetoBazin(proventoPorAno,pagouTodoAno,dyAlvo=0.06,anoAtual=new Date().getFullYear()){
+  const mapa=new Map();
+  for(const p of (proventoPorAno||[])) if(p&&Number.isFinite(p.valor)) mapa.set(Number(p.ano),p.valor);
+  const janela=Array.from({length:5},(_,i)=>anoAtual-5+i);   // 5 anos fechados
+  const presentes=janela.map(a=>mapa.get(a)).filter(v=>Number.isFinite(v)&&v>0);
+  const rotulo=`${janela[0]}-${janela[4]}`;
+  if(!presentes.length||!(dyAlvo>0)) {
+    return {teto:null,media_provento:null,anos_com_provento:0,janela:rotulo,historico_com_buraco:true,
+            motivo:presentes.length?"DY alvo inválido":"sem provento nos 5 anos fechados"};
+  }
+  const media=presentes.reduce((s,v)=>s+v,0)/janela.length;   // divide por 5, não por presentes.length
+  const buraco=(pagouTodoAno===false)||presentes.length<janela.length;
+  return {
+    teto:Math.round((media/dyAlvo)*100)/100,
+    media_provento:Math.round(media*10000)/10000,
+    anos_com_provento:presentes.length,
+    janela:rotulo,
+    // Bazin pressupõe pagamento consistente: com buraco, o teto sai mas a tela
+    // precisa avisar que a série não sustenta a premissa do método.
+    historico_com_buraco:buraco,
+    motivo:null,
+  };
+}
+
+// ── CAGR do lucro ───────────────────────────────────────────────────────────
+// A fonte (Yahoo incomeStatementHistory) entrega 4 anos, então são 3 períodos.
+// Rotular como "4 anos", nunca como 5 — mesma honestidade do "sem prejuízo".
+export function cagrLucro(lucroAnual){
+  const s=(lucroAnual||[]).filter(x=>x&&Number.isFinite(x.ano)&&Number.isFinite(x.valor)).sort((a,b)=>a.ano-b.ano);
+  if(s.length<2) return null;
+  const ini=s[0].valor,fim=s[s.length-1].valor;
+  // Partir de prejuízo (ou chegar nele) torna a taxa percentual indefinida —
+  // null, nunca Infinity nem NaN.
+  if(ini<=0||fim<=0) return null;
+  return Math.round((Math.pow(fim/ini,1/(s.length-1))-1)*1000)/10;
+}
+
+// ── Checklist Buy and Hold — 8 critérios ────────────────────────────────────
+// São 8, não 10. Dois ficaram de fora por FALTA DE DADO CONFIÁVEL, decisão
+// tomada e registrada no CLAUDE.md:
+//   · "lucro nos últimos 20 trimestres" — a fonte entrega 4 trimestres
+//   · "payout sustentável" — exigiria nº de ações histórico; com desdobramento
+//     na janela o número sai distorcido, e número aproximado que informa
+//     decisão de compra é pior que critério ausente
+export const CHECKLIST_PADRAO={
+  criterios:{
+    anos_bolsa:true, sem_prejuizo:true, provento_crescente:true, roe:true,
+    divida:true, cresc_receita:true, cresc_lucro:true, liquidez:true,
+  },
+  corte_liquidez:1000000,   // R$/dia. Investidor10 usa ~R$11M; 1M é mais
+                            // realista para posição pessoal. Configurável.
+};
+
+export function checklistBuyAndHold(dados,config){
+  const d=dados||{};
+  const cfg={...CHECKLIST_PADRAO,...(config||{})};
+  const lig={...CHECKLIST_PADRAO.criterios,...((config||{}).criterios||{})};
+  const num=v=>(typeof v==="number"&&Number.isFinite(v))?v:null;
+
+  const cagrL=cagrLucro(d.lucro_anual);
+  const anosBolsa=num(d.anos_bolsa);
+  const roe=num(d.roe);
+  const divPat=num(d.div_liq_patrim);
+  const cresRec=num(d.cres_rec_5a);
+  const vol=num(d.vol_med_2m);
+  const cagrProv=num(d.cagr_provento_5a);
+  const anosOk=num(d.anos_sem_prejuizo), anosAval=num(d.lucro_anos_avaliados);
+
+  // passou: true | false | null (null = sem dado, não dá para afirmar)
+  const defs=[
+    {id:"anos_bolsa",nome:"Mais de 5 anos de Bolsa",
+     passou:anosBolsa==null?null:anosBolsa>5,
+     valor:anosBolsa,
+     // ⚠️ quando anos_bolsa_minimo é true o número é um PISO, não a idade real
+     // (o Yahoo tem piso em 2000-02-01). A tela deve dizer "mais de X anos".
+     detalhe:anosBolsa==null?"sem dado":(d.anos_bolsa_minimo?`mais de ${anosBolsa} anos (piso da fonte)`:`${anosBolsa} anos`),
+     e_minimo:!!d.anos_bolsa_minimo},
+
+    {id:"sem_prejuizo",nome:"Sem prejuízo (4 anos)",   // NÃO é "nunca deu prejuízo"
+     passou:(anosOk==null||anosAval==null||anosAval===0)?null:anosOk===anosAval,
+     valor:anosOk,
+     detalhe:(anosOk==null||anosAval==null)?"sem dado":`${anosOk} de ${anosAval} anos com lucro`},
+
+    // ⚠️ ARMADILHA DO PROVENTO: a tabela anual do Fundamentus OMITE o ano sem
+    // pagamento em vez de trazer zero, então uma empresa que pulou um ano ainda
+    // produz CAGR positivo. Exigir os DOIS é o que impede exibir "dividendos
+    // crescentes" para quem falhou em pagar.
+    {id:"provento_crescente",nome:"Provento crescente (5 anos)",
+     passou:(cagrProv==null||d.pagou_todo_ano_5a==null)?null:(cagrProv>0&&d.pagou_todo_ano_5a===true),
+     valor:cagrProv,
+     detalhe:cagrProv==null?"sem dado":`${cagrProv}%/ano${d.pagou_todo_ano_5a===false?" — mas deixou de pagar em algum ano":""}`},
+
+    {id:"roe",nome:"ROE acima de 10%",
+     passou:roe==null?null:roe>10, valor:roe,
+     detalhe:roe==null?"sem dado":`${roe}%`},
+
+    {id:"divida",nome:"Dívida menor que patrimônio",
+     passou:divPat==null?null:divPat<1, valor:divPat,
+     detalhe:divPat==null?"sem dado":`dív. líq./patrim. = ${divPat}`},
+
+    {id:"cresc_receita",nome:"Receita crescente (5 anos)",
+     passou:cresRec==null?null:cresRec>0, valor:cresRec,
+     detalhe:cresRec==null?"sem dado":`${cresRec}%/ano`},
+
+    {id:"cresc_lucro",nome:"Lucro crescente (4 anos)",   // 4, limite da fonte
+     passou:cagrL==null?null:cagrL>0, valor:cagrL,
+     detalhe:cagrL==null?"sem dado":`${cagrL}%/ano`},
+
+    {id:"liquidez",nome:"Liquidez diária",
+     passou:vol==null?null:vol>=cfg.corte_liquidez, valor:vol,
+     detalhe:vol==null?"sem dado":`${Math.round(vol).toLocaleString("pt-BR")}/dia (corte ${Math.round(cfg.corte_liquidez).toLocaleString("pt-BR")})`},
+  ];
+
+  const criterios=defs.map(c=>({...c,ligado:lig[c.id]!==false}));
+  const ativos=criterios.filter(c=>c.ligado);
+  return {
+    criterios,
+    aprovados:ativos.filter(c=>c.passou===true).length,
+    avaliados:ativos.length,                              // desligar tira do denominador
+    sem_dado:ativos.filter(c=>c.passou===null).length,    // ligado mas sem dado
+    corte_liquidez:cfg.corte_liquidez,
+  };
+}
