@@ -15,6 +15,7 @@ rentabilidadeRF, serieRentabilidadeRF, composicaoAcoes,
 rentabilidadeAcoesDesdeInicio, rentabilidadeAcoes,
 isRFAtivo,
 calcValorLiquidoRF,
+grahamDefensivo, numeroGraham, precoTetoBazin, checklistBuyAndHold, CHECKLIST_PADRAO, cagrLucro,
 } from "./calc.mjs";
 
 // Chave pública VAPID (par gerado para este app; a privada é secret no Cloudflare)
@@ -300,6 +301,13 @@ const kSwGrupos=userId=>`sw_grupos:${userId}`;
 const kSwAtivo=userId=>`sw_ativo:${userId}`;
 const kSwNome=userId=>`sw_nome:${userId}`;
 const kSwSolicitado=userId=>`sw_solicitado:${userId}`;
+// Config do checklist Buy and Hold (quais critérios contam + corte de liquidez).
+// Nasce ESCOPADA por user_id — é a terceira vez que este padrão aparece na base
+// (all_profiles em 16/07, sw_* em 19/07), e as duas primeiras custaram dias de
+// investigação por vazarem dado entre contas. NÃO é limpa no logout, mesma
+// decisão do sw_*: a proteção vem do escopo, não de apagar; limpar só faria o
+// usuário reconfigurar o método a cada sessão.
+const kChecklistConfig=userId=>`checklist_config:${userId}`;
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,5);
 const fmtM=(v,cur="R$")=>cur+" "+Number(v||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtPct=v=>v!=null?Number(v).toFixed(2)+"%":"—";
@@ -473,7 +481,65 @@ function TVWidget({type,config}){
   useEffect(()=>{const el=ref.current;if(!el)return;el.innerHTML="";const w=document.createElement("div");w.className="tradingview-widget-container__widget";el.appendChild(w);const s=document.createElement("script");s.type="text/javascript";s.async=true;s.src=`https://s3.tradingview.com/external-embedding/embed-widget-${type}.js`;s.innerHTML=JSON.stringify({...config,theme:"dark",colorTheme:"dark"});el.appendChild(s);return()=>{el.innerHTML="";};},[JSON.stringify(config)]);
   return <div ref={ref} style={{minHeight:config.height||400,borderRadius:10,overflow:"hidden",background:D.bg3,display:"flex",alignItems:"center",justifyContent:"center"}}><p style={{color:D.text3,fontSize:13}}>Carregando TradingView...</p></div>;
 }
-function ChartModal({ticker,onClose,currency="A$",market="au",dyAlvo=6}){
+// ── Textos de ajuda da análise fundamentalista ──────────────────────────────
+// ESCRITOS À MÃO, de propósito. Não gerar por IA: o texto precisa estar CERTO,
+// não variado — e há precedente nesta base (a feature "Como uso meu dinheiro"
+// foi removida em 26/07/2026 porque a IA produzia erro factual). Cada verbete
+// responde: o que é · como ler · qual a armadilha.
+// Liga cada critério do checklist ao seu verbete de ajuda acima.
+const AJUDA_CRIT={anos_bolsa:"anos_bolsa",sem_prejuizo:"sem_prejuizo",provento_crescente:"cagr_provento",
+  roe:"roe",divida:"div_liq_patrim",cresc_receita:"cres_rec",cresc_lucro:"cagr_lucro",liquidez:"liquidez_diaria"};
+const AJUDA={
+  graham_defensivo:"Filtro de preço de Benjamin Graham: P/L abaixo de 15 e P/VP abaixo de 1,5. O teste que ele de fato aplicava é o PRODUTO dos dois abaixo de 22,5, que permite compensar — P/L alto com P/VP muito baixo ainda passa. Armadilha: múltiplo negativo não é múltiplo baixo. Empresa com prejuízo (P/L negativo) ou patrimônio negativo é marcada como inaplicável, não como barata.",
+  numero_graham:"Estimativa de valor justo para empresas lucrativas e estáveis: √(22,5 × LPA × VPA). Se o preço está abaixo, existe margem de segurança. Armadilha: não se aplica a empresa com prejuízo (LPA negativo), nem a empresa de crescimento acelerado — Graham desenhou isso para companhias maduras, e uma empresa que cresce rápido quase sempre parece 'cara' por esta régua.",
+  margem_seguranca:"Distância entre o preço atual e o Número de Graham, em %. Positiva significa que o papel está abaixo do valor estimado. Armadilha: margem alta pode ser oportunidade ou pode ser o mercado precificando um problema que a fórmula não enxerga — ela só olha lucro e patrimônio contábeis.",
+  bazin:"Preço máximo que faz sentido pagar para receber o dividend yield desejado: provento médio anual ÷ DY alvo. Usa a MÉDIA dos últimos 5 anos fechados, não o último ano. Armadilha: um dividendo extraordinário num único ano inflaria o teto se fosse usado sozinho — é justamente por isso que Bazin usa média.",
+  bazin_buraco:"A empresa deixou de pagar provento em pelo menos um dos 5 anos da janela. O teto continua sendo calculado (o ano sem pagamento entra como zero na média), mas o método de Bazin pressupõe pagamento consistente — com buraco no histórico, o número perde a premissa que o sustenta.",
+  pl:"Preço dividido pelo lucro por ação: quantos anos de lucro atual pagariam o preço da ação. Menor costuma ser mais barato. Armadilha: P/L baixo pode ser empresa barata ou empresa com lucro inflado por evento não recorrente; e P/L negativo não é 'muito barato', é prejuízo.",
+  pvp:"Preço dividido pelo valor patrimonial por ação. Abaixo de 1 significa pagar menos que o patrimônio contábil. Armadilha: patrimônio contábil não é valor de mercado dos ativos — banco e empresa de capital intensivo têm P/VP naturalmente baixo, e empresa de serviços tem alto sem estar cara.",
+  psr:"Preço dividido pela receita por ação. Útil para comparar empresas do mesmo setor, principalmente quando o lucro está distorcido. Armadilha: ignora completamente a margem — receita alta com prejuízo produz PSR atraente.",
+  ev_ebitda:"Valor da firma (mercado + dívida − caixa) dividido pelo EBITDA. Compara empresas com estruturas de dívida diferentes melhor que o P/L. Armadilha: EBITDA ignora depreciação e juros, então favorece empresa endividada e de capital intensivo.",
+  lpa:"Lucro por ação: quanto de lucro cabe a cada ação no período. É o insumo do P/L e do Número de Graham. Armadilha: um único trimestre atípico move o LPA dos 12 meses inteiro.",
+  vpa:"Valor patrimonial por ação: patrimônio líquido dividido pelo número de ações. É o insumo do P/VP e do Número de Graham. Armadilha: é valor contábil, não de liquidação.",
+  roe:"Retorno sobre o patrimônio líquido: quanto de lucro a empresa gera para cada real dos sócios. Acima de 10% costuma ser o corte mínimo. Armadilha: ROE alto pode vir de patrimônio pequeno por excesso de dívida, e não de eficiência.",
+  roic:"Retorno sobre o capital investido, incluindo o capital de terceiros. Mede eficiência sem o efeito da alavancagem, o que o ROE não faz. Armadilha: não é publicado para bancos e parte das seguradoras — aparece como sem dado.",
+  margens:"Quanto sobra da receita em cada etapa: bruta (depois do custo do produto), EBIT (depois das despesas operacionais) e líquida (depois de tudo). Armadilha: bancos não têm estrutura de custo e receita tradicional — as margens aparecem como sem dado em vez de zero, de propósito.",
+  div_liq_patrim:"Dívida líquida dividida pelo patrimônio líquido. Abaixo de 1 significa dever menos do que se tem de patrimônio. Negativo significa caixa líquido — mais dinheiro em caixa que dívida. Armadilha: dívida barata e bem usada não é defeito; o número sozinho não distingue alavancagem saudável de risco.",
+  liquidez_corrente:"Ativo circulante dividido pelo passivo circulante: capacidade de honrar as contas dos próximos 12 meses. Acima de 1 é o mínimo confortável. Armadilha: estoque parado conta como ativo circulante e infla o indicador.",
+  cres_rec:"Crescimento médio anual da receita nos últimos 5 anos, conforme o Fundamentus. Armadilha: crescer receita sem crescer lucro pode significar margem sendo destruída para ganhar mercado.",
+  cagr_lucro:"Crescimento médio anual do lucro. A fonte entrega 4 anos, então são 3 períodos — por isso o rótulo diz 4 anos, e não 5. Armadilha: se o ano inicial foi atipicamente fraco, a taxa sai inflada; olhe a série ano a ano, não só a taxa.",
+  cagr_provento:"Crescimento médio anual do provento por ação (dividendos + JCP) nos 5 anos fechados. Armadilha grave: a fonte OMITE o ano sem pagamento em vez de trazer zero, então uma empresa que deixou de pagar num ano ainda produz taxa positiva. Por isso este critério só passa se ela também tiver pago em TODOS os 5 anos.",
+  anos_bolsa:"Há quanto tempo o papel é negociado, pela primeira cotação disponível. Armadilha: a fonte tem um piso em fevereiro/2000 — empresas listadas antes disso aparecem com essa data. Quando é o caso, mostramos 'mais de X anos', porque o número é um piso e não a idade real.",
+  sem_prejuizo:"Quantos dos últimos anos fiscais tiveram lucro positivo. Armadilha: a fonte entrega apenas 4 anos, então isto NÃO é 'nunca deu prejuízo' — é uma janela curta, e uma empresa pode ter tido prejuízo no 5º ano anterior sem aparecer aqui.",
+  liquidez_diaria:"Volume financeiro médio negociado por dia nos últimos 2 meses. Liquidez baixa significa dificuldade de comprar ou vender sem mover o preço. Armadilha: o corte adequado depende do seu tamanho de posição — por isso ele é configurável aqui.",
+  placar:"Quantos critérios o papel cumpre, entre os que foram efetivamente avaliados. Critério sem dado na fonte NÃO conta no denominador: tratá-lo como reprovação faria um banco parecer pior do que é, já que vários indicadores simplesmente não existem para o setor financeiro.",
+};
+
+// ⚠️ Estes componentes ficam FORA do ChartModal de propósito. Definidos
+// dentro dele, cada re-render criaria uma função nova, o React desmontaria
+// e remontaria — e o estado interno (tooltip aberto, bloco expandido) seria
+// perdido. Sintoma seria: ligar um critério fecha todos os blocos abertos.
+// ── Componentes do painel de análise ──────────────────────────────────────
+const Ajuda=({k})=>{const[ab,setAb]=useState(false);return <span style={{position:"relative",display:"inline-block"}}>
+  <button onClick={()=>setAb(v=>!v)} title="Explicação" style={{marginLeft:6,width:16,height:16,lineHeight:"14px",borderRadius:"50%",border:`1px solid ${D.border}`,background:ab?D.text3:"transparent",color:ab?D.bg:D.text3,fontSize:10,fontWeight:700,cursor:"pointer",padding:0}}>?</button>
+  {ab&&<span onClick={()=>setAb(false)} style={{position:"absolute",zIndex:40,left:0,top:22,width:262,background:D.bg3,border:`1px solid ${D.border}`,borderRadius:10,padding:"10px 12px",fontSize:11,lineHeight:1.55,color:D.text2,boxShadow:"0 10px 30px rgba(0,0,0,.5)",fontWeight:400,textAlign:"left",cursor:"pointer"}}>{AJUDA[k]}</span>}
+</span>;};
+// "sem dado" NUNCA vira 0 nem traço ambíguo — banco legitimamente não publica
+// vários destes indicadores, e zero mentiria.
+const SD=<span style={{color:D.text3,fontWeight:500,fontSize:11}}>sem dado</span>;
+const val=(v,{suf="",pre="",dec=2}={})=>v==null?SD:<>{pre}{typeof v==="number"?v.toLocaleString("pt-BR",{minimumFractionDigits:dec,maximumFractionDigits:dec}):v}{suf}</>;
+const LinA=({label,v,suf="",pre="",dec=2,ajuda,cor})=><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:`1px solid ${D.border}`}}>
+  <span style={{fontSize:12,color:D.text2}}>{label}{ajuda&&<Ajuda k={ajuda}/>}</span>
+  <span style={{fontSize:13,fontWeight:700,color:v==null?D.text3:(cor||D.text)}}>{val(v,{suf,pre,dec})}</span>
+</div>;
+const Bloco=({titulo,aberto,children})=>{const[ab,setAb]=useState(!!aberto);return <div style={{background:D.bg2,borderRadius:12,marginBottom:10,border:`1px solid ${D.border}`,overflow:"hidden"}}>
+  <button onClick={()=>setAb(v=>!v)} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"11px 14px",background:"transparent",border:"none",cursor:"pointer",color:D.text,fontSize:12.5,fontWeight:700}}>
+    <span>{titulo}</span><span style={{color:D.text3,fontSize:11}}>{ab?"▲":"▼"}</span></button>
+  {ab&&<div style={{padding:"0 14px 10px"}}>{children}</div>}
+</div>;};
+
+
+function ChartModal({ticker,onClose,currency="A$",market="au",dyAlvo=6,userId}){
   // Monta o símbolo do TradingView com a bolsa CERTA (senão ele pega bolsa errada, ex: GETTEX alemã)
   const sym=(()=>{
     if(ticker.includes(":"))return ticker; // já tem bolsa
@@ -491,6 +557,7 @@ function ChartModal({ticker,onClose,currency="A$",market="au",dyAlvo=6}){
   const [newsLoading,setNewsLoading]=useState(false);
   const [descIA,setDescIA]=useState(null);
   const [descIALoading,setDescIALoading]=useState(false);
+  const [chkAberto,setChkAberto]=useState(false);
   useEffect(()=>{
     let vivo=true;
     setLoading(true);setErro(false);
@@ -526,8 +593,34 @@ function ChartModal({ticker,onClose,currency="A$",market="au",dyAlvo=6}){
     fetch(`${WORKER}/news?ticker=${encodeURIComponent(ticker)}&market=${market}${qNome}`).then(r=>r.json()).then(d=>{const arr=Array.isArray(d)?d:(d.items||[]);setNews(arr.slice(0,10));setFatos(Array.isArray(d?.fatos)?d.fatos:[]);setNewsLoading(false);}).catch(()=>{setNews([]);setFatos([]);setNewsLoading(false);});
   }
   const preco=dados?.preco_atual??dados?.preco??null;
-  const teto=(dados?.dy&&dados.dy>0&&preco)?preco*(dados.dy/dyAlvo):null;
+  // ⚠️ CORREÇÃO (27/07/2026): aqui o teto era `preco*(dy/dyAlvo)`, ou seja, o
+  // provento dos ÚLTIMOS 12 MESES dividido pelo DY alvo. Isso projeta para
+  // sempre um ano atípico: para WEGE3, o dividendo extraordinário de 2025
+  // (2,451 contra ~0,6 nos quatro anos anteriores) devolvia teto de R$40,85
+  // quando o correto é R$16,51 — a ação parecia "quase no teto" estando 178%
+  // acima. Bazin usa MÉDIA de 5 anos justamente porque ano atípico distorce.
+  // Não era outra janela do método: era o método aplicado errado.
+  const bazin=precoTetoBazin(dados?.provento_por_ano,dados?.pagou_todo_ano_5a,(dyAlvo||6)/100);
+  const teto=bazin.teto;
   const nomeEmp=dados?.nome&&dados.nome!==ticker?dados.nome:null;
+
+  // ── Config do checklist (por usuário) ──────────────────────────────────────
+  const [cfgChk,setCfgChk]=useState(()=>{
+    const salvo=userId?lsGet(kChecklistConfig(userId)):null;
+    return salvo&&salvo.criterios?salvo:CHECKLIST_PADRAO;
+  });
+  function salvarCfg(nova){
+    setCfgChk(nova);
+    if(userId)lsSet(kChecklistConfig(userId),nova);   // NUNCA chave crua
+  }
+  const graham=numeroGraham(dados?.lpa,dados?.vpa,preco);
+  const grahamDef=grahamDefensivo(dados?.pl,dados?.pvp);
+  const chk=checklistBuyAndHold(dados||{},cfgChk);
+  // Denominador NÃO inclui "sem dado": tratar ausência de dado como reprovação
+  // faria banco parecer pior do que é (o setor financeiro não publica vários
+  // destes indicadores). Decisão registrada.
+  const chkDenom=chk.avaliados-chk.sem_dado;
+  const cagrLucroTela=cagrLucro(dados?.lucro_anual);   // 4 anos = 3 períodos (teto da fonte)
   // Linha de indicador estilo AGF: label à esquerda, valor à direita
   const Lin=({label,valor,suf="",cor,pre=""})=><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:`1px solid ${D.border}`}}>
     <span style={{fontSize:12,color:D.text2}}>{label}</span>
@@ -584,6 +677,73 @@ function ChartModal({ticker,onClose,currency="A$",market="au",dyAlvo=6}){
       {erro&&<p style={{fontSize:13,color:D.red,padding:"30px 0",textAlign:"center"}}>Não consegui buscar os dados agora. Tente novamente em instantes.</p>}
       {!loading&&!erro&&dados&&<>
         {aba==="resumo"&&<div>
+          {/* ── Dois selos INDEPENDENTES: preço e qualidade ────────────────
+              Sem hierarquia entre eles de propósito: um papel pode ser caro E
+              excelente ao mesmo tempo, e a tela não deve resolver essa tensão
+              pelo usuário. */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(210px,1fr))",gap:10,marginBottom:14}}>
+            {/* PREÇO */}
+            <div style={{background:D.bg2,border:`1px solid ${grahamDef.aprovado===null?D.border:(grahamDef.aprovado?D.green:D.red)}55`,borderRadius:12,padding:"12px 14px"}}>
+              <p style={{margin:0,fontSize:10,color:D.text3,textTransform:"uppercase",letterSpacing:"0.5px"}}>Preço · Graham<Ajuda k="graham_defensivo"/></p>
+              <p style={{margin:"5px 0 8px",fontSize:17,fontWeight:800,color:grahamDef.aprovado===null?D.text3:(grahamDef.aprovado?D.green:D.red)}}>
+                {grahamDef.aprovado===null?"sem dado":(grahamDef.aprovado?"✓ Dentro do critério":"✗ Caro pelo critério")}</p>
+              {grahamDef.produto!=null
+                ? <p style={{margin:0,fontSize:11,color:D.text2}}>P/L × P/VP = <b>{grahamDef.produto.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}</b> <span style={{color:D.text3}}>(limite 22,5)</span></p>
+                : <p style={{margin:0,fontSize:11,color:D.text3}}>{grahamDef.motivo||"sem dado"}</p>}
+              {graham.aplicavel
+                ? <p style={{margin:"6px 0 0",fontSize:11,color:D.text2}}>Nº de Graham <b>{currency} {graham.numero.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}</b>
+                    {graham.margem_seguranca_pct!=null&&<> · margem <b style={{color:graham.margem_seguranca_pct>=0?D.green:D.red}}>{graham.margem_seguranca_pct>0?"+":""}{graham.margem_seguranca_pct.toLocaleString("pt-BR",{minimumFractionDigits:1,maximumFractionDigits:1})}%</b></>}
+                    <Ajuda k="numero_graham"/></p>
+                : <p style={{margin:"6px 0 0",fontSize:11,color:D.text3}}>Nº de Graham: {graham.motivo}<Ajuda k="numero_graham"/></p>}
+            </div>
+            {/* QUALIDADE */}
+            <div style={{background:D.bg2,border:`1px solid ${chkDenom>0&&chk.aprovados===chkDenom?D.green:D.border}55`,borderRadius:12,padding:"12px 14px"}}>
+              <p style={{margin:0,fontSize:10,color:D.text3,textTransform:"uppercase",letterSpacing:"0.5px"}}>Qualidade · Buy &amp; Hold<Ajuda k="placar"/></p>
+              <p style={{margin:"5px 0 4px",fontSize:17,fontWeight:800,color:chkDenom===0?D.text3:(chk.aprovados===chkDenom?D.green:chk.aprovados>=chkDenom*0.6?D.gold:D.red)}}>
+                {chkDenom===0?"sem dado":`${chk.aprovados} de ${chkDenom} avaliados`}</p>
+              {/* ausência de dado é reportada À PARTE, nunca somada como reprovação */}
+              {chk.sem_dado>0&&<p style={{margin:0,fontSize:11,color:D.text3}}>{chk.sem_dado} sem dado na fonte</p>}
+              <button onClick={()=>setChkAberto(v=>!v)} style={{marginTop:8,padding:"5px 10px",fontSize:11,fontWeight:600,borderRadius:7,border:`1px solid ${D.border}`,background:"transparent",color:D.text2,cursor:"pointer"}}>
+                {chkAberto?"Recolher":"Ver os 8 critérios"}</button>
+            </div>
+          </div>
+
+          {/* ── Checklist detalhado ──────────────────────────────────────── */}
+          {chkAberto&&<div style={{background:D.bg2,border:`1px solid ${D.border}`,borderRadius:12,padding:"12px 14px",marginBottom:14}}>
+            {chk.criterios.map(c=>{
+              const simbolo=!c.ligado?"○":c.passou===true?"✓":c.passou===false?"✗":"—";
+              const cor=!c.ligado?D.text3:c.passou===true?D.green:c.passou===false?D.red:D.text3;
+              return <div key={c.id} style={{display:"flex",alignItems:"flex-start",gap:9,padding:"8px 0",borderBottom:`1px solid ${D.border}`,opacity:c.ligado?1:0.45}}>
+                <span style={{fontSize:14,fontWeight:800,color:cor,width:15,flexShrink:0,lineHeight:"18px"}}>{simbolo}</span>
+                <div style={{flex:1,minWidth:0}}>
+                  <p style={{margin:0,fontSize:12,color:D.text,fontWeight:600}}>{c.nome}<Ajuda k={AJUDA_CRIT[c.id]}/></p>
+                  {/* o VALOR sempre visível: sem ele não dá para ver que a CXSE3
+                      passa em "> 5 anos" por 3 meses (5,3) */}
+                  <p style={{margin:"2px 0 0",fontSize:11,color:D.text3}}>{c.detalhe}</p>
+                </div>
+                <button onClick={()=>salvarCfg({...cfgChk,criterios:{...cfgChk.criterios,[c.id]:!c.ligado}})}
+                  title={c.ligado?"Desligar (sai do placar)":"Ligar"}
+                  style={{flexShrink:0,width:34,height:19,borderRadius:19,border:"none",cursor:"pointer",padding:0,background:c.ligado?D.green:D.bg3,position:"relative",transition:"background .2s"}}>
+                  <span style={{position:"absolute",top:2,left:c.ligado?17:2,width:15,height:15,borderRadius:"50%",background:"#fff",transition:"left .2s"}}/>
+                </button>
+              </div>;
+            })}
+            <div style={{display:"flex",alignItems:"center",gap:8,paddingTop:10,flexWrap:"wrap"}}>
+              <span style={{fontSize:11,color:D.text2}}>Corte de liquidez<Ajuda k="liquidez_diaria"/></span>
+              <input type="number" value={cfgChk.corte_liquidez} min={0} step={100000}
+                onChange={e=>salvarCfg({...cfgChk,corte_liquidez:Math.max(0,+e.target.value||0)})}
+                style={{width:120,padding:"4px 8px",fontSize:11,background:D.bg3,border:`1px solid ${D.border}`,borderRadius:7,color:D.text}}/>
+              <span style={{fontSize:11,color:D.text3}}>{currency}/dia</span>
+            </div>
+            {/* Deixa explícito que faltam 2 por LIMITE DE FONTE, não por descuido */}
+            <p style={{margin:"10px 0 0",fontSize:10,color:D.text3,lineHeight:1.5,borderTop:`1px solid ${D.border}`,paddingTop:9}}>
+              2 dos 10 critérios do checklist original não têm fonte confiável e ficaram de fora:
+              <b> lucro nos últimos 20 trimestres</b> (a fonte entrega só 4 trimestres) e
+              <b> payout sustentável</b> (exigiria o nº de ações histórico — com desdobramento na
+              janela o número sai distorcido). Critério que parece dizer algo sem dizer é pior que critério ausente.
+            </p>
+          </div>}
+
           {/* Chips de contexto estilo AGF */}
           <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
             {(dados.max_52!=null||dados.min_52!=null)&&<Chip label="Mín/Máx 52 sem" valor={`${dados.min_52?.toFixed(2)||"—"} / ${dados.max_52?.toFixed(2)||"—"}`}/>}
@@ -594,28 +754,64 @@ function ChartModal({ticker,onClose,currency="A$",market="au",dyAlvo=6}){
           <div style={{display:"flex",gap:6,background:D.bg2,borderRadius:12,padding:"12px 6px",marginBottom:12,border:`1px solid ${D.border}`}}>
             <Var label="Semana" v={dados.var_semana}/><Var label="Mês" v={dados.var_mes}/><Var label="Ano" v={dados.var_ano}/>
           </div>
-          {/* Preço teto */}
-          {teto!=null&&<div style={{background:preco<=teto?D.green+"18":D.red+"18",border:`1px solid ${preco<=teto?D.green:D.red}44`,borderRadius:12,padding:"12px 14px",marginBottom:12}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div><p style={{margin:0,fontSize:11,color:D.text3}}>Preço teto · método Bazin (DY alvo {dyAlvo}%)</p>
-              <p style={{margin:"3px 0 0",fontSize:20,fontWeight:800,color:preco<=teto?D.green:D.red}}>{currency} {teto.toFixed(2)}</p></div>
-              <span style={{fontSize:13,fontWeight:700,color:preco<=teto?D.green:D.red,textAlign:"right"}}>{preco<=teto?"✓ Abaixo\ndo teto":"✗ Acima\ndo teto"}</span>
-            </div>
-          </div>}
-          {/* Seções de indicadores estilo AGF */}
-          <Sec titulo="Indicadores de avaliação">
-            <Lin label="P/L (Preço/Lucro)" valor={dados.pl} cor={dados.pl!=null?(dados.pl<15?D.green:dados.pl>25?D.red:D.text):undefined}/>
-            <Lin label="P/VP (Preço/Valor patrim.)" valor={dados.pvp} cor={dados.pvp!=null?(dados.pvp<1.5?D.green:dados.pvp>3?D.red:D.text):undefined}/>
-          </Sec>
-          <Sec titulo="Indicadores de rentabilidade">
-            <Lin label="ROE (Retorno s/ patrimônio)" valor={dados.roe} suf="%" cor={dados.roe!=null?(dados.roe>15?D.green:dados.roe<8?D.red:D.text):undefined}/>
-            <Lin label="Margem líquida" valor={dados.margem_liquida} suf="%" cor={dados.margem_liquida!=null?(dados.margem_liquida>15?D.green:D.text):undefined}/>
-          </Sec>
-          <Sec titulo="Indicadores de dividendos">
-            <Lin label="Dividend Yield (DY)" valor={dados.dy} suf="%" cor={dados.dy!=null?(dados.dy>=dyAlvo?D.green:D.text):undefined}/>
-            {dados.valor_dividendo!=null&&<Lin label="Dividendo/ação (ano)" valor={dados.valor_dividendo} pre={currency+" "} cor={D.gold}/>}
-          </Sec>
-          <p style={{fontSize:10,color:D.text3,marginTop:6,lineHeight:1.5}}>⚠️ Dados do Yahoo Finance, podem ter atraso. Preço teto é o método Bazin (régua baseada em dividendos), não é recomendação de compra ou venda. Cores são referência geral, não conselho de investimento.</p>
+          {/* Preço teto de Bazin — agora vindo de precoTetoBazin (média de 5 anos) */}
+          {teto!=null
+            ? <div style={{background:preco<=teto?D.green+"18":D.red+"18",border:`1px solid ${preco<=teto?D.green:D.red}44`,borderRadius:12,padding:"12px 14px",marginBottom:12}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+                  <div style={{minWidth:0}}>
+                    <p style={{margin:0,fontSize:11,color:D.text3}}>Preço teto · Bazin (DY alvo {dyAlvo}%)<Ajuda k="bazin"/></p>
+                    <p style={{margin:"3px 0 0",fontSize:20,fontWeight:800,color:preco<=teto?D.green:D.red}}>{currency} {teto.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}</p>
+                    <p style={{margin:"3px 0 0",fontSize:10,color:D.text3}}>média de {bazin.janela} · {currency} {bazin.media_provento?.toLocaleString("pt-BR",{minimumFractionDigits:4,maximumFractionDigits:4})}/ação por ano</p>
+                  </div>
+                  <span style={{fontSize:13,fontWeight:700,color:preco<=teto?D.green:D.red,textAlign:"right",flexShrink:0}}>{preco<=teto?"✓ Abaixo\ndo teto":"✗ Acima\ndo teto"}</span>
+                </div>
+                {/* Bazin pressupõe pagamento consistente — sem isso o teto perde a premissa */}
+                {bazin.historico_com_buraco&&<p style={{margin:"8px 0 0",fontSize:10.5,color:D.gold,lineHeight:1.5,borderTop:`1px solid ${D.border}`,paddingTop:7}}>
+                  ⚠️ A empresa não pagou provento em todos os 5 anos da janela. O teto acima considera o ano sem pagamento como zero, mas o método de Bazin pressupõe pagamento consistente.<Ajuda k="bazin_buraco"/></p>}
+              </div>
+            : <div style={{background:D.bg2,border:`1px solid ${D.border}`,borderRadius:12,padding:"12px 14px",marginBottom:12}}>
+                <p style={{margin:0,fontSize:11,color:D.text3}}>Preço teto · Bazin<Ajuda k="bazin"/></p>
+                <p style={{margin:"3px 0 0",fontSize:13,color:D.text3}}>{bazin.motivo||"sem dado"}</p>
+              </div>}
+
+          {/* ── Quatro blocos. Substituem as antigas Sec de avaliação/rentabilidade/
+              dividendos: mostrar P/L em dois lugares da mesma tela é o que
+              "não espalhar a informação" existe para evitar. ─────────────── */}
+          <Bloco titulo="Valuation" aberto>
+            <LinA label="Nº de Graham" v={graham.numero} pre={currency+" "} ajuda="numero_graham" cor={graham.numero!=null&&preco!=null?(graham.numero>=preco?D.green:D.red):undefined}/>
+            <LinA label="Margem de segurança" v={graham.margem_seguranca_pct} suf="%" dec={1} ajuda="margem_seguranca" cor={graham.margem_seguranca_pct!=null?(graham.margem_seguranca_pct>=0?D.green:D.red):undefined}/>
+            <LinA label="Preço teto (Bazin)" v={bazin.teto} pre={currency+" "} ajuda="bazin" cor={bazin.teto!=null&&preco!=null?(preco<=bazin.teto?D.green:D.red):undefined}/>
+            <LinA label="P/L" v={dados.pl} ajuda="pl" cor={dados.pl!=null?(dados.pl<15?D.green:dados.pl>25?D.red:D.text):undefined}/>
+            <LinA label="P/VP" v={dados.pvp} ajuda="pvp" cor={dados.pvp!=null?(dados.pvp<1.5?D.green:dados.pvp>3?D.red:D.text):undefined}/>
+            <LinA label="PSR (Preço/Receita)" v={dados.psr} ajuda="psr"/>
+            <LinA label="EV/EBITDA" v={dados.ev_ebitda} ajuda="ev_ebitda"/>
+            <LinA label="LPA (Lucro por ação)" v={dados.lpa} pre={currency+" "} ajuda="lpa"/>
+            <LinA label="VPA (Valor patrim. por ação)" v={dados.vpa} pre={currency+" "} ajuda="vpa"/>
+            <LinA label="Dividend Yield" v={dados.dy} suf="%" dec={1} cor={dados.dy!=null?(dados.dy>=dyAlvo?D.green:D.text):undefined}/>
+          </Bloco>
+          <Bloco titulo="Rentabilidade">
+            <LinA label="ROE" v={dados.roe} suf="%" dec={1} ajuda="roe" cor={dados.roe!=null?(dados.roe>15?D.green:dados.roe<8?D.red:D.text):undefined}/>
+            <LinA label="ROIC" v={dados.roic} suf="%" dec={1} ajuda="roic" cor={dados.roic!=null?(dados.roic>10?D.green:D.text):undefined}/>
+            <LinA label="ROA" v={dados.roa} suf="%" dec={1}/>
+            <LinA label="Margem bruta" v={dados.margem_bruta} suf="%" dec={1} ajuda="margens"/>
+            <LinA label="Margem EBIT" v={dados.margem_ebit} suf="%" dec={1}/>
+            <LinA label="Margem líquida" v={dados.margem_liquida} suf="%" dec={1} cor={dados.margem_liquida!=null?(dados.margem_liquida>15?D.green:D.text):undefined}/>
+          </Bloco>
+          <Bloco titulo="Endividamento">
+            <LinA label="Dív. líquida / Patrimônio" v={dados.div_liq_patrim} ajuda="div_liq_patrim" cor={dados.div_liq_patrim!=null?(dados.div_liq_patrim<1?D.green:D.red):undefined}/>
+            <LinA label="Dívida bruta" v={dados.divida_bruta} pre={currency+" "} dec={0}/>
+            <LinA label="Dívida líquida" v={dados.divida_liquida} pre={currency+" "} dec={0}/>
+            <LinA label="Liquidez corrente" v={dados.liquidez_corrente} ajuda="liquidez_corrente" cor={dados.liquidez_corrente!=null?(dados.liquidez_corrente>=1?D.green:D.red):undefined}/>
+            <LinA label="Patrimônio líquido" v={dados.patrim_liq} pre={currency+" "} dec={0}/>
+          </Bloco>
+          <Bloco titulo="Crescimento">
+            <LinA label="Receita (5 anos)" v={dados.cres_rec_5a} suf="%/ano" dec={1} ajuda="cres_rec" cor={dados.cres_rec_5a!=null?(dados.cres_rec_5a>0?D.green:D.red):undefined}/>
+            <LinA label="Lucro (4 anos)" v={cagrLucroTela} suf="%/ano" dec={1} ajuda="cagr_lucro" cor={cagrLucroTela!=null?(cagrLucroTela>0?D.green:D.red):undefined}/>
+            <LinA label="Provento (5 anos)" v={dados.cagr_provento_5a} suf="%/ano" dec={1} ajuda="cagr_provento" cor={dados.cagr_provento_5a!=null?(dados.cagr_provento_5a>0&&dados.pagou_todo_ano_5a?D.green:D.red):undefined}/>
+            <LinA label="Receita (12 meses)" v={dados.receita_liquida_12m} pre={currency+" "} dec={0}/>
+            <LinA label="Lucro líquido (12 meses)" v={dados.lucro_liquido_12m} pre={currency+" "} dec={0}/>
+          </Bloco>
+          <p style={{fontSize:10,color:D.text3,marginTop:6,lineHeight:1.5}}>⚠️ Dados do Fundamentus e Yahoo Finance, podem ter atraso. Graham e Bazin são réguas de referência, não recomendação de compra ou venda. Cores são referência geral, não conselho de investimento.</p>
         </div>}
         {aba==="dividendos"&&<div>
           {dados.prox_dividendo&&<div style={{background:D.green+"18",border:`1px solid ${D.green}44`,borderRadius:12,padding:"12px 14px",marginBottom:14}}>
@@ -1501,7 +1697,7 @@ ${paginas}
 }
 
 // ── Investimentos Tab ─────────────────────────────────────────────────────────
-function InvestimentosTab({data,setData,currency,profileId}){
+function InvestimentosTab({data,setData,currency,profileId,userId}){
   const [view,setView]=useState("classe");
   const [perRF,setPerRF]=useState("mes");
   // Série histórica REAL do BCB (CDI diário + IPCA mensal) — busca 1x, cacheada
@@ -1802,7 +1998,7 @@ function InvestimentosTab({data,setData,currency,profileId}){
   }
 
   return <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
-    {chartTicker&&<ChartModal ticker={chartTicker} currency={currency} market={profileId} onClose={()=>setChartTicker(null)}/>}
+    {chartTicker&&<ChartModal ticker={chartTicker} currency={currency} market={profileId} userId={userId} onClose={()=>setChartTicker(null)}/>}
     <Card glow style={{background:`linear-gradient(135deg,${D.bg3},${D.card2})`,border:`1px solid ${D.blue}33`}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
         <div>
@@ -2786,7 +2982,7 @@ function SplitwiseTab({currency,userEmail,userId}){
 
 
 // ── Análise Tab ───────────────────────────────────────────────────────────────
-function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
+function AnaliseTab({data,setData,investimentos,profileId,market,currency,userId}){
   // Watchlist agora vem do Supabase (data.watchlist), sincroniza entre dispositivos
   const watchlist=data.watchlist||[];
   const setWatchlist=(updater)=>{
@@ -3180,7 +3376,7 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency}){
   const recCor=recScore>=7?D.green:recScore>=5?D.gold:D.red;
 
   return <div style={{display:"flex",flexDirection:"column",gap:"1.25rem"}}>
-    {chartTicker&&<ChartModal ticker={chartTicker} currency={currency} market={market} dyAlvo={dyAlvo} onClose={()=>setChartTicker(null)}/>}
+    {chartTicker&&<ChartModal ticker={chartTicker} currency={currency} market={market} dyAlvo={dyAlvo} userId={userId} onClose={()=>setChartTicker(null)}/>}
     {erro&&<div style={{background:D.red+"22",border:`1px solid ${D.red}44`,borderRadius:10,padding:"10px 14px",fontSize:12,color:D.red,display:"flex",justifyContent:"space-between"}}>{erro}<button onClick={()=>setErro("")} style={{border:"none",background:"none",cursor:"pointer",color:D.red}}>✕</button></div>}
 
     {/* ── NOVO: Chat com Analista IA ───────────────────────────────────────── */}
@@ -4926,9 +5122,9 @@ function AppInner(){
       {tab===1&&<BancosTab data={data} setData={setData} currency={currency}/>}
       {tab===2&&<LancamentosTab data={data} setData={setData} currency={currency} mes={mes} profileId={profileId}/>}
       {tab===3&&<CartaoTab data={data} setData={setData} currency={currency} mes={mes}/>}
-      {tab===4&&<InvestimentosTab data={data} setData={setData} currency={currency} profileId={profileId}/>}
+      {tab===4&&<InvestimentosTab data={data} setData={setData} currency={currency} profileId={profileId} userId={session?.user?.id}/>}
       {tab===5&&<MetasTab data={data} setData={setData} currency={currency}/>}
-      {tab===6&&<AnaliseTab data={data} setData={setData} investimentos={data.investimentos} profileId={profileId} market={profileId} currency={currency}/>}
+      {tab===6&&<AnaliseTab data={data} setData={setData} investimentos={data.investimentos} profileId={profileId} market={profileId} currency={currency} userId={session?.user?.id}/>}
       {tab===7&&<SplitwiseTab currency={currency} userEmail={session?.user?.email} userId={session?.user?.id}/>}
       {tab===8&&<RelatoriosTab data={data} currency={currency}/>}
       {modalPush&&<Modal title="🔔 Notificações" onClose={()=>setModalPush(false)}>

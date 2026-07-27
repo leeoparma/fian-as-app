@@ -858,6 +858,10 @@ export const CHECKLIST_PADRAO={
                             // realista para posição pessoal. Configurável.
 };
 
+// Formata número para pt-BR nos textos de detalhe. O app inteiro usa vírgula
+// decimal; sem isto o checklist mostraria "5.3 anos" ao lado de "430.210.000".
+const _n=(v,dec=1)=>v==null?"":Number(v).toLocaleString("pt-BR",{minimumFractionDigits:dec,maximumFractionDigits:dec});
+
 export function checklistBuyAndHold(dados,config){
   const d=dados||{};
   const cfg={...CHECKLIST_PADRAO,...(config||{})};
@@ -880,7 +884,7 @@ export function checklistBuyAndHold(dados,config){
      valor:anosBolsa,
      // ⚠️ quando anos_bolsa_minimo é true o número é um PISO, não a idade real
      // (o Yahoo tem piso em 2000-02-01). A tela deve dizer "mais de X anos".
-     detalhe:anosBolsa==null?"sem dado":(d.anos_bolsa_minimo?`mais de ${anosBolsa} anos (piso da fonte)`:`${anosBolsa} anos`),
+     detalhe:anosBolsa==null?"sem dado":(d.anos_bolsa_minimo?`mais de ${_n(anosBolsa)} anos (piso da fonte)`:`${_n(anosBolsa)} anos`),
      e_minimo:!!d.anos_bolsa_minimo},
 
     {id:"sem_prejuizo",nome:"Sem prejuízo (4 anos)",   // NÃO é "nunca deu prejuízo"
@@ -895,23 +899,23 @@ export function checklistBuyAndHold(dados,config){
     {id:"provento_crescente",nome:"Provento crescente (5 anos)",
      passou:(cagrProv==null||d.pagou_todo_ano_5a==null)?null:(cagrProv>0&&d.pagou_todo_ano_5a===true),
      valor:cagrProv,
-     detalhe:cagrProv==null?"sem dado":`${cagrProv}%/ano${d.pagou_todo_ano_5a===false?" — mas deixou de pagar em algum ano":""}`},
+     detalhe:cagrProv==null?"sem dado":`${_n(cagrProv)}%/ano${d.pagou_todo_ano_5a===false?" — mas deixou de pagar em algum ano":""}`},
 
     {id:"roe",nome:"ROE acima de 10%",
      passou:roe==null?null:roe>10, valor:roe,
-     detalhe:roe==null?"sem dado":`${roe}%`},
+     detalhe:roe==null?"sem dado":`${_n(roe)}%`},
 
     {id:"divida",nome:"Dívida menor que patrimônio",
      passou:divPat==null?null:divPat<1, valor:divPat,
-     detalhe:divPat==null?"sem dado":`dív. líq./patrim. = ${divPat}`},
+     detalhe:divPat==null?"sem dado":`dív. líq./patrim. = ${_n(divPat,2)}`},
 
     {id:"cresc_receita",nome:"Receita crescente (5 anos)",
      passou:cresRec==null?null:cresRec>0, valor:cresRec,
-     detalhe:cresRec==null?"sem dado":`${cresRec}%/ano`},
+     detalhe:cresRec==null?"sem dado":`${_n(cresRec)}%/ano`},
 
     {id:"cresc_lucro",nome:"Lucro crescente (4 anos)",   // 4, limite da fonte
      passou:cagrL==null?null:cagrL>0, valor:cagrL,
-     detalhe:cagrL==null?"sem dado":`${cagrL}%/ano`},
+     detalhe:cagrL==null?"sem dado":`${_n(cagrL)}%/ano`},
 
     {id:"liquidez",nome:"Liquidez diária",
      passou:vol==null?null:vol>=cfg.corte_liquidez, valor:vol,
