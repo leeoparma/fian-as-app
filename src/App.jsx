@@ -5113,16 +5113,42 @@ function AppInner(){
           const orcTotal=data.orcamentos.reduce((a,o)=>a+(o.valor||0),0);
           const gastoOrcadas=data.orcamentos.reduce((a,o)=>a+txMes.filter(t=>t.tipo==="despesa"&&t.categoria===o.categoria).reduce((s,t)=>s+t.valor,0),0);
           const linhas=data.orcamentos.map(o=>{const gasto=txMes.filter(t=>t.tipo==="despesa"&&t.categoria===o.categoria).reduce((a,t)=>a+t.valor,0);const pctReal=o.valor>0?gasto/o.valor*100:0;return {o,gasto,pctReal,resta:o.valor-gasto};}).sort((a,b)=>b.pctReal-a.pctReal);
-          const sobra=salMensal-totD;
+          // ── Recebido REAL do mês vs base configurada ────────────────────
+          // O card usava só o salário configurado, o que quebra para quem é pago
+          // por semana (mês com 5 pagamentos) ou recebe overtime: julho/2026 AU
+          // mostrava SOBRA de −1.528,98 com a receita real acima do gasto.
+          // `totR` já é a receita do mês pela MESMA totaisTransacoes testada que
+          // alimenta o card "Receitas" — nenhum segundo caminho de cálculo.
+          // Mês recém-começado, sem nada lançado: cai para a base, senão o card
+          // mostraria −100% no dia 1º.
+          const usandoBase=!(totR>0);
+          const refRenda=usandoBase?salMensal:totR;
+          const sobra=refRenda-totD;
+          const pctDe=v=>refRenda>0?Math.round(v/refRenda*100):null;
+          const rotuloRef=usandoBase?"da base":"do recebido";
           return <Card>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
               <p style={{fontSize:13,fontWeight:700,color:D.text,margin:0}}>🎯 Orçamento</p>
               <button onClick={()=>{setSalForm(sal?{valor:sal.valor,freq:sal.freq}:{freq:"semanal"});setModalSal(true);}} style={{border:"none",background:"none",cursor:"pointer",fontSize:11,color:D.blue}}>{salMensal>0?"✏️ salário":"+ definir salário"}</button>
             </div>
-            {salMensal>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:8,marginBottom:12}}>
-              <div style={{background:D.bg3,borderRadius:8,padding:"8px 10px"}}><p style={{margin:0,fontSize:10,color:D.text3}}>SALÁRIO/MÊS</p><p style={{margin:"2px 0 0",fontSize:15,fontWeight:700,color:D.text}}>{fmtM(salMensal,currency)}</p></div>
-              <div style={{background:D.bg3,borderRadius:8,padding:"8px 10px"}}><p style={{margin:0,fontSize:10,color:D.text3}}>GASTO REAL (MÊS)</p><p style={{margin:"2px 0 0",fontSize:15,fontWeight:700,color:totD/salMensal>0.9?D.red:totD/salMensal>0.7?D.gold:D.text}}>{fmtM(totD,currency)}</p><p style={{margin:0,fontSize:10,color:D.text3}}>{Math.round(totD/salMensal*100)}% do salário</p></div>
-              <div style={{background:D.bg3,borderRadius:8,padding:"8px 10px"}}><p style={{margin:0,fontSize:10,color:D.text3}}>SOBRA / POUPANÇA</p><p style={{margin:"2px 0 0",fontSize:15,fontWeight:700,color:sobra>=0?D.green:D.red}}>{fmtM(sobra,currency)}</p><p style={{margin:0,fontSize:10,color:D.text3}}>{Math.round(sobra/salMensal*100)}% do salário</p></div>
+            {refRenda>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:8,marginBottom:12}}>
+              <div style={{background:D.bg3,borderRadius:8,padding:"8px 10px"}}>
+                <p style={{margin:0,fontSize:10,color:D.text3}}>RECEBIDO NO MÊS</p>
+                <p style={{margin:"2px 0 0",fontSize:15,fontWeight:700,color:D.text}}>{fmtM(totR,currency)}</p>
+                {/* a base continua visível: responde "estou no meu padrão?", enquanto
+                    o recebido responde "quanto sobrou?". Editável pelo mesmo ✏️ salário. */}
+                <p style={{margin:0,fontSize:10,color:D.text3}}>{salMensal>0?`base: ${fmtM(salMensal,currency)}`:"sem base definida"}</p>
+              </div>
+              <div style={{background:D.bg3,borderRadius:8,padding:"8px 10px"}}>
+                <p style={{margin:0,fontSize:10,color:D.text3}}>GASTO REAL (MÊS)</p>
+                <p style={{margin:"2px 0 0",fontSize:15,fontWeight:700,color:totD/refRenda>0.9?D.red:totD/refRenda>0.7?D.gold:D.text}}>{fmtM(totD,currency)}</p>
+                <p style={{margin:0,fontSize:10,color:D.text3}}>{pctDe(totD)}% {rotuloRef}</p>
+              </div>
+              <div style={{background:D.bg3,borderRadius:8,padding:"8px 10px"}}>
+                <p style={{margin:0,fontSize:10,color:D.text3}}>SOBRA / POUPANÇA</p>
+                <p style={{margin:"2px 0 0",fontSize:15,fontWeight:700,color:sobra>=0?D.green:D.red}}>{fmtM(sobra,currency)}</p>
+                <p style={{margin:0,fontSize:10,color:D.text3}}>{pctDe(sobra)}% {rotuloRef}</p>
+              </div>
             </div>}
             <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:D.text3,marginBottom:4}}>
               <span>Orçado: <b style={{color:D.text2}}>{fmtM(orcTotal,currency)}</b>{salMensal>0?` · ${Math.round(orcTotal/salMensal*100)}% do salário`:""}</span>
