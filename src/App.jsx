@@ -3723,16 +3723,15 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency,userId
           {w.variacao_dia!=null&&<p style={{margin:"0 0 4px",fontSize:11,fontWeight:600,color:w.variacao_dia>=0?D.green:D.red}}>{w.variacao_dia>=0?"▲":"▼"} {Math.abs(w.variacao_dia).toFixed(2)}%{typeof w.variacao_dia_abs==="number"?` (${w.variacao_dia_abs>=0?"+":"−"}${currency} ${Math.abs(w.variacao_dia_abs).toFixed(2)})`:""} hoje</p>}
           <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
             {w.pl!=null&&<Badge color={D.blue}>P/L {Number(w.pl).toFixed(1)}</Badge>}
-            {w.dy!=null&&<Badge color={D.gold}>DY {Number(w.dy).toFixed(1)}%</Badge>}
           </div>
-          {w.dy!=null&&w.dy>0&&w.preco!=null&&(()=>{
-            const teto=w.preco*(w.dy/dyAlvo);
-            const abaixo=w.preco<=teto;
-            return <div style={{marginTop:5,padding:"4px 6px",borderRadius:6,background:abaixo?D.green+"18":D.red+"18",border:`1px solid ${abaixo?D.green:D.red}44`}}>
-              <p style={{margin:0,fontSize:10,color:D.text3}}>Preço teto ({dyAlvo}% DY)</p>
-              <p style={{margin:0,fontSize:12,fontWeight:700,color:abaixo?D.green:D.red}}>{currency} {teto.toFixed(2)} {abaixo?"✓ abaixo":"✗ acima"}</p>
-            </div>;
-          })()}
+          {/* ⚠️ REMOVIDO em 27/07/2026 — não restaurar. Havia aqui um "Preço teto"
+              calculado como preco*(dy/dyAlvo): fórmula ERRADA (Bazin usa a média
+              de 5 anos, não o provento dos últimos 12 meses) alimentada por um dy
+              que, para papel BR, vinha do askClaude — o /quote devolve dy null
+              para BR, e o fallback pedia o número à IA. Dava veredito OPOSTO ao
+              do raio-X: BBAS3 "✗ acima" (R$19,72) aqui contra "✓ abaixo" (R$51,10)
+              lá. O preço-teto correto vive só no raio-X, via precoTetoBazin, que
+              tem provento_por_ano de verdade. O card não tem esse dado. */}
           {(()=>{
             const alerta=alertaDoTicker(w.ticker);
             const atingido=alertaAtingido(w.ticker,w.preco);
