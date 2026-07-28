@@ -3091,6 +3091,19 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency,userId
 
   async function addWatch(){
     const t=wInput.trim().toUpperCase();
+    if(!t) return;   // Enter no campo vazio criava item com ticker ""
+    // Duplicata: o botão "+ Watchlist" das oportunidades já deduplicava, mas
+    // este caminho não — e WEGE3 acabou entrando 2x na watchlist BR, com dy/roe
+    // diferentes em cada entrada. A checagem vem ANTES do fetch e do askClaude,
+    // então duplicata nem gasta requisição.
+    // `watchlist` já é do perfil ativo (data.watchlist, e data = allData[profileId]),
+    // então PETR4 em br e um mesmo código em us continuam sendo itens distintos.
+    if(watchlist.some(w=>(w.ticker||"").toUpperCase()===t)){
+      setErro(`${t} já está na sua watchlist.`);
+      setWInput("");
+      return;
+    }
+    setErro("");
     setWLoading(true);
     // Busca preço + indicadores fundamentalistas reais do Yahoo (full=true)
     const real=await fetchPrecoReal(t,profileId,true);
