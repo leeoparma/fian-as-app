@@ -3098,15 +3098,17 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency,userId
     // Claude só para nome curto e categoria (e indicadores que o Yahoo não tiver)
     try{
       const mercado=nomeMercadoCurto(profileId);
-      const precisaIA=!obj.pl||!obj.dy||!obj.roe;
-      const txt=await askClaude(`Para o ativo ${t} na bolsa ${mercado}, retorne APENAS JSON: {"nome":"nome curto","categoria":"Banco|Infraestrutura|Fundo Imobiliário|Energia|Tecnologia|Varejo|Saúde|Agronegócio|Mineração|Petróleo|ETF|Exterior|Outros"${precisaIA?',"pl":number_or_null,"dy":number_or_null,"roe":number_or_null':''}}`,300);
+      // ⚠️ A IA responde APENAS nome e categoria — dado qualitativo. NUNCA pedir
+      // indicador numérico aqui: o /quote devolve dy e roe nulos para papel BR e
+      // para ETF australiano, e o fallback que existia pedia esses números ao
+      // askClaude e os gravava no Supabase. Ver CLAUDE.md, regra de segurança 4.
+      const txt=await askClaude(`Para o ativo ${t} na bolsa ${mercado}, retorne APENAS JSON: {"nome":"nome curto","categoria":"Banco|Infraestrutura|Fundo Imobiliário|Energia|Tecnologia|Varejo|Saúde|Agronegócio|Mineração|Petróleo|ETF|Exterior|Outros"}`,300);
       const parsed=JSON.parse(txt);
       obj={...obj,
         nome:(obj.nome&&obj.nome!==t)?obj.nome:(parsed.nome||t),
-        categoria:wCat||parsed.categoria||"Outros",
-        pl:obj.pl??parsed.pl??null,
-        dy:obj.dy??parsed.dy??null,
-        roe:obj.roe??parsed.roe??null};
+        categoria:wCat||parsed.categoria||"Outros"};
+        // pl/dy/roe ficam SÓ com o que veio de fonte real (obj.*). Sem fallback
+        // de IA: campo vazio é honesto, número inventado não.
     }catch{}
     setWatchlist(p=>[...p,obj]);
     setWInput("");setWLoading(false);
@@ -3186,7 +3188,10 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency,userId
     const mercado=nomeMercadoCurto(profileId);
     try{
       // Busca preços reais da watchlist para contexto
-      const precoCtx=watchlist.length>0?`\nAtivos em acompanhamento: ${watchlist.map(w=>`${w.ticker}@${currency}${w.preco||"?"} (P/L:${w.pl||"?"}, DY:${w.dy||"?"}%)`).join(", ")}`:"";
+      // DY fora daqui de propósito: para BR e ETF AU ele vinha da própria IA, e
+      // reinjetá-lo num prompt é alucinação virando entrada de outra alucinação.
+      // P/L fica porque vem da brapi/Yahoo, é dado real.
+      const precoCtx=watchlist.length>0?`\nAtivos em acompanhamento: ${watchlist.map(w=>`${w.ticker}@${currency}${w.preco||"?"} (P/L:${w.pl||"?"})`).join(", ")}`:"";
       const carteiraCtx=investimentos.length>0?`\nCarteira atual: ${investimentos.map(i=>`${i.ticker||i.tipo}:${currency}${i.valorAtual||i.valorInvestido||0}`).join(", ")}`:"";
 
       const res=await fetch(WORKER,{method:"POST",headers:{"Content-Type":"application/json",...authHdr()},body:JSON.stringify({
@@ -3474,7 +3479,7 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency,userId
 
             <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
               <button onClick={()=>addToComp(a.ticker)} style={{border:`1px solid ${D.blue}`,background:"transparent",color:D.blue,borderRadius:6,padding:"3px 10px",fontSize:10,cursor:"pointer"}}>+ Comparar</button>
-              <button onClick={()=>setWatchlist(w=>w.find(x=>x.ticker===a.ticker)?w:[...w,{ticker:a.ticker,nome:a.nome,categoria:a.setor,preco:a.preco,variacao_dia:a.variacao_dia,dy:a.dy,pl:a.pl,currency}])} style={{border:`1px solid ${D.green}`,background:"transparent",color:D.green,borderRadius:6,padding:"3px 10px",fontSize:10,cursor:"pointer"}}>+ Watchlist</button>
+              <button onClick={()=>setWatchlist(w=>w.find(x=>x.ticker===a.ticker)?w:[...w,{ticker:a.ticker,nome:a.nome,categoria:a.setor,preco:a.preco,variacao_dia:a.variacao_dia,currency}])} style={{border:`1px solid ${D.green}`,background:"transparent",color:D.green,borderRadius:6,padding:"3px 10px",fontSize:10,cursor:"pointer"}}>+ Watchlist</button>
               <button onClick={()=>gerarRelatorio(a.ticker)} style={{border:`1px solid ${D.gold}`,background:"transparent",color:D.gold,borderRadius:6,padding:"3px 10px",fontSize:10,cursor:"pointer"}}>📄 Relatório</button>
             </div>
           </div>)}
