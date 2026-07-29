@@ -2380,6 +2380,7 @@ function SplitwiseTab({currency,userEmail,userId}){
   const [mesSel,setMesSel]=useState(()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;}); // "AAAA-MM" recorte do mês (data local)
   const [catView,setCatView]=useState("grupo"); // "grupo" ou nome do membro: pizza por pessoa
   const [catDet,setCatDet]=useState(null); // categoria aberta para ver os lançamentos
+  const [swBusca,setSwBusca]=useState("");   // mesmo padrão da busca da aba Lançamentos
 
   // Ícones por categoria (estilo app oficial)
   const CATS=[
@@ -2796,7 +2797,7 @@ function SplitwiseTab({currency,userEmail,userId}){
         {itens.length===0?<p style={{fontSize:12,color:D.text3}}>Nenhum lançamento nesta categoria neste mês.</p>:itens.map(d=><div key={d.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:`1px solid ${D.border}`,gap:8}}>
           <div style={{flex:1,minWidth:0}}>
             <p style={{margin:0,fontSize:12,color:D.text}}>{d.descricao||"(sem descrição)"}</p>
-            <p style={{margin:"1px 0 0",fontSize:10,color:D.text3}}>{d.data}{d.pagoPor?` · ${d.pagoPor===nomeUser?"você":d.pagoPor} pagou`:""}</p>
+            <p style={{margin:"1px 0 0",fontSize:10,color:D.text3}}>{(d.data||"").split("-").reverse().join("/")}{d.pagoPor?` · ${d.pagoPor===nomeUser?"você":d.pagoPor} pagou`:""}</p>
           </div>
           <span style={{fontSize:13,fontWeight:700,color:D.text}}>{fmtM(d.valor||0,currency)}</span>
         </div>)}
@@ -2830,6 +2831,9 @@ function SplitwiseTab({currency,userEmail,userId}){
 
     <Card>
       <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>Despesas de {labelMes}</p>
+      {/* Mesmo campo, placeholder e critérios da busca da aba Lançamentos —
+          descrição, categoria ou valor. Reusa o padrão em vez de inventar outro. */}
+      {dadosMes.despesas.length>0&&<input placeholder="🔎 Buscar descrição, categoria ou valor…" value={swBusca} onChange={e=>setSwBusca(e.target.value)} style={{width:"100%",padding:"7px 10px",fontSize:12,marginBottom:10}}/>}
       {dadosMes.despesas.length===0&&<p style={{fontSize:13,color:D.text3}}>Nenhuma despesa em {labelMes}. Use ◀ ▶ para trocar de mês ou adicione uma nova.</p>}
       {/* Sem teto: o .slice(0,30) que existia aqui escondia lançamento sem
           avisar — o gráfico de categorias somava tudo e a lista omitia o
@@ -2838,7 +2842,13 @@ function SplitwiseTab({currency,userEmail,userId}){
           a ordem de inserção, então despesa lançada retroativamente subia para
           o topo. Mesmo sort do drill-down por categoria, para os dois
           concordarem. */}
-      {[...dadosMes.despesas].sort((a,b)=>(b.data||"").localeCompare(a.data||"")).map(d=>{
+      {(()=>{
+        const q=swBusca.trim().toLowerCase();
+        const lista=[...dadosMes.despesas]
+          .filter(d=>!q||(d.descricao||"").toLowerCase().includes(q)||(d.categoria||"").toLowerCase().includes(q)||String(d.valor).includes(q))
+          .sort((a,b)=>(b.data||"").localeCompare(a.data||""));
+        if(q&&lista.length===0)return <p style={{fontSize:13,color:D.text3}}>Nenhuma despesa de {labelMes} casa com "{swBusca.trim()}".</p>;
+        return lista.map(d=>{
         const minhaParte=(d.divisao||[]).find(x=>(typeof x==="string"?x:x?.nome)===nomeUser);
         const meuValor=minhaParte?(typeof minhaParte==="string"?(d.valor/d.divisao.length):minhaParte.valor):0;
         const euPaguei=d.pagoPor===nomeUser;
@@ -2848,7 +2858,7 @@ function SplitwiseTab({currency,userEmail,userId}){
           <div style={{width:40,height:40,borderRadius:10,background:corCat(d.categoria)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>{iconeCat(d.categoria)}</div>
           <div style={{flex:1,minWidth:0}}>
             <p style={{margin:0,fontSize:14,fontWeight:600,color:D.text}}>{d.descricao}{(d.historico&&d.historico.length>0)&&<span title="editada" style={{fontSize:10,color:D.text3,marginLeft:6,fontWeight:400}}>✎ editada</span>}</p>
-            <p style={{margin:"2px 0 0",fontSize:11,color:D.text3}}>{d.pagoPor===nomeUser?"Você":d.pagoPor} pagou {fmtM(d.valor,currency)}</p>
+            <p style={{margin:"2px 0 0",fontSize:11,color:D.text3}}>{(d.data||"").split("-").reverse().join("/")} · {d.pagoPor===nomeUser?"Você":d.pagoPor} pagou {fmtM(d.valor,currency)}</p>
           </div>
           <div style={{textAlign:"right",flexShrink:0}}>
             {lent>0.01&&<><p style={{margin:0,fontSize:10,color:D.green}}>você emprestou</p><p style={{margin:0,fontSize:14,fontWeight:700,color:D.green}}>{fmtM(lent,currency)}</p></>}
@@ -2860,7 +2870,8 @@ function SplitwiseTab({currency,userEmail,userId}){
             <button onClick={()=>saveSW({...swData,despesas:swData.despesas.filter(x=>x.id!==d.id)})} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:13}}>🗑</button>
           </div>
         </div>;
-      })}
+        });
+      })()}
     </Card>
 
     {modal==="membros"&&<Modal title="Membros do grupo" onClose={()=>setModal(null)}>
