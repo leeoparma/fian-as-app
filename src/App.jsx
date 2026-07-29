@@ -4306,7 +4306,10 @@ tbody tr:nth-child(even){background:#fafbfc}
         {(R.acoes.length>0||!R.temBaseAcoes)&&<div>
           <p style={{fontSize:11,fontWeight:700,color:D.text2,margin:"0 0 4px"}}>AÇÕES E FUNDOS {R.temBaseAcoes&&R.acoes.some(a=>a.ganho!=null)&&<span style={{color:R.acoesTotalGanho>=0?D.green:D.red}}>{R.acoesTotalGanho>=0?"+":""}{fmtM(R.acoesTotalGanho,currency)} no mês</span>}</p>
           {!R.temBaseAcoes&&<p style={{fontSize:11,color:D.text3,margin:0}}>Primeira base sendo criada — a variação mensal das ações aparece a partir do próximo mês fechado.</p>}
-          {R.acoes.slice(0,8).map((a,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0"}}><span style={{color:D.text2}}>{a.nome}{a.novo?<span style={{color:D.text3,fontSize:10}}> · novo no mês</span>:null}</span>{a.ganho==null?<span style={{color:D.text3,fontSize:11}}>{fmtM(a.valorFim,currency)}</span>:<span style={{fontWeight:600,color:a.ganho>=0?D.green:D.red}}>{a.ganho>=0?"+":""}{fmtM(a.ganho,currency)}</span>}</div>)}
+          {/* sem teto: o cabeçalho acima soma acoesTotalGanho de TODAS as posições,
+              então listar só 8 fazia o total não fechar com a lista, sem avisar.
+              A ordem já vem do calc.mjs (por |ganho| desc), a mesma do total. */}
+          {R.acoes.map((a,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0"}}><span style={{color:D.text2}}>{a.nome}{a.novo?<span style={{color:D.text3,fontSize:10}}> · novo no mês</span>:null}</span>{a.ganho==null?<span style={{color:D.text3,fontSize:11}}>{fmtM(a.valorFim,currency)}</span>:<span style={{fontWeight:600,color:a.ganho>=0?D.green:D.red}}>{a.ganho>=0?"+":""}{fmtM(a.ganho,currency)}</span>}</div>)}
         </div>}
         <div style={{marginTop:10}}>
           <Btn color={D.purple} outline sm onClick={analisarMesIA} disabled={relAiBusy}>{relAiBusy?"Analisando…":"🤖 Analisar meu mês"}</Btn>
@@ -4413,7 +4416,8 @@ tbody tr:nth-child(even){background:#fafbfc}
                 </div>))}
               </div>}
               {!R.temBaseAcoes&&<p style={{fontSize:11,color:D.text3,margin:"0 0 6px"}}>A variação mensal das ações estreia no próximo mês fechado (a base por ativo começou a ser registrada agora).</p>}
-              {R.acoes.length>0&&R.acoes.slice(0,8).map((a,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${D.border}`}}>
+              {/* idem: sem teto, ordem do calc.mjs */}
+              {R.acoes.length>0&&R.acoes.map((a,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${D.border}`}}>
                 <span style={{fontSize:13,color:D.text2}}>{a.nome}{a.novo?<span style={{fontSize:10,color:D.text3}}> · novo no mês</span>:null}</span>
                 {a.ganho==null?<span style={{fontSize:12,color:D.text3}}>{fmtM(a.valorFim,currency)}</span>:<span style={{fontSize:14,fontWeight:700,color:a.ganho>=0?D.green:D.red}}>{a.ganho>=0?"+":""}{fmtM(a.ganho,currency)}</span>}
               </div>))}
