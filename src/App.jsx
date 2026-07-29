@@ -2831,7 +2831,14 @@ function SplitwiseTab({currency,userEmail,userId}){
     <Card>
       <p style={{fontSize:13,fontWeight:700,color:D.text,marginBottom:10}}>Despesas de {labelMes}</p>
       {dadosMes.despesas.length===0&&<p style={{fontSize:13,color:D.text3}}>Nenhuma despesa em {labelMes}. Use ◀ ▶ para trocar de mês ou adicione uma nova.</p>}
-      {[...dadosMes.despesas].reverse().slice(0,30).map(d=>{
+      {/* Sem teto: o .slice(0,30) que existia aqui escondia lançamento sem
+          avisar — o gráfico de categorias somava tudo e a lista omitia o
+          excedente, então o mesmo dado aparecia num lugar e sumia no outro.
+          E ordena por DATA, não por ordem de digitação: o .reverse() invertia
+          a ordem de inserção, então despesa lançada retroativamente subia para
+          o topo. Mesmo sort do drill-down por categoria, para os dois
+          concordarem. */}
+      {[...dadosMes.despesas].sort((a,b)=>(b.data||"").localeCompare(a.data||"")).map(d=>{
         const minhaParte=(d.divisao||[]).find(x=>(typeof x==="string"?x:x?.nome)===nomeUser);
         const meuValor=minhaParte?(typeof minhaParte==="string"?(d.valor/d.divisao.length):minhaParte.valor):0;
         const euPaguei=d.pagoPor===nomeUser;
