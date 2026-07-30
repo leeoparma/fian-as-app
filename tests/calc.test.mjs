@@ -20,6 +20,7 @@ INDICES_RATE,
 compoeFatorDiario,compoeFatorMensal,calcValorAtualRFHistorico,mesclarIPCAcomPrevia,compoeFatorMensalProRata,
 posicaoRV,
 grahamDefensivo,numeroGraham,precoTetoBazin,cagrLucro,checklistBuyAndHold,CHECKLIST_PADRAO,
+tipoFii,metricasImovel,dyFii12m,tendenciaFii,filtraFii,FII_PADRAO,
 } from "../src/calc.mjs";
 
 const aprox=(a,b,tol=0.01)=>assert.ok(Math.abs(a-b)<=tol,`esperado ~${b}, veio ${a}`);
@@ -1309,4 +1310,167 @@ test("checklist: dados vazios não explodem", ()=>{
   assert.equal(r.aprovados,0);
   assert.equal(r.sem_dado,8);
   assert.ok(r.criterios.every(c=>c.passou===null));
+});
+
+// ============================================================================
+// FII — triagem
+// ----------------------------------------------------------------------------
+// ⚠️ Informa decisão de COMPRA. Valores esperados calculados por caminho
+// independente, nunca copiados do que o código produziu.
+// ============================================================================
+
+// série mensal auxiliar: n pagamentos de `v`, terminando em fim (YYYY-MM)
+const serieFii=(n,v,fimAno,fimMes,pular=[])=>{
+  const out=[];
+  for(let i=n-1;i>=0;i--){
+    const t=fimAno*12+(fimMes-1)-i, y=Math.floor(t/12), m=t%12+1;
+    const mk=`${y}-${String(m).padStart(2,"0")}`;
+    if(pular.includes(mk))continue;
+    out.push({data:`${mk}-28`,valor:v});
+  }
+  return out;
+};
+
+// ── Tipo derivado ───────────────────────────────────────────────────────────
+test("FII: tipo vem de Qtd de imóveis, não do campo Segmento", ()=>{
+  // O Segmento do Fundamentus chama MXRF11 (papel) de "Logística" — inservível.
+  assert.equal(tipoFii(60),"tijolo");   // HGLG11
+  assert.equal(tipoFii(0),"papel");     // MXRF11 / KNCR11
+  assert.equal(tipoFii(null),null);     // sem dado ≠ papel
+});
+
+// ── ⚠️ Zero-filler: o teste mais importante deste bloco ─────────────────────
+test("FII de papel: vacância e cap rate vêm NULL, nunca 0", ()=>{
+  // 412 dos 560 fundos trazem vacância 0,00% na tabela; a maioria por não ter
+  // imóvel. Se virasse 0, um filtro "vacância < 5%" os aprovaria como exemplares.
+  const r=metricasImovel(0,0,0);
+  assert.equal(r.vacancia,null);
+  assert.equal(r.cap_rate,null);
+  assert.equal(r.aplicavel,false);
+  assert.notEqual(r.vacancia,0);   // trava explícita contra a regressão
+});
+
+test("FII de tijolo com 0% de vacância é dado REAL, não filler", ()=>{
+  // TRXF11 tem 97 imóveis e 0,00% — totalmente locado. Zerar isso seria perder
+  // informação boa.
+  const r=metricasImovel(97,0,7.7);
+  assert.equal(r.vacancia,0);
+  assert.equal(r.cap_rate,7.7);
+  assert.equal(r.aplicavel,true);
+});
+
+// ── DY calculado ────────────────────────────────────────────────────────────
+test("FII: DY do MXRF11 = 12,40% (soma 1,20 ÷ 9,68)", ()=>{
+  // 12 × 0,10 = 1,20 · 1,20/9,68 = 12,3966…% → 12,40
+  const r=dyFii12m(serieFii(12,0.10,2026,6),9.68);
+  assert.equal(r.soma_12m,1.2);
+  assert.equal(r.dy_pct,12.4);
+  assert.equal(r.meses_pagos,12);
+  assert.equal(r.pagou_todos_12m,true);
+});
+
+test("FII: NUNCA usar o DY publicado — o calculado é outro número", ()=>{
+  // O Fundamentus exibe 13,30% para o MXRF11; o histórico dele dá 12,40%.
+  // Esta asserção existe para travar a tentação de ler o campo pronto.
+  const r=dyFii12m(serieFii(12,0.10,2026,6),9.68);
+  assert.notEqual(r.dy_pct,13.3);
+});
+
+test("FII com menos de 12 meses de histórico: DY null, não parcial", ()=>{
+  // Fundo com 6 meses somaria meio ano e pareceria render metade.
+  const r=dyFii12m(serieFii(6,0.10,2026,6),9.68);
+  assert.equal(r.dy_pct,null);
+  assert.equal(r.soma_12m,null);
+  assert.ok(/menor que 12 meses/.test(r.motivo));
+});
+
+test("FII: mês sem pagamento no meio da série reprova a consistência", ()=>{
+  // 11 pagamentos numa janela de 12 → soma 1,10 → DY 11,36%, mas pagou_todos false
+  const r=dyFii12m(serieFii(24,0.10,2026,6,["2026-02"]),9.68);
+  assert.equal(r.meses_pagos,11);
+  assert.equal(r.pagou_todos_12m,false);
+  assert.equal(r.soma_12m,1.1);
+  assert.equal(r.dy_pct,11.36);
+});
+
+test("FII: janela é trailing 12m, não 'os 12 últimos pagamentos'", ()=>{
+  // Com 24 meses e um buraco, pegar os 12 pagamentos mais recentes alcançaria
+  // 13 meses atrás e inflaria o DY. A janela por mês evita isso.
+  const r=dyFii12m(serieFii(24,0.10,2026,6,["2026-02"]),9.68);
+  assert.equal(r.soma_12m,1.1);      // 11 pagamentos, não 12
+  assert.notEqual(r.soma_12m,1.2);
+});
+
+test("FII: DY sem preço válido devolve null, não Infinity", ()=>{
+  assert.equal(dyFii12m(serieFii(12,0.10,2026,6),0).dy_pct,null);
+  assert.equal(dyFii12m(serieFii(12,0.10,2026,6),null).dy_pct,null);
+});
+
+// ── Tendência ───────────────────────────────────────────────────────────────
+test("FII: tendência compara 12m recentes com os 12 anteriores", ()=>{
+  // 12 × 0,10 = 1,20 contra 12 × 0,08 = 0,96 → (1,20/0,96−1) = +25,0%
+  const h=[...serieFii(12,0.08,2025,6),...serieFii(12,0.10,2026,6)];
+  assert.equal(tendenciaFii(h),25);
+});
+
+test("FII: sem 24 meses não há tendência — null, não zero", ()=>{
+  assert.equal(tendenciaFii(serieFii(12,0.10,2026,6)),null);
+});
+
+// ── Filtro composto ─────────────────────────────────────────────────────────
+const TIJOLO_BOM={papel:"HGLG11",cotacao:105,pvp:0.89,liquidez:3000000,qtd_imoveis:60,
+  vacancia:3.2,cap_rate:7.7,dy_pct:8.57,pagou_todos_12m:true,meses_pagos:12};
+const criF=(r,id)=>r.criterios.find(c=>c.id===id);
+
+test("FII: tijolo bom passa nos 5 critérios", ()=>{
+  const r=filtraFii(TIJOLO_BOM,null);
+  assert.equal(r.tipo,"tijolo");
+  assert.equal(r.aprovado,true);
+  assert.equal(r.aprovados,5);
+  assert.equal(r.sem_dado,0);
+});
+
+test("FII: régua de DY é diferente para papel e tijolo", ()=>{
+  // 9% aprova tijolo (≥8) e reprova papel (≥10) — régua única faria tijolo
+  // parecer sempre pior, já que papel carrega risco de crédito.
+  const tij=filtraFii({...TIJOLO_BOM,dy_pct:9},null);
+  const pap=filtraFii({...TIJOLO_BOM,qtd_imoveis:0,dy_pct:9},null);
+  assert.equal(criF(tij,"dy").passou,true);
+  assert.equal(criF(pap,"dy").passou,false);
+  assert.ok(/tijolo/.test(criF(tij,"dy").nome));
+  assert.ok(/papel/.test(criF(pap,"dy").nome));
+});
+
+test("FII de papel: vacância fica 'sem dado', não aprovada por ter 0%", ()=>{
+  const r=filtraFii({...TIJOLO_BOM,qtd_imoveis:0,vacancia:0,cap_rate:0,dy_pct:12},null);
+  assert.equal(r.tipo,"papel");
+  assert.equal(criF(r,"vacancia").passou,null);   // null, NÃO true
+  assert.equal(r.vacancia,null);
+  assert.equal(r.sem_dado,1);
+  assert.equal(r.aprovado,true);                 // sem dado não reprova
+});
+
+test("FII: P/VP acima do teto reprova", ()=>{
+  assert.equal(criF(filtraFii({...TIJOLO_BOM,pvp:1.30},null),"pvp").passou,false);
+  assert.equal(criF(filtraFii({...TIJOLO_BOM,pvp:1.05},null),"pvp").passou,true); // limite inclusivo
+});
+
+test("FII: critério desligado sai do denominador", ()=>{
+  const r=filtraFii(TIJOLO_BOM,{criterios:{...FII_PADRAO.criterios,vacancia:false,liquidez:false}});
+  assert.equal(r.avaliados,3);
+  assert.equal(r.criterios.length,5);
+  assert.equal(criF(r,"vacancia").ligado,false);
+});
+
+test("FII: corte de liquidez é configurável", ()=>{
+  const f={...TIJOLO_BOM,liquidez:600000};
+  assert.equal(criF(filtraFii(f,null),"liquidez").passou,true);              // padrão 500k
+  assert.equal(criF(filtraFii(f,{liquidez_min:1000000}),"liquidez").passou,false);
+});
+
+test("FII: fundo sem dado nenhum não explode e não aprova por omissão", ()=>{
+  const r=filtraFii({papel:"XXXX11"},null);
+  assert.equal(r.tipo,null);
+  assert.equal(r.sem_dado,5);
+  assert.equal(r.aprovados,0);
 });

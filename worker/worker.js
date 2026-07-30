@@ -1,3 +1,8 @@
+// A matemática de FII vem do calc.mjs — MESMA fonte que o app usa e que os
+// testes cobrem. Duplicar a conta aqui criaria dois caminhos divergentes, que é
+// a classe de bug que já apareceu quatro vezes neste projeto.
+import { dyFii12m, tendenciaFii, filtraFii } from "../src/calc.mjs";
+
 // BRAPI_TOKEN agora vem de env (secret no Cloudflare) — não fica mais no código.
 
 // Supabase (chave anon é pública — usada só para validar o login de quem chama o proxy de IA)
@@ -426,6 +431,119 @@ async function fetchLucroAnual(yfTicker) {
     };
   } catch (erro) {
     console.error("[fetchLucroAnual] falha:", erro?.status, erro?.message || erro);
+    return null;
+  }
+}
+
+// ── FII: tabela geral (560 fundos, 1 requisição) ─────────────────────────────
+// fii_resultado.php. ⚠️ A âncora é id="tabelaResultado" — NÃO é o id="resultado"
+// das ações; são páginas diferentes com estruturas parecidas.
+// Colunas mapeadas por RÓTULO (via <th>), não por posição, para sobreviver a
+// reordenação — mesmo princípio do `pega`.
+//
+// ⚠️ Esta tabela usa ZERO como "sem dado" — não existe um único "-" nela.
+// 412 dos 560 trazem vacância 0,00%, a maioria por não ter imóvel nenhum.
+// A normalização NÃO decide isso aqui: entrega o número cru e o qtd_imoveis,
+// e a guarda (metricasImovel, em calc.mjs) resolve com teste cobrindo.
+async function fetchFiiTabela() {
+  try {
+    const r = await fetch("https://www.fundamentus.com.br/fii_resultado.php", {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "pt-BR,pt;q=0.9",
+      },
+    });
+    if (!r.ok) { console.error("[fetchFiiTabela] HTTP", r.status); return null; }
+    const html = await lerHtml(r);
+    const bloco = html.match(/<table[^>]*id="tabelaResultado"[^>]*>([\s\S]*?)<\/table>/i);
+    if (!bloco) { console.error("[fetchFiiTabela] tabela não encontrada — layout mudou?"); return null; }
+
+    const limpo = (x) => x.replace(/<[^>]+>/g, "").trim();
+    const cabecalhos = [...bloco[1].matchAll(/<th[^>]*>([\s\S]*?)<\/th>/gi)].map(m => limpo(m[1]));
+    const col = {};
+    cabecalhos.forEach((h, i) => { col[h] = i; });
+    const idx = (nome) => (col[nome] != null ? col[nome] : -1);
+    const num = (s) => {
+      if (s == null || s === "" || s === "-") return null;
+      const n = parseFloat(String(s).replace(/%/g, "").replace(/\./g, "").replace(/,/g, ".").trim());
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const fundos = [];
+    for (const L of bloco[1].matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)) {
+      const tds = [...L[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map(m => limpo(m[1]));
+      if (tds.length < cabecalhos.length - 1) continue;
+      const g = (nome) => { const i = idx(nome); return i >= 0 ? tds[i] : null; };
+      const papel = g("Papel");
+      if (!papel || !/^[A-Z0-9]{4,6}$/i.test(papel)) continue;
+      const cotacao = num(g("Cotação")), pvp = num(g("P/VP"));
+      fundos.push({
+        papel,
+        cotacao,
+        pvp,
+        // VP/Cota não vem na tabela, mas sai de Cotação ÷ P/VP — mesmo truque
+        // que derivou LPA e VPA para ações, verificado contra valores reais.
+        vp_cota: (cotacao != null && pvp) ? Math.round((cotacao / pvp) * 100) / 100 : null,
+        ffo_yield: num(g("FFO Yield")),
+        // ⚠️ dy_fonte é o DY PUBLICADO e NÃO deve ser exibido: não é reproduzível
+        // (MXRF11 dá 13,3% aqui, 12,4% pelo histórico). Fica só para diagnóstico.
+        dy_fonte: num(g("Dividend Yield")),
+        valor_mercado: num(g("Valor de Mercado")),
+        liquidez: num(g("Liquidez")),
+        qtd_imoveis: num(g("Qtd de imóveis")),
+        preco_m2: num(g("Preço do m2")),
+        aluguel_m2: num(g("Aluguel por m2")),
+        cap_rate: num(g("Cap Rate")),
+        vacancia: num(g("Vacância Média")),
+        // ⚠️ segmento_fonte é NÃO CONFIÁVEL: chama MXRF11 (papel) de "Logística"
+        // e joga 56% do universo em "Multicategoria"/"Outros". Nunca exibir como
+        // classificação — o tipo é derivado de qtd_imoveis no calc.mjs.
+        segmento_fonte: g("Segmento") || null,
+      });
+    }
+    if (!fundos.length) { console.error("[fetchFiiTabela] nenhuma linha reconhecida"); return null; }
+    return fundos;
+  } catch (erro) {
+    console.error("[fetchFiiTabela] falha:", erro?.status, erro?.message || erro);
+    return null;
+  }
+}
+
+// ── FII: histórico mensal de rendimentos (1 requisição POR fundo) ────────────
+// fii_proventos.php. Âncora id="resultado". ~113 pagamentos, 10 anos, mensais,
+// tipo único "Rendimento" (FII não tem JCP). Diferente da página de ações, NÃO
+// há tabela agregada por ano — a soma é nossa, no calc.mjs.
+async function fetchFiiProventos(papel) {
+  try {
+    const p = String(papel || "").toUpperCase();
+    const r = await fetch(
+      `https://www.fundamentus.com.br/fii_proventos.php?papel=${encodeURIComponent(p)}&tipo=2`,
+      {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "Accept": "text/html,application/xhtml+xml",
+          "Accept-Language": "pt-BR,pt;q=0.9",
+        },
+      }
+    );
+    if (!r.ok) { console.error("[fetchFiiProventos] HTTP", r.status, "para", p); return null; }
+    const html = await lerHtml(r);
+    const bloco = html.match(/<table[^>]*id="resultado"[^>]*>([\s\S]*?)<\/table>/i);
+    if (!bloco) { console.error("[fetchFiiProventos] tabela não encontrada para", p); return null; }
+    const out = [];
+    for (const L of bloco[1].matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)) {
+      const tds = [...L[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map(m => m[1].replace(/<[^>]+>/g, "").trim());
+      if (tds.length < 4) continue;
+      const m = (tds[0] || "").match(/^(\d{2})\/(\d{2})\/(\d{4})$/);   // data-com
+      if (!m) continue;
+      const v = parseFloat((tds[3] || "").replace(/\./g, "").replace(/,/g, "."));
+      if (!Number.isFinite(v)) continue;
+      out.push({ data: `${m[3]}-${m[2]}-${m[1]}`, valor: v });
+    }
+    return out.length ? out : null;
+  } catch (erro) {
+    console.error("[fetchFiiProventos] falha:", erro?.status, erro?.message || erro);
     return null;
   }
 }
@@ -905,6 +1023,101 @@ export default {
       return new Response(JSON.stringify({ _v: "fatos-utf8-v3", papel, count: fatos.length, fatos }), {
         status: 200, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...CORS }
       });
+    }
+
+    // GET /fii-triagem — varre os 560 FIIs e devolve os candidatos
+    // FUNIL (a ordem importa): filtra primeiro pela TABELA, que é 1 requisição
+    // para o universo inteiro; só depois busca o histórico de rendimentos dos
+    // sobreviventes. Calcular DY para 560 fundos seriam 560 requisições —
+    // inviável, e bloquearia o Fundamentus, que é a fonte de TODO indicador BR
+    // do app.
+    //
+    // ⚠️ Workers têm teto de 50 subrequisições por requisição. Com 1 da tabela,
+    // o limite prático de enriquecidos é ~45 — daí o `max` com teto rígido.
+    if (request.method === "GET" && url.pathname === "/fii-triagem") {
+      const nOr = (v, d) => { const n = parseFloat(v); return Number.isFinite(n) ? n : d; };
+      const cfg = {
+        pvp_max: nOr(url.searchParams.get("pvp_max"), 1.05),
+        liquidez_min: nOr(url.searchParams.get("liq_min"), 500000),
+        dy_min_tijolo: nOr(url.searchParams.get("dy_tijolo"), 8),
+        dy_min_papel: nOr(url.searchParams.get("dy_papel"), 10),
+      };
+      // ⚠️ Workers cortam em 50 SUBREQUISIÇÕES por invocação — e cache.match e
+      // cache.put CONTAM. Fundo frio custa 3 (match + fetch + put); fundo já
+      // cacheado custa 1. Por isso não dá para fixar um `max`: 40 fundos frios
+      // seriam ~123 subrequisições e a rota morria com "Too many subrequests"
+      // (medido em produção). Em vez de um teto arbitrário, gastamos um
+      // ORÇAMENTO e paramos antes de estourar, avisando no `truncado`.
+      const max = Math.max(1, nOr(url.searchParams.get("max"), 40));
+      let orcamento = 44;   // margem de 6 sobre o limite de 50
+      const cache = caches.default;
+      const JH = { "Content-Type": "application/json; charset=utf-8", ...CORS };
+
+      try {
+        // ── tabela: cache de edge por 12h (mesmo padrão do /bcb-serie).
+        // Guarda o JSON já processado (~50KB), não o HTML de 495KB.
+        const kTab = new Request("https://cache.local/fii-tabela-v1", { method: "GET" });
+        let tabela = null;
+        const hit = await cache.match(kTab); orcamento--;
+        if (hit) tabela = await hit.json();
+        if (!tabela) {
+          tabela = await fetchFiiTabela(); orcamento--;
+          if (!tabela) return new Response(JSON.stringify({ error: "não consegui ler a tabela de FIIs" }), { status: 503, headers: JH });
+          await cache.put(kTab, new Response(JSON.stringify(tabela), {
+            headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "public, max-age=43200" },
+          })); orcamento--;
+        }
+
+        // ── etapa 1 (grátis): só o que a tabela responde
+        const pre = tabela.filter(f =>
+          f.pvp != null && f.pvp > 0 && f.pvp <= cfg.pvp_max &&
+          f.liquidez != null && f.liquidez >= cfg.liquidez_min
+        ).sort((a, b) => (b.liquidez || 0) - (a.liquidez || 0));
+        const alvo = pre.slice(0, max);
+
+        // ── etapa 2: histórico só dos sobreviventes, também cacheado por 12h
+        const enriquecidos = [];
+        let faltouOrcamento = false;
+        for (const f of alvo) {
+          // precisa caber o pior caso deste fundo (match + fetch + put)
+          if (orcamento < 3) { faltouOrcamento = true; break; }
+          const kP = new Request(`https://cache.local/fii-prov-v1/${encodeURIComponent(f.papel)}`, { method: "GET" });
+          let hist = null;
+          const h2 = await cache.match(kP); orcamento--;
+          if (h2) hist = await h2.json();
+          if (!hist) {
+            hist = await fetchFiiProventos(f.papel); orcamento--;
+            if (hist) { await cache.put(kP, new Response(JSON.stringify(hist), {
+              headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "public, max-age=43200" },
+            })); orcamento--; }
+          }
+          const dy = dyFii12m(hist, f.cotacao);
+          enriquecidos.push(filtraFii({
+            ...f,
+            dy_pct: dy.dy_pct, meses_pagos: dy.meses_pagos, pagou_todos_12m: dy.pagou_todos_12m,
+            dy_janela: dy.janela, dy_motivo: dy.motivo,
+            tendencia_pct: tendenciaFii(hist),
+          }, cfg));
+        }
+
+        const aprovados = enriquecidos.filter(f => f.aprovado);
+        return new Response(JSON.stringify({
+          gerado_em: new Date().toISOString(),
+          universo: tabela.length,
+          apos_filtro_tabela: pre.length,
+          enriquecidos: enriquecidos.length,
+          // honesto: diz que sobrou fila E por qual motivo. Chamar de novo
+          // aproveita o cache já aquecido e avança mais.
+          truncado: pre.length > enriquecidos.length,
+          truncado_por: faltouOrcamento ? "limite de subrequisições — chame de novo para avançar (o cache já aqueceu)" : (pre.length > alvo.length ? "parâmetro max" : null),
+          config: cfg,
+          aprovados,
+          reprovados: enriquecidos.filter(f => !f.aprovado),
+        }), { status: 200, headers: { ...JH, "Cache-Control": "no-store" } });
+      } catch (erro) {
+        console.error("[fii-triagem] falha:", erro?.status, erro?.message || erro);
+        return new Response(JSON.stringify({ error: "falha na triagem de FIIs" }), { status: 500, headers: JH });
+      }
     }
 
     // GET /news — manchetes (3 países) + fatos relevantes (só BR)

@@ -932,3 +932,142 @@ export function checklistBuyAndHold(dados,config){
     corte_liquidez:cfg.corte_liquidez,
   };
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FII — triagem (fundos imobiliários)
+// ═══════════════════════════════════════════════════════════════════════════
+// ⚠️ NÃO reaproveitar Graham, Bazin nem o checklist Buy and Hold aqui. FII é
+// outro regime: FFO no lugar de lucro, VP/Cota no lugar de VPA, distribuição
+// obrigatória por lei (95% do lucro semestral) no lugar de política de
+// dividendos, e "ROE > 10%" não tem equivalente. Aplicar as réguas de ação a
+// FII produz número plausível e ERRADO — a mesma falha que tirou o DY de IA
+// da watchlist.
+
+// ── Tipo do fundo ───────────────────────────────────────────────────────────
+// O campo "Segmento" do Fundamentus é inservível: classifica MXRF11 (fundo de
+// papel/CRI) como "Logística", e joga 56% do universo em "Multicategoria"/
+// "Outros". Derivar de Qtd de imóveis é confiável e verificável.
+// ⚠️ Limite honesto: sem imóveis NÃO distingue fundo de papel de FoF — os dois
+// caem em "papel". A tabela não tem como separar, então o rótulo é o que dá
+// para sustentar, não o que seria ideal.
+export function tipoFii(qtdImoveis){
+  if(qtdImoveis==null||!Number.isFinite(qtdImoveis))return null;
+  return qtdImoveis>0?"tijolo":"papel";
+}
+
+// ── Guarda do zero-filler (4ª vez nesta base) ───────────────────────────────
+// Vacância e Cap Rate só existem como conceito para quem TEM imóvel. Na tabela
+// geral, 412 dos 560 fundos trazem vacância 0,00% — a maioria por não ter
+// imóvel nenhum. Um filtro "vacância < 5%" aprovaria esses 412 como se fossem
+// exemplares. Zero de fundo de papel não é excelência, é ausência de conceito.
+// Fundo de tijolo COM 0% é real (totalmente locado, ex.: TRXF11 com 97 imóveis)
+// e por isso o corte é pela contagem de imóveis, nunca pelo valor lido.
+export function metricasImovel(qtdImoveis,vacancia,capRate){
+  const temImovel=Number.isFinite(qtdImoveis)&&qtdImoveis>0;
+  return {
+    vacancia: temImovel?(Number.isFinite(vacancia)?vacancia:null):null,
+    cap_rate: temImovel?(Number.isFinite(capRate)?capRate:null):null,
+    aplicavel: temImovel,
+  };
+}
+
+// ── DY de 12 meses, calculado do histórico ──────────────────────────────────
+// ⚠️ NUNCA usar o campo "Div. Yield" pronto do Fundamentus: ele não é
+// reproduzível. Para MXRF11 os próprios dados deles dão três respostas —
+// soma dos 12 rendimentos ÷ preço = 12,40%, Dividendo/cota ÷ preço = 12,19%,
+// e o campo exibido diz 13,30%. Ferramenta de decisão não pode exibir número
+// que não se consegue refazer.
+//
+// Janela de 12 meses ENCERRADA no último pagamento (trailing 12m), não "os 12
+// pagamentos mais recentes": fundo que pulou meses somaria menos, que é o
+// correto — pegar os 12 últimos alcançaria 14 meses atrás e inflaria o DY,
+// o mesmo erro que a média de Bazin evita ao dividir sempre por 5.
+// historico: [{data:"YYYY-MM-DD", valor:number}]
+export function dyFii12m(historico,preco){
+  const h=(historico||[]).filter(p=>p&&typeof p.data==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(p.data)&&Number.isFinite(p.valor))
+    .sort((a,b)=>a.data.localeCompare(b.data));
+  const vazio={dy_pct:null,soma_12m:null,meses_pagos:0,pagou_todos_12m:false,janela:null,motivo:"sem histórico"};
+  if(!h.length)return vazio;
+  // Aritmética de MÊS, não de data: 12 pagamentos mensais vão do mês M-11 ao M,
+  // então comparar datas exatas rejeitaria um histórico completo por um dia.
+  const mnum=d=>{const[y,m]=d.split("-").map(Number);return y*12+(m-1);};
+  const fimM=mnum(h[h.length-1].data), iniM=fimM-11;
+  // Histórico que não alcança 12 meses: null, NUNCA um DY parcial anualizado —
+  // fundo com 6 meses de vida somaria meio ano e pareceria render metade.
+  if(fimM-mnum(h[0].data)+1<12)return {...vazio,motivo:"histórico menor que 12 meses"};
+  const janela=h.filter(p=>{const m=mnum(p.data);return m>=iniM&&m<=fimM;});
+  const soma=janela.reduce((s,p)=>s+p.valor,0);
+  const meses=new Set(janela.map(p=>p.data.slice(0,7))).size;
+  const rot=m=>`${Math.floor(m/12)}-${String(m%12+1).padStart(2,"0")}`;
+  return {
+    dy_pct:(Number.isFinite(preco)&&preco>0)?Math.round((soma/preco*100)*100)/100:null,
+    soma_12m:Math.round(soma*10000)/10000,
+    meses_pagos:meses,
+    pagou_todos_12m:meses===12,   // o critério que mais separa FII bom de armadilha
+    janela:`${rot(iniM)} → ${rot(fimM)}`,
+    motivo:null,
+  };
+}
+
+// ── Tendência da distribuição ───────────────────────────────────────────────
+// Compara a soma dos últimos 12 meses com os 12 anteriores. Com 10 anos de
+// histórico dá para ver se o rendimento cresce, estagna ou encolhe.
+export function tendenciaFii(historico){
+  const h=(historico||[]).filter(p=>p&&/^\d{4}-\d{2}-\d{2}$/.test(p.data||"")&&Number.isFinite(p.valor))
+    .sort((a,b)=>a.data.localeCompare(b.data));
+  if(h.length<4)return null;
+  const mnum=d=>{const[y,m]=d.split("-").map(Number);return y*12+(m-1);};
+  const fimM=mnum(h[h.length-1].data);
+  if(fimM-mnum(h[0].data)+1<24)return null;   // sem 24 meses não há o que comparar
+  const soma=(de,ate)=>h.filter(p=>{const m=mnum(p.data);return m>=de&&m<=ate;}).reduce((s,p)=>s+p.valor,0);
+  const a1=soma(fimM-11,fimM), a2=soma(fimM-23,fimM-12);
+  if(!(a2>0)||!(a1>0))return null;            // sem base de comparação: null, não 0
+  return Math.round(((a1/a2-1)*100)*10)/10;
+}
+
+// ── Configuração da triagem ─────────────────────────────────────────────────
+export const FII_PADRAO={
+  criterios:{pvp:true,dy:true,liquidez:true,consistencia:true,vacancia:true},
+  pvp_max:1.05,          // abaixo de 1,00 é o clássico, mas corta bons com ágio pequeno
+  dy_min_tijolo:8,       // %
+  dy_min_papel:10,       // papel exige mais porque carrega risco de crédito —
+                         // régua única faria tijolo parecer sempre pior
+  liquidez_min:500000,   // R$/dia. FII é menos líquido que ação (o padrão de
+                         // ações é 1M); configurável.
+  vacancia_max:10,       // % — só se aplica a tijolo
+};
+
+// ── Filtro composto ─────────────────────────────────────────────────────────
+// `f` é o fundo já normalizado: {papel,cotacao,pvp,liquidez,qtd_imoveis,
+//  vacancia,cap_rate,dy_pct,pagou_todos_12m}
+// passou: true | false | null (null = sem dado, NÃO conta como reprovado)
+export function filtraFii(f,config){
+  const cfg={...FII_PADRAO,...(config||{})};
+  const lig={...FII_PADRAO.criterios,...((config||{}).criterios||{})};
+  const n=v=>Number.isFinite(v)?v:null;
+  const tipo=tipoFii(n(f?.qtd_imoveis));
+  const im=metricasImovel(n(f?.qtd_imoveis),n(f?.vacancia),n(f?.cap_rate));
+  const pvp=n(f?.pvp), liq=n(f?.liquidez), dy=n(f?.dy_pct);
+  const dyMin=tipo==="papel"?cfg.dy_min_papel:cfg.dy_min_tijolo;
+
+  const defs=[
+    {id:"pvp",nome:`P/VP até ${cfg.pvp_max}`,passou:pvp==null?null:pvp<=cfg.pvp_max,valor:pvp},
+    {id:"dy",nome:`DY 12m ≥ ${dyMin}% (${tipo||"?"})`,passou:dy==null?null:dy>=dyMin,valor:dy},
+    {id:"liquidez",nome:"Liquidez diária",passou:liq==null?null:liq>=cfg.liquidez_min,valor:liq},
+    {id:"consistencia",nome:"Pagou nos 12 meses",passou:f?.pagou_todos_12m==null?null:!!f.pagou_todos_12m,valor:f?.meses_pagos??null},
+    // vacância só entra para quem tem imóvel; para papel é null (não avaliado),
+    // nunca "aprovado por ter 0%"
+    {id:"vacancia",nome:"Vacância",passou:!im.aplicavel?null:(im.vacancia==null?null:im.vacancia<=cfg.vacancia_max),valor:im.vacancia},
+  ];
+  const criterios=defs.map(c=>({...c,ligado:lig[c.id]!==false}));
+  const ativos=criterios.filter(c=>c.ligado);
+  return {
+    ...f, tipo, vacancia:im.vacancia, cap_rate:im.cap_rate,
+    criterios,
+    aprovados:ativos.filter(c=>c.passou===true).length,
+    avaliados:ativos.length,
+    sem_dado:ativos.filter(c=>c.passou===null).length,
+    // aprovado = nenhum critério ligado REPROVOU (sem dado não reprova)
+    aprovado:ativos.every(c=>c.passou!==false),
+  };
+}
