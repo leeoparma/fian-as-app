@@ -16,6 +16,7 @@ rentabilidadeAcoesDesdeInicio, rentabilidadeAcoes,
 isRFAtivo,
 calcValorLiquidoRF,
 grahamDefensivo, numeroGraham, precoTetoBazin, checklistBuyAndHold, CHECKLIST_PADRAO, cagrLucro,
+filtraFii, FII_PADRAO,
 } from "./calc.mjs";
 
 // Chave pública VAPID (par gerado para este app; a privada é secret no Cloudflare)
@@ -308,6 +309,11 @@ const kSwSolicitado=userId=>`sw_solicitado:${userId}`;
 // decisão do sw_*: a proteção vem do escopo, não de apagar; limpar só faria o
 // usuário reconfigurar o método a cada sessão.
 const kChecklistConfig=userId=>`checklist_config:${userId}`;
+// Config da triagem de FIIs. QUARTA vez que este padrão aparece — nasce
+// escopada. Não é limpa no logout, mesma decisão do sw_* e do
+// kChecklistConfig: a proteção vem do escopo, não de apagar, e config de
+// método deve sobreviver entre sessões da mesma conta.
+const kFiiConfig=userId=>`fii_config:${userId}`;
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,5);
 const fmtM=(v,cur="R$")=>cur+" "+Number(v||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtPct=v=>v!=null?Number(v).toFixed(2)+"%":"—";
@@ -489,6 +495,20 @@ function TVWidget({type,config}){
 // Liga cada critério do checklist ao seu verbete de ajuda acima.
 const AJUDA_CRIT={anos_bolsa:"anos_bolsa",sem_prejuizo:"sem_prejuizo",provento_crescente:"cagr_provento",
   roe:"roe",divida:"div_liq_patrim",cresc_receita:"cres_rec",cresc_lucro:"cagr_lucro",liquidez:"liquidez_diaria"};
+// Ajuda da triagem de FII. ESCRITOS À MÃO, como os de ações — não gerar por
+// IA (a feature "Como uso meu dinheiro" saiu daqui por erro factual de IA).
+// Formato: o que é · como ler · a armadilha.
+const AJUDA_FII={
+  tipo:"Fundo de TIJOLO tem imóveis (galpões, lajes, shoppings) e ganha com aluguel. Fundo de PAPEL não tem imóvel: compra dívida imobiliária (CRI) e ganha com juros. São riscos diferentes — tijolo sofre com vacância e desvalorização, papel sofre com calote e queda de juros. Armadilha: o campo 'Segmento' da fonte erra feio (classifica fundo de papel como 'Logística') e joga metade do universo em rótulos vazios. Aqui o tipo é DEDUZIDO da quantidade de imóveis, não copiado. Limite honesto: sem imóveis não dá para separar fundo de papel de fundo de fundos (FoF).",
+  pvp:"Quanto você paga por cada real de patrimônio do fundo. Abaixo de 1,00 significa comprar os ativos por menos que o valor contábil. Armadilha: P/VP baixo pode indicar problema — imóvel mal avaliado, inquilino saindo, ou fundo em dificuldade. Barato nem sempre é bom.",
+  dy:"Rendimento distribuído nos últimos 12 meses dividido pelo preço da cota. Em FII a distribuição é obrigatória por lei (95% do lucro semestral), então o DY tende a ser mais alto e mais estável que em ação. Armadilha: este número é CALCULADO aqui a partir do histórico mês a mês. A fonte publica um DY próprio que não bate com os dados dela mesma — para o MXRF11 são três respostas diferentes. Um DY muito acima dos pares costuma ser preço caindo, não fundo generoso.",
+  vacancia:"Percentual de área desocupada nos imóveis do fundo. Só faz sentido para fundo de tijolo. Armadilha: fundo de papel aparece com vacância 0% em muitas fontes — isso não é excelência, é ausência de imóvel. Este app OMITE o campo nesses casos em vez de mostrar zero.",
+  cap_rate:"Retorno anual dos imóveis sobre o valor deles — o aluguel dividido pelo preço do patrimônio. Ajuda a ver se o fundo comprou bem. Armadilha: como a vacância, só existe para tijolo, e depende de reavaliações patrimoniais que nem sempre acompanham o mercado.",
+  liquidez:"Volume financeiro negociado por dia. FII costuma ser bem menos líquido que ação — muitos quase não giram. Armadilha: cota ilíquida é fácil de comprar e difícil de vender pelo preço justo. O corte adequado depende do tamanho da sua posição, por isso é configurável aqui.",
+  consistencia:"Em quantos dos últimos 12 meses o fundo efetivamente distribuiu rendimento. 12/12 é o esperado de um FII saudável. Armadilha: mês sem distribuição costuma ser o primeiro sinal de problema, e some numa média anual — por isso mostramos a contagem, não só o DY.",
+  truncado:"A varredura lê os 560 FIIs de uma vez, mas buscar o histórico de rendimentos custa uma requisição por fundo, e a plataforma limita quantas cabem numa chamada. Os fundos já consultados ficam em cache por 12h, então chamar de novo avança a fila e fica mais rápido.",
+};
+
 const AJUDA={
   graham_defensivo:"Filtro de preço de Benjamin Graham: P/L abaixo de 15 e P/VP abaixo de 1,5. O teste que ele de fato aplicava é o PRODUTO dos dois abaixo de 22,5, que permite compensar — P/L alto com P/VP muito baixo ainda passa. Armadilha: múltiplo negativo não é múltiplo baixo. Empresa com prejuízo (P/L negativo) ou patrimônio negativo é marcada como inaplicável, não como barata.",
   numero_graham:"Estimativa de valor justo para empresas lucrativas e estáveis: √(22,5 × LPA × VPA). Se o preço está abaixo, existe margem de segurança. Armadilha: não se aplica a empresa com prejuízo (LPA negativo), nem a empresa de crescimento acelerado — Graham desenhou isso para companhias maduras, e uma empresa que cresce rápido quase sempre parece 'cara' por esta régua.",
@@ -520,9 +540,9 @@ const AJUDA={
 // e remontaria — e o estado interno (tooltip aberto, bloco expandido) seria
 // perdido. Sintoma seria: ligar um critério fecha todos os blocos abertos.
 // ── Componentes do painel de análise ──────────────────────────────────────
-const Ajuda=({k})=>{const[ab,setAb]=useState(false);return <span style={{position:"relative",display:"inline-block"}}>
+const Ajuda=({k,mapa})=>{const[ab,setAb]=useState(false);const txt=(mapa||AJUDA)[k];return <span style={{position:"relative",display:"inline-block"}}>
   <button onClick={()=>setAb(v=>!v)} title="Explicação" style={{marginLeft:6,width:16,height:16,lineHeight:"14px",borderRadius:"50%",border:`1px solid ${D.border}`,background:ab?D.text3:"transparent",color:ab?D.bg:D.text3,fontSize:10,fontWeight:700,cursor:"pointer",padding:0}}>?</button>
-  {ab&&<span onClick={()=>setAb(false)} style={{position:"absolute",zIndex:40,left:0,top:22,width:262,background:D.bg3,border:`1px solid ${D.border}`,borderRadius:10,padding:"10px 12px",fontSize:11,lineHeight:1.55,color:D.text2,boxShadow:"0 10px 30px rgba(0,0,0,.5)",fontWeight:400,textAlign:"left",cursor:"pointer"}}>{AJUDA[k]}</span>}
+  {ab&&<span onClick={()=>setAb(false)} style={{position:"absolute",zIndex:40,left:0,top:22,width:262,background:D.bg3,border:`1px solid ${D.border}`,borderRadius:10,padding:"10px 12px",fontSize:11,lineHeight:1.55,color:D.text2,boxShadow:"0 10px 30px rgba(0,0,0,.5)",fontWeight:400,textAlign:"left",cursor:"pointer"}}>{txt}</span>}
 </span>;};
 // "sem dado" NUNCA vira 0 nem traço ambíguo — banco legitimamente não publica
 // vários destes indicadores, e zero mentiria.
@@ -3017,6 +3037,29 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency,userId
   const [compInput,setCompInput]=useState("");const [compList,setCompList]=useState([]);const [compLoading,setCompLoading]=useState(false);const [compData,setCompData]=useState([]);
   const [fundTicker,setFundTicker]=useState("");const [fundInput,setFundInput]=useState("");const [fundSymbol,setFundSymbol]=useState("BMFBOVESPA:PETR4");
   const [screenerSearch,setScreenerSearch]=useState("");
+  // ── Triagem de FIIs ────────────────────────────────────────────────────────
+  const [fiiCfg,setFiiCfg]=useState(()=>{
+    const salvo=userId?lsGet(kFiiConfig(userId)):null;
+    return salvo&&salvo.criterios?salvo:FII_PADRAO;
+  });
+  const [fiiRes,setFiiRes]=useState(null);
+  const [fiiLoading,setFiiLoading]=useState(false);
+  const [fiiErro,setFiiErro]=useState("");
+  const [fiiAberto,setFiiAberto]=useState(false);
+  function salvarFiiCfg(nova){ setFiiCfg(nova); if(userId)lsSet(kFiiConfig(userId),nova); }  // NUNCA chave crua
+  async function buscarFii(){
+    if(fiiLoading)return;
+    setFiiLoading(true);setFiiErro("");
+    try{
+      const q=new URLSearchParams({pvp_max:fiiCfg.pvp_max,liq_min:fiiCfg.liquidez_min,
+        dy_tijolo:fiiCfg.dy_min_tijolo,dy_papel:fiiCfg.dy_min_papel,max:"200"});
+      const r=await fetch(`${WORKER}/fii-triagem?${q}`);
+      const j=await r.json();
+      if(j.error)throw new Error(j.error);
+      setFiiRes(j);
+    }catch(e){setFiiErro("Não consegui varrer os FIIs agora. Tente de novo em instantes.");}
+    setFiiLoading(false);
+  }
   const [dyAlvo,setDyAlvo]=useState(()=>parseFloat(lsGet("dy_alvo"))||6);
   const [indiceData,setIndiceData]=useState(null);
   const [indiceLoading,setIndiceLoading]=useState(false);
@@ -3725,6 +3768,82 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency,userId
       {indiceData?.erro&&<p style={{fontSize:12,color:D.red,marginTop:8}}>Não consegui buscar o índice agora. Tente novamente em instantes.</p>}
       {!indiceData&&<p style={{fontSize:12,color:D.text3,marginTop:8}}>Clique em "Comparar" para ver se sua carteira está rendendo mais que o {nomeIndice(profileId)}.</p>}
     </Card>
+
+    {/* ── Triagem de FIIs — só BR, e só descoberta (o usuário não tem posição) ──
+        Fica aqui, junto de oportunidades e comparador, porque é ferramenta de
+        DESCOBERTA. Não reusa nenhum selo de ação: FII tem regime próprio. */}
+    {isBR&&<Card>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+        <p style={{fontSize:14,fontWeight:700,color:D.text,margin:0}}>🏢 Triagem de FIIs</p>
+        <Btn sm color={D.blue} onClick={()=>{setFiiAberto(true);buscarFii();}} disabled={fiiLoading}>
+          {fiiLoading?"Varrendo…":(fiiRes?"Atualizar":"Varrer a B3")}</Btn>
+      </div>
+      <p style={{fontSize:11,color:D.text3,margin:"4px 0 0",lineHeight:1.5}}>
+        Lê os ~560 FIIs listados e mostra os que passam nos seus critérios. O rendimento é <b>calculado</b> do histórico mês a mês<Ajuda k="dy" mapa={AJUDA_FII}/>, não copiado da fonte.
+      </p>
+      {fiiErro&&<p style={{fontSize:12,color:D.red,marginTop:8}}>{fiiErro}</p>}
+
+      {fiiAberto&&<div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${D.border}`}}>
+        {/* réguas — mudar aqui exige varrer de novo, porque afeta quem é analisado */}
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:10}}>
+          {[["P/VP até","pvp_max",0.05,"pvp"],["DY tijolo ≥","dy_min_tijolo",0.5,"dy"],["DY papel ≥","dy_min_papel",0.5,"dy"],["Liquidez ≥","liquidez_min",100000,"liquidez"]].map(([rot,k,step,aj])=>
+            <label key={k} style={{fontSize:11,color:D.text2,display:"flex",alignItems:"center",gap:5}}>
+              {rot}<Ajuda k={aj} mapa={AJUDA_FII}/>
+              <input type="number" value={fiiCfg[k]} step={step} min={0}
+                onChange={e=>salvarFiiCfg({...fiiCfg,[k]:Math.max(0,+e.target.value||0)})}
+                style={{width:k==="liquidez_min"?104:64,padding:"3px 6px",fontSize:11}}/>
+            </label>)}
+        </div>
+        {/* marcadores — aplicados no cliente, então não refazem a varredura */}
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+          {[["pvp","P/VP"],["dy","Rendimento"],["liquidez","Liquidez"],["consistencia","Consistência"],["vacancia","Vacância"]].map(([id,rot])=>{
+            const on=fiiCfg.criterios[id]!==false;
+            return <button key={id} onClick={()=>salvarFiiCfg({...fiiCfg,criterios:{...fiiCfg.criterios,[id]:!on}})}
+              style={{padding:"3px 10px",borderRadius:16,fontSize:11,cursor:"pointer",fontWeight:600,
+                border:`1px solid ${on?D.green:D.border}`,background:on?D.green+"22":"transparent",color:on?D.green:D.text3}}>
+              {on?"✓":"○"} {rot}</button>;
+          })}
+        </div>
+
+        {fiiLoading&&!fiiRes&&<p style={{fontSize:12,color:D.text3}}>⏳ Lendo a lista e buscando o histórico de rendimentos…</p>}
+        {fiiRes&&(()=>{
+          // reaplica o filtro no cliente com os marcadores do usuário — a rota
+          // já trouxe os números, então ligar/desligar não custa requisição
+          const todos=[...(fiiRes.aprovados||[]),...(fiiRes.reprovados||[])].map(f=>filtraFii(f,fiiCfg));
+          const ok=todos.filter(f=>f.aprovado).sort((a,b)=>(b.dy_pct||0)-(a.dy_pct||0));
+          return <>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:D.text3,marginBottom:8,flexWrap:"wrap",gap:6}}>
+              <span><b style={{color:D.text2}}>{ok.length}</b> aprovados de {todos.length} analisados · universo {fiiRes.universo}</span>
+              {/* ⚠️ truncamento VISÍVEL: mostrar parte do dado sem avisar é a
+                  doença dos .slice que corrigimos em três telas */}
+              {fiiRes.truncado&&<button onClick={buscarFii} disabled={fiiLoading} style={{border:"none",background:"none",cursor:"pointer",fontSize:11,color:D.gold,padding:0,textAlign:"right"}}>
+                ⚠️ {fiiRes.enriquecidos} de {fiiRes.apos_filtro_tabela} analisados — toque para carregar mais<Ajuda k="truncado" mapa={AJUDA_FII}/></button>}
+            </div>
+            {ok.length===0&&<p style={{fontSize:12,color:D.text3}}>Nenhum FII passou nos critérios atuais. Afrouxe uma régua ou desligue um marcador.</p>}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(230px,1fr))",gap:8}}>
+              {ok.map(f=><div key={f.papel} style={{background:D.bg3,borderRadius:10,padding:"10px 12px",border:`1px solid ${D.border}`}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:6}}>
+                  <span style={{fontSize:13,fontWeight:700,color:D.green}}>{f.papel}</span>
+                  {/* tipo DERIVADO, nunca o "Segmento" da fonte */}
+                  <Badge color={f.tipo==="tijolo"?D.gold:D.blue}>{f.tipo||"?"}<Ajuda k="tipo" mapa={AJUDA_FII}/></Badge>
+                </div>
+                <p style={{margin:"6px 0 0",fontSize:11,color:D.text2,lineHeight:1.7}}>
+                  P/VP <b style={{color:D.text}}>{f.pvp?.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}</b>
+                  {" · "}DY <b style={{color:D.gold}}>{f.dy_pct!=null?`${f.dy_pct.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}%`:"sem dado"}</b>
+                  {/* vacância SÓ tijolo — para papel o campo some, não vira 0% */}
+                  {f.vacancia!=null&&<>{" · "}vacância <b style={{color:f.vacancia<=10?D.text:D.red}}>{f.vacancia.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}%</b><Ajuda k="vacancia" mapa={AJUDA_FII}/></>}
+                </p>
+                <p style={{margin:"2px 0 0",fontSize:10.5,color:f.meses_pagos===12?D.text3:D.gold}}>
+                  {f.meses_pagos!=null?`${f.meses_pagos}/12 meses distribuídos`:"histórico insuficiente"}<Ajuda k="consistencia" mapa={AJUDA_FII}/>
+                  {f.cap_rate!=null&&<> · cap rate {f.cap_rate.toLocaleString("pt-BR",{minimumFractionDigits:1,maximumFractionDigits:1})}%<Ajuda k="cap_rate" mapa={AJUDA_FII}/></>}
+                </p>
+              </div>)}
+            </div>
+            <p style={{fontSize:10,color:D.text3,marginTop:10,lineHeight:1.5}}>⚠️ Triagem por dados do Fundamentus, não é recomendação de compra. FII tem réguas próprias — Graham, Bazin e o checklist de ações não se aplicam aqui.</p>
+          </>;
+        })()}
+      </div>}
+    </Card>}
 
     {/* Watchlist */}
     <Card>
