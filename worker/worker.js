@@ -548,6 +548,54 @@ async function fetchFiiProventos(papel) {
   }
 }
 
+// ── FII: séries históricas (fii_graficos.php) ────────────────────────────────
+// A página NÃO devolve imagem: devolve os dados em JavaScript. Dois formatos
+// convivem e o parser cobre os dois:
+//   A) var X = [[timestampMs, valor], ...]
+//   B) X.push(valor) em paralelo a labelsY.push(timestampMs)
+// tipo=1 → rendimentos mensais + Dividend Yield diário (~103 KB)
+// tipo=2 → FFO trimestral (~28 KB)
+// tipo=3 → Patrimônio Líquido + Valor de Mercado + labelsPVP (~349 KB)
+function _fiiSerieA(html, nome) {
+  const m = html.match(new RegExp(nome + "\\s*=\\s*(\\[[\\s\\S]*?\\])\\s*;"));
+  if (!m) return [];
+  return [...m[1].matchAll(/\[\s*(\d{10,13})\s*,\s*([-\d.eE]+)\s*\]/g)]
+    .map(x => ({ t: +x[1], v: parseFloat(x[2]) }))
+    .filter(x => Number.isFinite(x.v));
+}
+function _fiiSerieB(html, nomeVal, nomeLabel) {
+  const vals = [...html.matchAll(new RegExp(nomeVal + "\\.push\\(([-\\d.eE]+)\\)", "g"))].map(x => parseFloat(x[1]));
+  const ts = [...html.matchAll(new RegExp(nomeLabel + "\\.push\\((\\d{10,13})\\)", "g"))].map(x => +x[1]);
+  const n = Math.min(vals.length, ts.length);
+  const out = [];
+  for (let i = 0; i < n; i++) if (Number.isFinite(vals[i])) out.push({ t: ts[i], v: vals[i] });
+  return out;
+}
+const _mesDe = (ms) => { try { return new Date(ms).toISOString().slice(0, 7); } catch { return null; } };
+// Reduz série diária a mensal (último valor do mês) — o cliente não precisa de
+// 2379 pontos para ver a forma da curva, e isso corta o payload em ~20x.
+function _mensaliza(serie) {
+  const m = new Map();
+  for (const p of (serie || [])) { const k = _mesDe(p.t); if (k) m.set(k, p.v); }
+  return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([mes, valor]) => ({ mes, valor }));
+}
+async function fetchFiiGrafico(papel, tipo) {
+  try {
+    const p = String(papel || "").toUpperCase();
+    const r = await fetch(`https://www.fundamentus.com.br/fii_graficos.php?papel=${encodeURIComponent(p)}&tipo=${tipo}`, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml", "Accept-Language": "pt-BR,pt;q=0.9",
+      },
+    });
+    if (!r.ok) { console.error("[fetchFiiGrafico] HTTP", r.status, p, "tipo", tipo); return null; }
+    return await lerHtml(r);
+  } catch (erro) {
+    console.error("[fetchFiiGrafico] falha:", erro?.status, erro?.message || erro);
+    return null;
+  }
+}
+
 // Yahoo quoteSummary (exige cookie+crumb desde 2023) — para AU/US
 let _yahooCrumb = null, _yahooCookie = null, _crumbTime = 0;
 async function getYahooCrumb() {
@@ -1117,6 +1165,59 @@ export default {
       } catch (erro) {
         console.error("[fii-triagem] falha:", erro?.status, erro?.message || erro);
         return new Response(JSON.stringify({ error: "falha na triagem de FIIs" }), { status: 500, headers: JH });
+      }
+    }
+
+    // GET /fii-detalhe?papel=X — rendimentos mensais + DY histórico + FFO
+    // Busca 2 páginas (~131 KB) e devolve JSON pequeno: mensaliza as séries
+    // diárias no servidor, porque o cliente só precisa da FORMA da curva.
+    // O P/VP fica FORA daqui de propósito — são 349 KB, 65% do custo total,
+    // e o usuário abre vários candidatos para descartar a maioria em segundos.
+    if (request.method === "GET" && (url.pathname === "/fii-detalhe" || url.pathname === "/fii-pvp")) {
+      const papel = url.searchParams.get("papel")?.toUpperCase();
+      const JH = { "Content-Type": "application/json; charset=utf-8", ...CORS };
+      if (!papel || !/^[A-Z0-9]{4,6}$/.test(papel)) {
+        return new Response(JSON.stringify({ error: "papel inválido" }), { status: 400, headers: JH });
+      }
+      const ehPvp = url.pathname === "/fii-pvp";
+      const cache = caches.default;
+      const kc = new Request(`https://cache.local/${ehPvp ? "fii-pvp" : "fii-det"}-v1/${papel}`, { method: "GET" });
+      try {
+        const hit = await cache.match(kc);
+        if (hit) return new Response(await hit.text(), { status: 200, headers: JH });
+
+        let out;
+        if (ehPvp) {
+          const h3 = await fetchFiiGrafico(papel, 3);
+          if (!h3) return new Response(JSON.stringify({ error: "sem dados de P/VP" }), { status: 503, headers: JH });
+          // P/VP = Valor de Mercado ÷ Patrimônio Líquido (conferido: para MXRF11
+          // o último ponto dá 1,0222, batendo com o 1,02-1,03 da triagem)
+          const pl = _fiiSerieB(h3, "dataSeriePatrimLiq", "labelsPVP");
+          const vm = _fiiSerieB(h3, "dataSerieValorMercado", "labelsPVP");
+          const n = Math.min(pl.length, vm.length);
+          const bruto = [];
+          for (let i = 0; i < n; i++) if (pl[i].v > 0) bruto.push({ t: pl[i].t, v: vm[i].v / pl[i].v });
+          out = { papel, pvp: _mensaliza(bruto), pontos_brutos: bruto.length };
+        } else {
+          const [h1, h2] = await Promise.all([fetchFiiGrafico(papel, 1), fetchFiiGrafico(papel, 2)]);
+          if (!h1) return new Response(JSON.stringify({ error: "sem dados do fundo" }), { status: 503, headers: JH });
+          const rend = _fiiSerieB(h1, "dataSerieRendimento", "labelsRendimento");
+          out = {
+            papel,
+            // data completa: o calc.mjs monta o eixo contínuo e detecta buracos
+            rendimentos: rend.map(p => ({ data: new Date(p.t).toISOString().slice(0, 10), valor: p.v })),
+            // ⚠️ DY DA FONTE — não é o mesmo número que o app calcula. A tela
+            // rotula como "fonte: Fundamentus". Serve pela FORMA da curva.
+            dy_fonte: _mensaliza(_fiiSerieA(h1, "dataSerieDividendYield")).map(p => ({ mes: p.mes, valor: Math.round(p.valor * 10000) / 100 })),
+            ffo: h2 ? _mensaliza(_fiiSerieB(h2, "dataSerieFFO", "labelsFFO")) : [],
+          };
+        }
+        const body = JSON.stringify(out);
+        await cache.put(kc, new Response(body, { headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "public, max-age=43200" } }));
+        return new Response(body, { status: 200, headers: JH });
+      } catch (erro) {
+        console.error("[fii-detalhe] falha:", erro?.status, erro?.message || erro);
+        return new Response(JSON.stringify({ error: "falha ao buscar o fundo" }), { status: 500, headers: JH });
       }
     }
 

@@ -16,7 +16,7 @@ rentabilidadeAcoesDesdeInicio, rentabilidadeAcoes,
 isRFAtivo,
 calcValorLiquidoRF,
 grahamDefensivo, numeroGraham, precoTetoBazin, checklistBuyAndHold, CHECKLIST_PADRAO, cagrLucro,
-filtraFii, FII_PADRAO,
+filtraFii, FII_PADRAO, serieRendimentosFii, resumoRendimentosFii, serieRecortada,
 } from "./calc.mjs";
 
 // Chave pública VAPID (par gerado para este app; a privada é secret no Cloudflare)
@@ -498,6 +498,15 @@ const AJUDA_CRIT={anos_bolsa:"anos_bolsa",sem_prejuizo:"sem_prejuizo",provento_c
 // Ajuda da triagem de FII. ESCRITOS À MÃO, como os de ações — não gerar por
 // IA (a feature "Como uso meu dinheiro" saiu daqui por erro factual de IA).
 // Formato: o que é · como ler · a armadilha.
+// Ajuda da tela individual de FII — escritos à mão, como os demais.
+const AJUDA_FII_DET={
+  ffo:"FFO (Funds From Operations) é o \"lucro\" de um FII: o resultado operacional sem depreciação, que em fundo imobiliário distorce o número porque imóvel não se deprecia como máquina. É o que sustenta a distribuição. Armadilha: FFO menor que o rendimento distribuído significa que o fundo está pagando com venda de ativo ou caixa acumulado — pode durar um tempo, mas não é sustentável.",
+  serie_rend:"Quanto o fundo distribuiu por cota, mês a mês. É o gráfico mais importante da tela: mostra estabilidade, tendência e quedas. Armadilha: um fundo com DY alto e rendimento em queda é a armadilha clássica — o DY olha os 12 meses passados, e a curva mostra para onde vai. Mês sem barra é mês sem pagamento, não é erro do gráfico.",
+  mes_multiplo:"Neste mês a fonte registrou mais de um pagamento, e os valores foram somados. Pode ser distribuição extra legítima ou linha duplicada na fonte — não há como distinguir pelos dados publicados, então preferimos somar e avisar em vez de escolher em silêncio.",
+  dy_fonte:"Esta curva vem PRONTA do Fundamentus e não é o mesmo número que o app calcula no topo da tela. Para o MXRF11 há três respostas para a mesma pergunta: a fonte publica 13,30%, nosso cálculo dá 13,50% e a soma direta dos 12 rendimentos dá 12,19%. Use a curva pela FORMA (o DY subiu de 8% para 13%?), não pelo valor exato do ponto. O número confiável é o calculado, exibido no topo.",
+  pvp_hist:"P/VP ao longo do tempo, calculado como Valor de Mercado ÷ Patrimônio Líquido. Serve para responder se o P/VP de hoje é desconto de verdade ou se é onde o fundo sempre negociou. Armadilha: os primeiros meses de vida de um fundo produzem valores absurdos (o patrimônio era minúsculo), então a janela exibida descarta o começo da série — a faixa mín/máx mostrada é a da janela, não a de toda a história.",
+};
+
 const AJUDA_FII={
   tipo:"Fundo de TIJOLO tem imóveis (galpões, lajes, shoppings) e ganha com aluguel. Fundo de PAPEL não tem imóvel: compra dívida imobiliária (CRI) e ganha com juros. São riscos diferentes — tijolo sofre com vacância e desvalorização, papel sofre com calote e queda de juros. Armadilha: o campo 'Segmento' da fonte erra feio (classifica fundo de papel como 'Logística') e joga metade do universo em rótulos vazios. Aqui o tipo é DEDUZIDO da quantidade de imóveis, não copiado. Limite honesto: sem imóveis não dá para separar fundo de papel de fundo de fundos (FoF).",
   pvp:"Quanto você paga por cada real de patrimônio do fundo. Abaixo de 1,00 significa comprar os ativos por menos que o valor contábil. Armadilha: P/VP baixo pode indicar problema — imóvel mal avaliado, inquilino saindo, ou fundo em dificuldade. Barato nem sempre é bom.",
@@ -558,6 +567,156 @@ const Bloco=({titulo,aberto,children})=>{const[ab,setAb]=useState(!!aberto);retu
   {ab&&<div style={{padding:"0 14px 10px"}}>{children}</div>}
 </div>;};
 
+
+// ── Modal de análise individual de FII ──────────────────────────────────────
+// Modal PRÓPRIO, não o ChartModal. O ChartModal renderiza os selos Graham e o
+// checklist Buy and Hold direto no corpo — reusá-lo para FII significaria ou
+// exibir régua de ação em fundo imobiliário (regime errado) ou espalhar
+// `if (ehFii)` por um componente já grande. E o ponto de entrada é outro: FII
+// abre da triagem, não da lista de investimentos.
+function FiiModal({fundo,onClose,currency="R$"}){
+  const [det,setDet]=useState(null);
+  const [carregando,setCarregando]=useState(true);
+  const [erro,setErro]=useState(false);
+  const [pvp,setPvp]=useState(null);            // sob demanda: são 349 KB na origem
+  const [pvpCarregando,setPvpCarregando]=useState(false);
+  useEffect(()=>{
+    let vivo=true; setCarregando(true); setErro(false);
+    fetch(`${WORKER}/fii-detalhe?papel=${encodeURIComponent(fundo.papel)}`)
+      .then(r=>r.json()).then(d=>{if(vivo){d&&!d.error?setDet(d):setErro(true);setCarregando(false);}})
+      .catch(()=>{if(vivo){setErro(true);setCarregando(false);}});
+    return()=>{vivo=false;};
+  },[fundo.papel]);
+  function carregarPvp(){
+    if(pvp||pvpCarregando)return;
+    setPvpCarregando(true);
+    fetch(`${WORKER}/fii-pvp?papel=${encodeURIComponent(fundo.papel)}`)
+      .then(r=>r.json()).then(d=>{if(d&&!d.error)setPvp(d);setPvpCarregando(false);})
+      .catch(()=>setPvpCarregando(false));
+  }
+  // ⚠️ Ancora a janela em HOJE, não no último pagamento. Sem isto, um fundo
+  // que parou de distribuir há anos mostraria a janela ANTIGA (a dele), com
+  // barras cheias, escondendo justamente que ele não paga mais — verificado
+  // com GSFI11, que pagou uma vez em jun/2017 e exibia 2017-2020 como se
+  // fosse o presente. Ancorado em hoje, ele aparece como 36 meses de buraco.
+  const serie=det?serieRendimentosFii(det.rendimentos,{meses:36,ate:new Date().toISOString().slice(0,10)}):[];
+  const resumo=resumoRendimentosFii(serie);
+  const pvpRec=pvp?serieRecortada(pvp.pvp.map(x=>({mes:x.mes,valor:x.valor})),{descartarMeses:24}):null;
+  const fmt=(v,d=2)=>v==null?"—":v.toLocaleString("pt-BR",{minimumFractionDigits:d,maximumFractionDigits:d});
+
+  return <Modal title={`${fundo.papel} · ${fundo.tipo||"?"}`} onClose={onClose} wide>
+    {/* topo: os números do app, calculados por nós */}
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8,marginBottom:14}}>
+      <div style={{background:D.bg3,borderRadius:8,padding:"8px 10px"}}>
+        <p style={{margin:0,fontSize:10,color:D.text3}}>P/VP</p>
+        <p style={{margin:"2px 0 0",fontSize:16,fontWeight:700,color:D.text}}>{fmt(fundo.pvp)}</p></div>
+      <div style={{background:D.bg3,borderRadius:8,padding:"8px 10px"}}>
+        <p style={{margin:0,fontSize:10,color:D.text3}}>DY 12M (CALCULADO)</p>
+        <p style={{margin:"2px 0 0",fontSize:16,fontWeight:700,color:D.gold}}>{fmt(fundo.dy_pct)}%</p></div>
+      <div style={{background:D.bg3,borderRadius:8,padding:"8px 10px"}}>
+        <p style={{margin:0,fontSize:10,color:D.text3}}>DISTRIBUIÇÕES</p>
+        <p style={{margin:"2px 0 0",fontSize:16,fontWeight:700,color:fundo.meses_pagos===12?D.green:D.gold}}>{fundo.meses_pagos ?? "—"}/12</p></div>
+      {/* vacância só tijolo — para papel o bloco nem existe */}
+      {fundo.vacancia!=null&&<div style={{background:D.bg3,borderRadius:8,padding:"8px 10px"}}>
+        <p style={{margin:0,fontSize:10,color:D.text3}}>VACÂNCIA</p>
+        <p style={{margin:"2px 0 0",fontSize:16,fontWeight:700,color:fundo.vacancia<=10?D.text:D.red}}>{fmt(fundo.vacancia)}%</p></div>}
+    </div>
+
+    {carregando&&<p style={{fontSize:13,color:D.text3,padding:"24px 0",textAlign:"center"}}>⏳ Buscando o histórico de {fundo.papel}…</p>}
+    {erro&&<p style={{fontSize:13,color:D.red,padding:"20px 0",textAlign:"center"}}>Não consegui buscar o histórico agora. Tente de novo em instantes.</p>}
+
+    {det&&<>
+      <p style={{fontSize:12,fontWeight:700,color:D.text,margin:"0 0 2px"}}>Rendimento por cota · 36 meses<Ajuda k="serie_rend" mapa={AJUDA_FII_DET}/></p>
+      <p style={{fontSize:10.5,color:D.text3,margin:"0 0 6px"}}>
+        média {currency} {fmt(resumo.media,4)} · faixa {fmt(resumo.min,4)}–{fmt(resumo.max,4)}
+        {resumo.tendencia&&<> · tendência <b style={{color:resumo.tendencia==="queda"?D.red:resumo.tendencia==="alta"?D.green:D.text2}}>{resumo.tendencia}</b> ({resumo.variacao_pct>0?"+":""}{resumo.variacao_pct}%)</>}
+      </p>
+      <GraficoRendFii serie={serie} currency={currency}/>
+      <p style={{fontSize:10,color:D.text3,margin:"2px 0 14px"}}>
+        {resumo.meses_sem_pagamento>0
+          ? <b style={{color:D.red}}>⚠️ {resumo.meses_sem_pagamento} {resumo.meses_sem_pagamento===1?"mês sem distribuição":"meses sem distribuição"} no meio da série</b>
+          : "distribuiu em todos os meses até o último informado"}
+        {/* 1-2 meses no fim é defasagem normal da fonte, não fundo parado */}
+        {resumo.meses_desde_ultimo>2&&<> · <b style={{color:D.red}}>⚠️ sem distribuir há {resumo.meses_desde_ultimo} meses</b></>}
+        {resumo.meses_desde_ultimo>0&&resumo.meses_desde_ultimo<=2&&<span style={{color:D.text3}}> · fonte ainda não publicou {resumo.meses_desde_ultimo===1?"o último mês":"os 2 últimos meses"}</span>}
+        {serie.some(p=>p.multiplo)&&<> · <span style={{color:D.gold}}>◆ mês com mais de um lançamento, somados</span><Ajuda k="mes_multiplo" mapa={AJUDA_FII_DET}/></>}
+      </p>
+
+      {det.dy_fonte?.length>1&&<>
+        {/* ⚠️ rótulo explícito: não é o mesmo número do topo */}
+        <p style={{fontSize:12,fontWeight:700,color:D.text,margin:"0 0 2px"}}>DY histórico <span style={{fontWeight:400,fontSize:10,color:D.text3}}>(fonte: Fundamentus — não é o calculado acima)</span><Ajuda k="dy_fonte" mapa={AJUDA_FII_DET}/></p>
+        <GraficoLinhaFii pontos={det.dy_fonte.slice(-60)} cor={D.gold} sufixo="%"/>
+        <div style={{height:14}}/>
+      </>}
+
+      {det.ffo?.length>1&&<>
+        <p style={{fontSize:12,fontWeight:700,color:D.text,margin:"0 0 2px"}}>FFO trimestral<Ajuda k="ffo" mapa={AJUDA_FII_DET}/></p>
+        <GraficoLinhaFii pontos={det.ffo} cor={D.blue}/>
+        <div style={{height:14}}/>
+      </>}
+
+      {/* P/VP sob demanda: 349 KB na origem, 65% do custo total do fundo */}
+      <p style={{fontSize:12,fontWeight:700,color:D.text,margin:"0 0 4px"}}>P/VP histórico<Ajuda k="pvp_hist" mapa={AJUDA_FII_DET}/></p>
+      {!pvp&&<Btn sm outline color={D.text2} onClick={carregarPvp} disabled={pvpCarregando}>
+        {pvpCarregando?"Carregando…":"Carregar série de P/VP"}</Btn>}
+      {!pvp&&!pvpCarregando&&<p style={{fontSize:10,color:D.text3,margin:"4px 0 0"}}>carregado só quando você pede — é a série mais pesada da fonte</p>}
+      {pvpRec&&<>
+        <GraficoLinhaFii pontos={pvpRec.pontos} cor={D.purple}/>
+        <p style={{fontSize:10,color:D.text3,margin:"2px 0 0"}}>
+          janela exibida: {pvpRec.pontos[0]?.mes} em diante · faixa <b style={{color:D.text2}}>{fmt(pvpRec.min)}–{fmt(pvpRec.max)}</b> · atual <b style={{color:D.text2}}>{fmt(pvpRec.atual)}</b>
+          {pvpRec.descartados>0&&<> · {pvpRec.descartados} meses iniciais descartados (patrimônio pequeno distorce o múltiplo)</>}
+        </p>
+      </>}
+      <p style={{fontSize:10,color:D.text3,marginTop:14,lineHeight:1.5}}>⚠️ Dados do Fundamentus, podem ter atraso. Não é recomendação. Vacância ao longo do tempo e concentração por inquilino não aparecem aqui porque a fonte não entrega esses dados de forma confiável.</p>
+    </>}
+  </Modal>;
+}
+
+// ── Gráfico de barras de rendimento ─────────────────────────────────────────
+// ⚠️ NÃO usa polyline: mês sem pagamento tem que aparecer como BURACO. Uma
+// linha ligaria fevereiro a abril por cima de março e esconderia exatamente o
+// sinal que o investidor precisa ver.
+function GraficoRendFii({serie,currency}){
+  const vals=serie.filter(p=>!p.vazio).map(p=>p.valor);
+  if(!vals.length)return <p style={{fontSize:12,color:D.text3}}>Sem histórico de rendimentos.</p>;
+  const max=Math.max(...vals), W=Math.max(300,serie.length*9), H=90;
+  const lw=W/serie.length;
+  return <div style={{overflowX:"auto"}}>
+    <svg viewBox={`0 0 ${W} ${H+16}`} style={{width:"100%",minWidth:300,height:106,display:"block"}}>
+      {serie.map((p,i)=>{
+        const x=i*lw;
+        if(p.vazio) // buraco: marca discreta na base, para o vazio ser visível COMO vazio
+          return <rect key={i} x={x+lw*0.15} y={H-2} width={Math.max(1.5,lw*0.7)} height={2} fill={D.red} opacity={0.55}/>;
+        const h=max>0?Math.max(1.5,(p.valor/max)*(H-6)):1.5;
+        return <g key={i}>
+          <rect x={x+lw*0.15} y={H-h} width={Math.max(1.5,lw*0.7)} height={h}
+                fill={p.multiplo?D.gold:D.green} opacity={p.multiplo?1:0.85}/>
+          {p.multiplo&&<circle cx={x+lw*0.5} cy={H-h-3.5} r={1.8} fill={D.gold}/>}
+        </g>;
+      })}
+      <line x1={0} y1={H} x2={W} y2={H} stroke={D.border} strokeWidth={1}/>
+    </svg>
+  </div>;
+}
+
+// Linha simples para séries contínuas (DY, P/VP, FFO) — aqui interpolar é ok,
+// porque são medições contínuas, não eventos de pagamento.
+function GraficoLinhaFii({pontos,cor,sufixo=""}){
+  if(!pontos||pontos.length<2)return <p style={{fontSize:12,color:D.text3}}>Série insuficiente.</p>;
+  const vals=pontos.map(p=>p.valor), min=Math.min(...vals), max=Math.max(...vals);
+  const W=300,H=70,amp=(max-min)||1;
+  const pts=pontos.map((p,i)=>`${(i/(pontos.length-1))*W},${H-((p.valor-min)/amp)*(H-8)-4}`).join(" ");
+  const fmt=v=>v.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+  return <div>
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height:80,display:"block"}}>
+      <polyline points={pts} fill="none" stroke={cor} strokeWidth={1.8}/>
+    </svg>
+    <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:D.text3}}>
+      <span>{pontos[0].mes} · mín {fmt(min)}{sufixo}</span>
+      <span>máx {fmt(max)}{sufixo} · {pontos[pontos.length-1].mes}</span>
+    </div>
+  </div>;
+}
 
 function ChartModal({ticker,onClose,currency="A$",market="au",dyAlvo=6,userId}){
   // Monta o símbolo do TradingView com a bolsa CERTA (senão ele pega bolsa errada, ex: GETTEX alemã)
@@ -3046,6 +3205,7 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency,userId
   const [fiiLoading,setFiiLoading]=useState(false);
   const [fiiErro,setFiiErro]=useState("");
   const [fiiAberto,setFiiAberto]=useState(false);
+  const [fiiSel,setFiiSel]=useState(null);   // fundo aberto no modal individual
   function salvarFiiCfg(nova){ setFiiCfg(nova); if(userId)lsSet(kFiiConfig(userId),nova); }  // NUNCA chave crua
   async function buscarFii(){
     if(fiiLoading)return;
@@ -3823,7 +3983,7 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency,userId
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(230px,1fr))",gap:8}}>
               {ok.map(f=><div key={f.papel} style={{background:D.bg3,borderRadius:10,padding:"10px 12px",border:`1px solid ${D.border}`}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:6}}>
-                  <span style={{fontSize:13,fontWeight:700,color:D.green}}>{f.papel}</span>
+                  <span onClick={()=>setFiiSel(f)} title="Ver análise do fundo" style={{fontSize:13,fontWeight:700,color:D.green,cursor:"pointer",textDecoration:"underline",textDecorationStyle:"dotted",textUnderlineOffset:3}}>{f.papel}</span>
                   {/* tipo DERIVADO, nunca o "Segmento" da fonte */}
                   <Badge color={f.tipo==="tijolo"?D.gold:D.blue}>{f.tipo||"?"}<Ajuda k="tipo" mapa={AJUDA_FII}/></Badge>
                 </div>
@@ -3844,6 +4004,8 @@ function AnaliseTab({data,setData,investimentos,profileId,market,currency,userId
         })()}
       </div>}
     </Card>}
+
+    {fiiSel&&<FiiModal fundo={fiiSel} currency={currency} onClose={()=>setFiiSel(null)}/>}
 
     {/* Watchlist */}
     <Card>

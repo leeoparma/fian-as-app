@@ -21,6 +21,7 @@ compoeFatorDiario,compoeFatorMensal,calcValorAtualRFHistorico,mesclarIPCAcomPrev
 posicaoRV,
 grahamDefensivo,numeroGraham,precoTetoBazin,cagrLucro,checklistBuyAndHold,CHECKLIST_PADRAO,
 tipoFii,metricasImovel,dyFii12m,tendenciaFii,filtraFii,FII_PADRAO,
+serieRendimentosFii,resumoRendimentosFii,serieRecortada,
 } from "../src/calc.mjs";
 
 const aprox=(a,b,tol=0.01)=>assert.ok(Math.abs(a-b)<=tol,`esperado ~${b}, veio ${a}`);
@@ -1473,4 +1474,134 @@ test("FII: fundo sem dado nenhum não explode e não aprova por omissão", ()=>{
   assert.equal(r.tipo,null);
   assert.equal(r.sem_dado,5);
   assert.equal(r.aprovados,0);
+});
+
+// ── Série mensal de rendimentos (o gráfico mais importante da tela de FII) ──
+test("FII série: mês sem pagamento vira BURACO explícito, não some nem vira 0", ()=>{
+  // A fonte omite o mês sem pagamento. Se a série só trouxesse os pontos
+  // existentes, o gráfico ligaria fev a abr e esconderia que março falhou —
+  // que é exatamente o sinal que o investidor precisa ver.
+  const h=[{data:"2026-02-27",valor:0.10},{data:"2026-04-30",valor:0.10},{data:"2026-05-29",valor:0.10}];
+  const s=serieRendimentosFii(h,{meses:4});
+  assert.equal(s.length,4);
+  assert.deepEqual(s.map(p=>p.mes),["2026-02","2026-03","2026-04","2026-05"]);
+  const mar=s.find(p=>p.mes==="2026-03");
+  assert.equal(mar.valor,null);      // null, NÃO zero
+  assert.equal(mar.vazio,true);
+  assert.notEqual(mar.valor,0);      // trava contra a regressão
+});
+
+test("FII série: mês com DOIS pagamentos soma e sinaliza", ()=>{
+  // MXRF11 teve isso em jun/2019 e out/2025. Não dá para distinguir
+  // distribuição extra de linha duplicada, então soma e avisa.
+  const h=[{data:"2025-10-31",valor:0.10},{data:"2025-10-31",valor:0.10},{data:"2025-11-28",valor:0.10}];
+  const s=serieRendimentosFii(h,{meses:2});
+  const out=s.find(p=>p.mes==="2025-10");
+  assert.equal(out.valor,0.2);
+  assert.equal(out.lancamentos,2);
+  assert.equal(out.multiplo,true);
+  assert.equal(s.find(p=>p.mes==="2025-11").multiplo,false);
+});
+
+test("FII série: eixo é contínuo mesmo com buraco longo", ()=>{
+  const h=[{data:"2024-01-31",valor:0.5},{data:"2024-06-28",valor:0.5}];
+  const s=serieRendimentosFii(h,{meses:6});
+  assert.equal(s.length,6);
+  assert.equal(s.filter(p=>p.vazio).length,4);   // fev,mar,abr,mai
+});
+
+test("FII série: sem histórico devolve lista vazia, não explode", ()=>{
+  assert.deepEqual(serieRendimentosFii([],{meses:12}),[]);
+  assert.deepEqual(serieRendimentosFii(null),[]);
+});
+
+test("FII resumo: conta meses sem pagamento e detecta queda", ()=>{
+  // 1ª metade média 1,00 · 2ª metade média 0,50 → −50% → "queda"
+  const s=serieRendimentosFii([
+    {data:"2026-01-31",valor:1},{data:"2026-02-27",valor:1},
+    {data:"2026-03-31",valor:0.5},{data:"2026-04-30",valor:0.5},
+  ],{meses:4});
+  const r=resumoRendimentosFii(s);
+  assert.equal(r.media,0.75);
+  assert.equal(r.min,0.5); assert.equal(r.max,1);
+  assert.equal(r.variacao_pct,-50);
+  assert.equal(r.tendencia,"queda");
+  assert.equal(r.meses_sem_pagamento,0);
+});
+
+test("FII resumo: rendimento estável não é rotulado como tendência", ()=>{
+  const s=serieRendimentosFii([1,2,3,4].map((_,i)=>({data:`2026-0${i+1}-28`,valor:0.10})),{meses:4});
+  assert.equal(resumoRendimentosFii(s).tendencia,"estável");
+});
+
+// ── Recorte do ruído inicial (P/VP) ─────────────────────────────────────────
+test("FII P/VP: descarta os primeiros meses e reporta a faixa da janela", ()=>{
+  // 40 meses: os 24 primeiros com ruído (até 9,0), os 16 últimos entre 0,8 e 1,0.
+  // (é o caso real: MXRF11 tem ~115 meses, então cortar 24 sobra muito.)
+  const serie=[];
+  for(let i=0;i<40;i++){
+    const y=2020+Math.floor(i/12), m=String(i%12+1).padStart(2,"0");
+    serie.push({mes:`${y}-${m}`,valor:i<24?9-i*0.3:0.8+(i-24)*0.01});
+  }
+  const r=serieRecortada(serie,{descartarMeses:24});
+  assert.equal(r.pontos.length,16);
+  assert.equal(r.descartados,24);
+  assert.ok(r.max<1.1);            // o pico de 9,0 saiu da janela
+  assert.ok(r.min>=0.8);
+});
+
+test("FII P/VP: série curta não é recortada até sobrar nada", ()=>{
+  // com 8 pontos, descartar 24 deixaria zero — devolve os que existem, sem
+  // ressuscitar ruído (aqui não há ruído: a série toda cabe)
+  const serie=Array.from({length:8},(_,i)=>({mes:`2026-0${i+1}`,valor:1+i*0.01}));
+  const r=serieRecortada(serie,{descartarMeses:24});
+  assert.equal(r.pontos.length,8);
+  assert.equal(r.descartados,0);
+});
+
+test("FII P/VP: série longa é afinada para não pesar na tela", ()=>{
+  const serie=Array.from({length:2379},(_,i)=>({mes:`20${17+Math.floor(i/250)}-01`,valor:1}));
+  const r=serieRecortada(serie,{descartarMeses:0,maxPontos:180});
+  assert.ok(r.pontos.length<=180);
+  assert.ok(r.pontos.length>100);
+});
+
+test("FII série: janela ancorada em `ate` revela fundo que parou de pagar", ()=>{
+  // GSFI11 pagou uma vez em jun/2017 e nunca mais. Ancorando na série (padrão),
+  // a janela seria 2017 e mostraria barra cheia — escondendo que o fundo morreu.
+  const h=[{data:"2017-06-30",valor:0.5}];
+  const naSerie=serieRendimentosFii(h,{meses:12});
+  assert.equal(naSerie.filter(p=>p.vazio).length,11);   // 11 buracos + 1 barra
+  assert.equal(naSerie.at(-1).mes,"2017-06");
+  // ancorada em hoje: 12 meses de buraco, que é a verdade
+  const hoje=serieRendimentosFii(h,{meses:12,ate:"2026-08-01"});
+  assert.equal(hoje.filter(p=>p.vazio).length,12);
+  assert.equal(hoje.at(-1).mes,"2026-08");
+  assert.ok(hoje.every(p=>p.valor===null));
+});
+
+test("FII resumo: buraco no FIM é defasagem da fonte, não pagamento falhado", ()=>{
+  // Todo fundo tem 1-2 meses vazios no fim porque a fonte publica com atraso.
+  // Contar isso como "mês sem distribuição" daria alarme falso em todos.
+  const s=serieRendimentosFii([
+    {data:"2026-04-30",valor:1},{data:"2026-05-29",valor:1},{data:"2026-06-30",valor:1},
+  ],{meses:5,ate:"2026-08-15"});
+  const r=resumoRendimentosFii(s);
+  assert.equal(r.meses_sem_pagamento,0);      // nenhum buraco no MEIO
+  assert.equal(r.meses_desde_ultimo,2);       // jul e ago: fonte não publicou
+});
+
+test("FII resumo: buraco no MEIO continua sendo contado", ()=>{
+  const s=serieRendimentosFii([
+    {data:"2026-03-31",valor:1},{data:"2026-05-29",valor:1},{data:"2026-06-30",valor:1},
+  ],{meses:4,ate:"2026-06-30"});
+  const r=resumoRendimentosFii(s);
+  assert.equal(r.meses_sem_pagamento,1);      // abril
+  assert.equal(r.meses_desde_ultimo,0);
+});
+
+test("FII resumo: fundo que parou de pagar acusa o tempo parado", ()=>{
+  const s=serieRendimentosFii([{data:"2017-06-30",valor:0.5}],{meses:36,ate:"2026-08-01"});
+  const r=resumoRendimentosFii(s);
+  assert.equal(r.meses_desde_ultimo,36);      // nada na janela inteira
 });

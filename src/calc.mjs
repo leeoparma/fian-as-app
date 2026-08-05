@@ -1071,3 +1071,104 @@ export function filtraFii(f,config){
     aprovado:ativos.every(c=>c.passou!==false),
   };
 }
+
+// ── Série mensal de rendimentos de FII ──────────────────────────────────────
+// Monta um eixo de meses CONTÍNUO. Isso é o ponto: a fonte OMITE o mês sem
+// pagamento (mesma armadilha do provento de ação, onde o ano sem pagamento
+// some da tabela). Se o gráfico plotasse só os pontos existentes, um fundo que
+// parou de pagar em março apareceria com a linha ligando fevereiro a abril —
+// interpolando por cima do buraco, que é justamente o sinal que importa.
+// Aqui o mês vazio vira uma entrada explícita com valor null.
+//
+// ⚠️ Mês com DOIS pagamentos existe (MXRF11 em jun/2019 e out/2025: 113
+// lançamentos para 111 meses). Somamos os do mesmo mês e devolvemos
+// `lancamentos` para a tela sinalizar — não dá para distinguir distribuição
+// extra de linha duplicada na fonte, então o honesto é somar e avisar.
+export function serieRendimentosFii(historico,{meses=36,ate=null}={}){
+  const h=(historico||[]).filter(p=>p&&/^\d{4}-\d{2}/.test(p.data||"")&&Number.isFinite(p.valor));
+  if(!h.length)return [];
+  const mnum=mk=>{const[y,m]=mk.split("-").map(Number);return y*12+(m-1);};
+  const rot=n=>`${Math.floor(n/12)}-${String(n%12+1).padStart(2,"0")}`;
+  const porMes=new Map();
+  for(const p of h){
+    const mk=p.data.slice(0,7), a=porMes.get(mk)||{soma:0,n:0};
+    a.soma+=p.valor; a.n++; porMes.set(mk,a);
+  }
+  const fimM=ate?mnum(ate.slice(0,7)):Math.max(...[...porMes.keys()].map(mnum));
+  const iniM=fimM-(meses-1);
+  const out=[];
+  for(let m=iniM;m<=fimM;m++){
+    const mk=rot(m), a=porMes.get(mk);
+    out.push({
+      mes:mk,
+      valor:a?Math.round(a.soma*100000)/100000:null,   // null = não pagou, NÃO zero
+      lancamentos:a?a.n:0,
+      vazio:!a,
+      multiplo:!!a&&a.n>1,                              // sinaliza mês com 2+ lançamentos
+    });
+  }
+  return out;
+}
+
+// Resumo da série, para a tela dizer o que a curva mostra sem o usuário
+// precisar interpretar sozinho.
+export function resumoRendimentosFii(serie){
+  const arr=(serie||[]).filter(Boolean);
+  const s=arr.filter(p=>!p.vazio&&Number.isFinite(p.valor));
+  // ⚠️ Buraco no MEIO da série é pagamento falhado. Buraco no FIM é quase
+  // sempre atraso da fonte (o Fundamentus publica o mês com semanas de
+  // defasagem). Contar os dois juntos faria TODO fundo aparecer com "2 meses
+  // sem distribuição" — alarme falso em cima de dado que informa compra.
+  const ultimoPago=arr.map(p=>!p.vazio).lastIndexOf(true);
+  const mesesDesdeUltimo=ultimoPago<0?arr.length:(arr.length-1-ultimoPago);
+  const vazios=ultimoPago<0?0:arr.slice(0,ultimoPago).filter(p=>p.vazio).length;
+  if(s.length<2)return {media:null,min:null,max:null,meses_sem_pagamento:vazios,meses_desde_ultimo:mesesDesdeUltimo,variacao_pct:null,tendencia:null};
+  const vals=s.map(p=>p.valor);
+  const media=vals.reduce((a,b)=>a+b,0)/vals.length;
+  // compara a média da 1ª metade com a da 2ª — mostra tendência sem prometer
+  // precisão de regressão
+  const meio=Math.floor(s.length/2);
+  const m1=s.slice(0,meio).reduce((a,p)=>a+p.valor,0)/meio;
+  const m2=s.slice(meio).reduce((a,p)=>a+p.valor,0)/(s.length-meio);
+  const varPct=m1>0?Math.round(((m2/m1-1)*100)*10)/10:null;
+  return {
+    media:Math.round(media*100000)/100000,
+    min:Math.min(...vals), max:Math.max(...vals),
+    meses_sem_pagamento:vazios,        // só os do MEIO da série
+    meses_desde_ultimo:mesesDesdeUltimo, // atraso da fonte OU fundo parado
+    variacao_pct:varPct,
+    tendencia:varPct==null?null:(varPct>5?"alta":varPct<-5?"queda":"estável"),
+  };
+}
+
+// ── Corte do ruído inicial de séries longas (P/VP) ──────────────────────────
+// A série de P/VP do MXRF11 vai de 0,807 a 9,269 — o topo é dos primeiros
+// meses, quando o patrimônio era minúsculo e qualquer oscilação virava
+// múltiplo absurdo. Plotar com essa escala produz uma reta rente ao zero com
+// um pico ilegível: o gráfico existe e não comunica nada.
+// Corta os primeiros `descartarMeses` e devolve a faixa da janela EXIBIDA,
+// para a tela poder dizer se 0,88 é desconto ou é onde o fundo sempre andou.
+export function serieRecortada(serie,{descartarMeses=24,maxPontos=180}={}){
+  const s=(serie||[]).filter(p=>p&&Number.isFinite(p.valor)&&/^\d{4}-\d{2}/.test(p.mes||p.data||""));
+  if(!s.length)return {pontos:[],min:null,max:null,atual:null,descartados:0};
+  const key=p=>(p.mes||p.data).slice(0,7);
+  const mnum=mk=>{const[y,m]=mk.split("-").map(Number);return y*12+(m-1);};
+  const iniM=mnum(key(s[0]))+descartarMeses;
+  let pontos=s.filter(p=>mnum(key(p))>=iniM);
+  // Se o corte deixaria pouco ponto, NÃO volta para a série inteira — isso
+  // traria o ruído de volta, que é o que o corte existe para tirar. Fica com
+  // os 12 mais recentes: gráfico curto e legível vence gráfico longo ilegível.
+  if(pontos.length<12)pontos=s.slice(-Math.min(12,s.length));
+  if(pontos.length>maxPontos){               // afina para não pesar na tela
+    const passo=Math.ceil(pontos.length/maxPontos);
+    pontos=pontos.filter((_,i)=>i%passo===0||i===pontos.length-1);
+  }
+  const vals=pontos.map(p=>p.valor);
+  return {
+    pontos,
+    min:Math.round(Math.min(...vals)*1000)/1000,
+    max:Math.round(Math.max(...vals)*1000)/1000,
+    atual:pontos[pontos.length-1].valor,
+    descartados:s.length-pontos.length,
+  };
+}
