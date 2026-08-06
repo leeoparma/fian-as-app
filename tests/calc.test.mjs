@@ -21,7 +21,7 @@ compoeFatorDiario,compoeFatorMensal,calcValorAtualRFHistorico,mesclarIPCAcomPrev
 posicaoRV,
 grahamDefensivo,numeroGraham,precoTetoBazin,cagrLucro,checklistBuyAndHold,CHECKLIST_PADRAO,
 tipoFii,metricasImovel,dyFii12m,tendenciaFii,filtraFii,FII_PADRAO,
-serieRendimentosFii,resumoRendimentosFii,serieRecortada,
+serieRendimentosFii,resumoRendimentosFii,serieRecortada,coberturaFfoFii,
 } from "../src/calc.mjs";
 
 const aprox=(a,b,tol=0.01)=>assert.ok(Math.abs(a-b)<=tol,`esperado ~${b}, veio ${a}`);
@@ -1604,4 +1604,52 @@ test("FII resumo: fundo que parou de pagar acusa o tempo parado", ()=>{
   const s=serieRendimentosFii([{data:"2017-06-30",valor:0.5}],{meses:36,ate:"2026-08-01"});
   const r=resumoRendimentosFii(s);
   assert.equal(r.meses_desde_ultimo,36);      // nada na janela inteira
+});
+
+// ── Cobertura da distribuição pelo FFO ──────────────────────────────────────
+test("FII FFO: cobertura com números reais do MXRF11", ()=>{
+  // 2025-12: 120.266.970 / 131.197.589 = 91,67% → 91,7
+  // 2026-03: 120.253.668 / 179.518.966 = 66,99% → 67,0
+  const r=coberturaFfoFii(
+    [{mes:"2025-12",valor:120266970},{mes:"2026-03",valor:120253668}],
+    [{mes:"2025-12",valor:131197589},{mes:"2026-03",valor:179518966}]);
+  assert.equal(r.pontos[0].cobertura_pct,91.7);
+  assert.equal(r.pontos[1].cobertura_pct,67);
+  assert.equal(r.periodos_descobertos,2);
+  assert.equal(r.alerta,"distribuindo acima do resultado");
+});
+
+test("FII FFO: negativo continua NEGATIVO, não vira zero nem absoluto", ()=>{
+  // MXRF11 em 2017-03 teve FFO −323.638. Zerar ou usar módulo esconderia
+  // trimestre de prejuízo operacional.
+  const r=coberturaFfoFii([{mes:"2017-03",valor:-323638}],[{mes:"2017-03",valor:100000}]);
+  assert.equal(r.pontos[0].ffo,-323638);
+  assert.equal(r.pontos[0].negativo,true);
+  assert.equal(r.pontos[0].cobertura_pct,-323.6);   // negativa, como deve ser
+  assert.equal(r.tem_ffo_negativo,true);
+  assert.notEqual(r.pontos[0].ffo,0);
+  assert.notEqual(r.pontos[0].ffo,323638);
+});
+
+test("FII FFO: período sem distribuição tem cobertura null, não zero nem infinita", ()=>{
+  const r=coberturaFfoFii([{mes:"2017-06",valor:5850780}],[{mes:"2017-06",valor:0}]);
+  assert.equal(r.pontos[0].cobertura_pct,null);
+  assert.equal(r.cobertura_media_4t,null);
+});
+
+test("FII FFO: cobertura saudável não dispara alerta", ()=>{
+  const ffo=[1,2,3,4].map(i=>({mes:`2025-0${i*3}`,valor:150}));
+  const div=[1,2,3,4].map(i=>({mes:`2025-0${i*3}`,valor:100}));
+  const r=coberturaFfoFii(ffo,div);
+  assert.equal(r.cobertura_media_4t,150);
+  assert.equal(r.periodos_descobertos,0);
+  assert.equal(r.alerta,null);
+});
+
+test("FII FFO: média olha só os 4 últimos períodos com distribuição", ()=>{
+  const ffo=[],div=[];
+  for(let i=1;i<=8;i++){ffo.push({mes:`2025-${String(i).padStart(2,"0")}`,valor:i<=4?50:200});
+                        div.push({mes:`2025-${String(i).padStart(2,"0")}`,valor:100});}
+  // 4 primeiros 50% (ruins), 4 últimos 200% (bons) → média dos 4 ÚLTIMOS = 200
+  assert.equal(coberturaFfoFii(ffo,div).cobertura_media_4t,200);
 });

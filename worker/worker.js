@@ -1181,7 +1181,10 @@ export default {
       }
       const ehPvp = url.pathname === "/fii-pvp";
       const cache = caches.default;
-      const kc = new Request(`https://cache.local/${ehPvp ? "fii-pvp" : "fii-det"}-v1/${papel}`, { method: "GET" });
+      // ⚠️ Versão na chave: mudar o SHAPE da resposta exige bumpar, senão o cache
+      // de 12h continua servindo o formato antigo e o campo novo "não existe"
+      // por meio dia — foi o que aconteceu ao adicionar `dividendo` (v1→v2).
+      const kc = new Request(`https://cache.local/${ehPvp ? "fii-pvp" : "fii-det"}-v2/${papel}`, { method: "GET" });
       try {
         const hit = await cache.match(kc);
         if (hit) return new Response(await hit.text(), { status: 200, headers: JH });
@@ -1209,7 +1212,13 @@ export default {
             // ⚠️ DY DA FONTE — não é o mesmo número que o app calcula. A tela
             // rotula como "fonte: Fundamentus". Serve pela FORMA da curva.
             dy_fonte: _mensaliza(_fiiSerieA(h1, "dataSerieDividendYield")).map(p => ({ mes: p.mes, valor: Math.round(p.valor * 10000) / 100 })),
+            // FFO e Dividendo distribuído vêm da MESMA série de períodos
+            // (labelsFFO, 38 pontos cada) e em valor absoluto. É o par que
+            // responde "a distribuição cabe no resultado?" sem precisar de nº
+            // de cotas — e portanto sem o erro de usar a contagem de hoje para
+            // trimestres antigos, quando o fundo tinha uma fração das cotas.
             ffo: h2 ? _mensaliza(_fiiSerieB(h2, "dataSerieFFO", "labelsFFO")) : [],
+            dividendo: h2 ? _mensaliza(_fiiSerieB(h2, "dataSerieDividendo", "labelsFFO")) : [],
           };
         }
         const body = JSON.stringify(out);

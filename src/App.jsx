@@ -16,7 +16,7 @@ rentabilidadeAcoesDesdeInicio, rentabilidadeAcoes,
 isRFAtivo,
 calcValorLiquidoRF,
 grahamDefensivo, numeroGraham, precoTetoBazin, checklistBuyAndHold, CHECKLIST_PADRAO, cagrLucro,
-filtraFii, FII_PADRAO, serieRendimentosFii, resumoRendimentosFii, serieRecortada,
+filtraFii, FII_PADRAO, serieRendimentosFii, resumoRendimentosFii, serieRecortada, coberturaFfoFii,
 } from "./calc.mjs";
 
 // Chave pública VAPID (par gerado para este app; a privada é secret no Cloudflare)
@@ -500,7 +500,7 @@ const AJUDA_CRIT={anos_bolsa:"anos_bolsa",sem_prejuizo:"sem_prejuizo",provento_c
 // Formato: o que é · como ler · a armadilha.
 // Ajuda da tela individual de FII — escritos à mão, como os demais.
 const AJUDA_FII_DET={
-  ffo:"FFO (Funds From Operations) é o \"lucro\" de um FII: o resultado operacional sem depreciação, que em fundo imobiliário distorce o número porque imóvel não se deprecia como máquina. É o que sustenta a distribuição. Armadilha: FFO menor que o rendimento distribuído significa que o fundo está pagando com venda de ativo ou caixa acumulado — pode durar um tempo, mas não é sustentável.",
+  ffo:"FFO (Funds From Operations) é o \"lucro\" de um FII: o resultado operacional sem depreciação, que em fundo imobiliário distorce o número porque imóvel não se deprecia como máquina. É o que sustenta a distribuição. O gráfico põe FFO e distribuição lado a lado, na mesma unidade, e a cobertura diz quanto do que foi pago veio do resultado. Armadilha: cobertura abaixo de 100% significa que o fundo pagou com venda de ativo ou caixa acumulado — dura um tempo, não para sempre. Barra vermelha abaixo da linha é trimestre com resultado operacional negativo. (Não usamos \"FFO por cota\" porque exigiria o nº de cotas de cada trimestre, e FII faz emissão com frequência — dividir o FFO antigo pelas cotas de hoje viraria uma falsa curva de crescimento.)",
   serie_rend:"Quanto o fundo distribuiu por cota, mês a mês. É o gráfico mais importante da tela: mostra estabilidade, tendência e quedas. Armadilha: um fundo com DY alto e rendimento em queda é a armadilha clássica — o DY olha os 12 meses passados, e a curva mostra para onde vai. Mês sem barra é mês sem pagamento, não é erro do gráfico.",
   mes_multiplo:"Neste mês a fonte registrou mais de um pagamento, e os valores foram somados. Pode ser distribuição extra legítima ou linha duplicada na fonte — não há como distinguir pelos dados publicados, então preferimos somar e avisar em vez de escolher em silêncio.",
   dy_fonte:"Esta curva vem PRONTA do Fundamentus e não é o mesmo número que o app calcula no topo da tela. Para o MXRF11 há três respostas para a mesma pergunta: a fonte publica 13,30%, nosso cálculo dá 13,50% e a soma direta dos 12 rendimentos dá 12,19%. Use a curva pela FORMA (o DY subiu de 8% para 13%?), não pelo valor exato do ponto. O número confiável é o calculado, exibido no topo.",
@@ -649,11 +649,25 @@ function FiiModal({fundo,onClose,currency="R$"}){
         <div style={{height:14}}/>
       </>}
 
-      {det.ffo?.length>1&&<>
-        <p style={{fontSize:12,fontWeight:700,color:D.text,margin:"0 0 2px"}}>FFO trimestral<Ajuda k="ffo" mapa={AJUDA_FII_DET}/></p>
-        <GraficoLinhaFii pontos={det.ffo} cor={D.blue}/>
-        <div style={{height:14}}/>
-      </>}
+      {det.ffo?.length>1&&(()=>{
+        const cob=coberturaFfoFii(det.ffo,det.dividendo);
+        return <>
+          <p style={{fontSize:12,fontWeight:700,color:D.text,margin:"0 0 2px"}}>FFO × distribuição<Ajuda k="ffo" mapa={AJUDA_FII_DET}/></p>
+          <p style={{fontSize:10.5,color:D.text3,margin:"0 0 4px"}}>
+            {cob.cobertura_media_4t!=null
+              ? <>cobertura média (4 trimestres): <b style={{color:cob.cobertura_media_4t>=100?D.green:D.red}}>{cob.cobertura_media_4t.toLocaleString("pt-BR",{maximumFractionDigits:1})}%</b>
+                  {cob.alerta&&<b style={{color:D.red}}> · ⚠️ {cob.alerta}</b>}</>
+              : "sem distribuição registrada nos períodos"}
+          </p>
+          <GraficoFfoFii pontos={cob.pontos} currency={currency}/>
+          {/* a legenda do negativo só faz sentido se o trimestre negativo estiver
+              DENTRO da janela exibida (16 trimestres) — senão aponta para algo
+              que não está no gráfico. O MXRF11 tem negativo em 2016-12, fora. */}
+          {cob.pontos.slice(-16).some(p=>p.negativo)&&<p style={{fontSize:10,color:D.text3,margin:"2px 0 0"}}><span style={{color:D.red}}>■</span> trimestre com FFO negativo (resultado operacional no vermelho)</p>}
+          {cob.tem_ffo_negativo&&!cob.pontos.slice(-16).some(p=>p.negativo)&&<p style={{fontSize:10,color:D.text3,margin:"2px 0 0"}}>houve trimestre com FFO negativo antes da janela exibida</p>}
+          <div style={{height:14}}/>
+        </>;
+      })()}
 
       {/* P/VP sob demanda: 349 KB na origem, 65% do custo total do fundo */}
       <p style={{fontSize:12,fontWeight:700,color:D.text,margin:"0 0 4px"}}>P/VP histórico<Ajuda k="pvp_hist" mapa={AJUDA_FII_DET}/></p>
@@ -696,6 +710,45 @@ function GraficoRendFii({serie,currency}){
       })}
       <line x1={0} y1={H} x2={W} y2={H} stroke={D.border} strokeWidth={1}/>
     </svg>
+  </div>;
+}
+
+// ── FFO vs distribuição ─────────────────────────────────────────────────────
+// Barras pareadas com LINHA DO ZERO explícita: FFO negativo desce abaixo dela,
+// em vez de sumir ou virar valor absoluto (o MXRF11 teve −323.638 em 2017-03).
+// Compara as duas grandezas na mesma unidade — é o que responde se a
+// distribuição cabe no resultado.
+function GraficoFfoFii({pontos,currency}){
+  const p=(pontos||[]).slice(-16);
+  if(p.length<2)return <p style={{fontSize:12,color:D.text3}}>Série insuficiente.</p>;
+  const vals=p.flatMap(x=>[x.ffo,x.distribuido].filter(v=>Number.isFinite(v)));
+  const max=Math.max(...vals,0), min=Math.min(...vals,0);
+  const W=Math.max(300,p.length*34), H=96, amp=(max-min)||1;
+  const y=v=>H-((v-min)/amp)*(H-8)-4;
+  const y0=y(0);
+  const lw=W/p.length;
+  const mi=v=>`${(v/1e6).toLocaleString("pt-BR",{maximumFractionDigits:1})}M`;
+  return <div style={{overflowX:"auto"}}>
+    <svg viewBox={`0 0 ${W} ${H+4}`} style={{width:"100%",minWidth:300,height:112,display:"block"}}>
+      {p.map((x,i)=>{
+        const cx=i*lw, bw=lw*0.3;
+        const barra=(v,dx,cor)=>{
+          if(!Number.isFinite(v))return null;
+          const yv=y(v);
+          return <rect x={cx+dx} y={Math.min(yv,y0)} width={bw} height={Math.max(1.5,Math.abs(y0-yv))} fill={cor} opacity={0.9}/>;
+        };
+        return <g key={i}>
+          {barra(x.ffo,lw*0.15,x.negativo?D.red:D.blue)}
+          {barra(x.distribuido,lw*0.52,D.gold)}
+        </g>;
+      })}
+      {/* zero explícito: sem isto, barra negativa fica indistinguível */}
+      <line x1={0} y1={y0} x2={W} y2={y0} stroke={D.text3} strokeWidth={1} strokeDasharray={min<0?"3 3":"0"}/>
+    </svg>
+    <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:D.text3}}>
+      <span>{p[0].mes} · <span style={{color:D.blue}}>■</span> FFO <span style={{color:D.gold}}>■</span> distribuído</span>
+      <span>{mi(min)} a {mi(max)} · {p[p.length-1].mes}</span>
+    </div>
   </div>;
 }
 

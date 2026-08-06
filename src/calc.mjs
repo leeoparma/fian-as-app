@@ -1172,3 +1172,42 @@ export function serieRecortada(serie,{descartarMeses=24,maxPontos=180}={}){
     descartados:s.length-pontos.length,
   };
 }
+
+// ── Cobertura da distribuição pelo FFO ──────────────────────────────────────
+// A pergunta que importa em FII: a distribuição cabe no resultado operacional?
+// FFO abaixo do distribuído significa pagar com venda de ativo ou caixa
+// acumulado — sustentável por um tempo, não para sempre.
+//
+// ⚠️ Por que NÃO "FFO por cota": exigiria o nº de cotas de CADA trimestre. Só
+// temos o de hoje, e FII faz emissão com frequência — o MXRF11 saiu de R$ 253
+// milhões para R$ 4,3 bilhões de patrimônio. Dividir o FFO de 2017 pelas cotas
+// de 2026 produziria uma curva de "crescimento" que é só diluição. Como a fonte
+// dá FFO e distribuição na MESMA unidade (R$ absolutos, mesmos períodos), a
+// comparação sai exata sem cotas nenhuma.
+//
+// ⚠️ FFO NEGATIVO existe (MXRF11 em 2017-03: −323.638). Não vira zero nem
+// valor absoluto: fica negativo, e a cobertura fica negativa.
+export function coberturaFfoFii(ffo,dividendo){
+  const dMap=new Map((dividendo||[]).filter(p=>p&&p.mes).map(p=>[p.mes,p.valor]));
+  const pontos=(ffo||[]).filter(p=>p&&p.mes&&Number.isFinite(p.valor)).map(p=>{
+    const dist=dMap.get(p.mes);
+    const temDist=Number.isFinite(dist)&&dist>0;
+    return {
+      mes:p.mes, ffo:p.valor, distribuido:Number.isFinite(dist)?dist:null,
+      // sem distribuição no período: cobertura é indefinida, não 0 nem infinita
+      cobertura_pct:temDist?Math.round((p.valor/dist*100)*10)/10:null,
+      negativo:p.valor<0,
+    };
+  });
+  // olha os 4 últimos períodos COM distribuição — é o que diz se o problema é
+  // atual ou é história antiga
+  const recentes=pontos.filter(p=>p.cobertura_pct!=null).slice(-4);
+  const media=recentes.length?Math.round((recentes.reduce((a,p)=>a+p.cobertura_pct,0)/recentes.length)*10)/10:null;
+  return {
+    pontos,
+    cobertura_media_4t:media,
+    periodos_descobertos:recentes.filter(p=>p.cobertura_pct<100).length,
+    tem_ffo_negativo:pontos.some(p=>p.negativo),
+    alerta:media==null?null:(media<100?"distribuindo acima do resultado":null),
+  };
+}
