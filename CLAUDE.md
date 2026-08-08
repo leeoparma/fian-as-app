@@ -99,6 +99,14 @@ App de controle financeiro pessoal usado por Leo e sua parceira Carol. Suporta p
   - ⚠️ **`cache.match()` e `cache.put()` CONTAM no limite de 50 subrequisições do Worker.** Fundo frio custa 3 (match+fetch+put), quente custa 1. A rota morria com "Too many subrequests" ao pedir 40 frios (~123). Resolvido com **orçamento** que degrada e sinaliza `truncado`, em vez de teto fixo — chamar de novo avança conforme o cache aquece.
   - **Cache:** edge (`caches.default`, 12h), mesmo padrão do `/bcb-serie`. Não usar Supabase (cota de egress). KV foi avaliado e dispensado: exigiria namespace + binding para economizar 2-3 requisições/dia.
 
+## Verificação visual em navegador headless — REGRA
+
+**Chamar `resize_window` ANTES de qualquer medição, e reportar o viewport usado junto com o resultado.** O navegador headless abre com viewport `0×0`: nesse estado `position:fixed; inset:0` vira 0×0, `min(96vw,600px)` colapsa para o padding, e elementos com `min-width` "sobrevivem" enquanto os sem `min-width` somem — o que produz um diagnóstico **invertido**. Verificação sem viewport declarado não conta como verificação.
+
+O que continua válido sem viewport (não depende de layout): texto extraído do DOM, contagem de elementos, coordenadas internas de `viewBox` de SVG, `localStorage`, contagem de requisições de rede. O que **não** vale: qualquer afirmação sobre aparência, altura, largura, sobreposição ou "está bonito na tela".
+
+Caso real (30/07/2026): dois gráficos do modal de FII eram esmagados de 106px para 51px por um `overflow-x:auto` dentro de um flex column, e a verificação anterior — feita com viewport 0×0 — não só não pegou como sugeria que o gráfico saudável é que estava quebrado.
+
 ## Fluxo de trabalho com o Leo
 
 - Mostrar o diff e explicar o que mudou ANTES de commitar.

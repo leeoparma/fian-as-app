@@ -1187,27 +1187,44 @@ export function serieRecortada(serie,{descartarMeses=24,maxPontos=180}={}){
 //
 // ⚠️ FFO NEGATIVO existe (MXRF11 em 2017-03: −323.638). Não vira zero nem
 // valor absoluto: fica negativo, e a cobertura fica negativa.
-export function coberturaFfoFii(ffo,dividendo){
-  const dMap=new Map((dividendo||[]).filter(p=>p&&p.mes).map(p=>[p.mes,p.valor]));
-  const pontos=(ffo||[]).filter(p=>p&&p.mes&&Number.isFinite(p.valor)).map(p=>{
-    const dist=dMap.get(p.mes);
-    const temDist=Number.isFinite(dist)&&dist>0;
+// janela padrão de 12 trimestres (3 anos): 38 linhas é ilegível, 4 é curto
+// demais para ver padrão. A média agregada é SEMPRE calculada sobre a MESMA
+// janela exibida — nunca sobre um recorte diferente do que está na tela.
+export function coberturaFfoFii(ffo,dividendo,{janela=12}={}){
+  const dm=new Map((dividendo||[]).filter(p=>p&&p.mes).map(p=>[p.mes,p.valor]));
+  const base=(ffo||[]).filter(p=>p&&p.mes&&Number.isFinite(p.valor)).slice(-janela);
+  const linhas=base.map(p=>{
+    const d=dm.get(p.mes);
+    // ⚠️ Zero-filler, 5ª vez neste projeto: trimestre sem distribuição confiável
+    // vira null (a tela mostra "—"), NUNCA 0,00 — mas conta como zero no
+    // agregado, porque não distribuir É informação, não ausência dela.
+    const temD=Number.isFinite(d)&&d>0;
+    const neg=p.valor<0;
     return {
-      mes:p.mes, ffo:p.valor, distribuido:Number.isFinite(dist)?dist:null,
-      // sem distribuição no período: cobertura é indefinida, não 0 nem infinita
-      cobertura_pct:temDist?Math.round((p.valor/dist*100)*10)/10:null,
-      negativo:p.valor<0,
+      mes:p.mes, ffo:p.valor, distribuido:temD?d:null,
+      // Cobertura = FFO ÷ distribuído. NÃO o inverso: <100% precisa significar
+      // "pagou mais do que ganhou" para casar com vermelho. Com dist/FFO, um
+      // fundo que distribui além do resultado daria >100% e sairia verde.
+      // FFO negativo: percentual não tem sentido — "n/a", não um número torto.
+      cobertura_pct:(neg||!temD)?null:Math.round((p.valor/d*100)*10)/10,
+      sem_distribuicao:!temD,
+      ffo_negativo:neg,
     };
   });
-  // olha os 4 últimos períodos COM distribuição — é o que diz se o problema é
-  // atual ou é história antiga
-  const recentes=pontos.filter(p=>p.cobertura_pct!=null).slice(-4);
-  const media=recentes.length?Math.round((recentes.reduce((a,p)=>a+p.cobertura_pct,0)/recentes.length)*10)/10:null;
+  const somaFfo=linhas.reduce((a,l)=>a+l.ffo,0);
+  const somaDist=linhas.reduce((a,l)=>a+(l.distribuido||0),0);   // ausente = 0
+  // Agregado em vez de média de percentuais: média daria peso igual a
+  // trimestres de tamanhos diferentes, e a regra antiga descartava em silêncio
+  // justamente os trimestres sem distribuição, que são os mais informativos.
+  const agregada=somaDist>0?Math.round((somaFfo/somaDist*100)*10)/10:null;
   return {
-    pontos,
-    cobertura_media_4t:media,
-    periodos_descobertos:recentes.filter(p=>p.cobertura_pct<100).length,
-    tem_ffo_negativo:pontos.some(p=>p.negativo),
-    alerta:media==null?null:(media<100?"distribuindo acima do resultado":null),
+    linhas:[...linhas].reverse(),          // mais recente primeiro, para a tabela
+    janela:linhas.length,                  // quantidade REAL, para o rótulo não mentir
+    soma_ffo:somaFfo, soma_distribuido:somaDist,
+    cobertura_agregada_pct:agregada,
+    trimestres_descobertos:linhas.filter(l=>l.cobertura_pct!=null&&l.cobertura_pct<100).length,
+    trimestres_sem_distribuicao:linhas.filter(l=>l.sem_distribuicao).length,
+    tem_ffo_negativo:linhas.some(l=>l.ffo_negativo),
+    alerta:agregada==null?null:(agregada<100?"distribuindo acima do resultado":null),
   };
 }

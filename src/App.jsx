@@ -651,20 +651,40 @@ function FiiModal({fundo,onClose,currency="R$"}){
 
       {det.ffo?.length>1&&(()=>{
         const cob=coberturaFfoFii(det.ffo,det.dividendo);
+        const mi=v=>v==null?"—":`${(v/1e6).toLocaleString("pt-BR",{minimumFractionDigits:1,maximumFractionDigits:1})}M`;
+        const td={padding:"5px 6px",borderBottom:`1px solid ${D.border}`,fontSize:11,whiteSpace:"nowrap"};
         return <>
           <p style={{fontSize:12,fontWeight:700,color:D.text,margin:"0 0 2px"}}>FFO × distribuição<Ajuda k="ffo" mapa={AJUDA_FII_DET}/></p>
-          <p style={{fontSize:10.5,color:D.text3,margin:"0 0 4px"}}>
-            {cob.cobertura_media_4t!=null
-              ? <>cobertura média (4 trimestres): <b style={{color:cob.cobertura_media_4t>=100?D.green:D.red}}>{cob.cobertura_media_4t.toLocaleString("pt-BR",{maximumFractionDigits:1})}%</b>
+          {/* o rótulo declara a janela REAL da tabela — a média agregada sai
+              exatamente das linhas exibidas, uma fonte da verdade só */}
+          <p style={{fontSize:10.5,color:D.text3,margin:"0 0 6px"}}>
+            {cob.cobertura_agregada_pct!=null
+              ? <>cobertura agregada ({cob.janela} trimestres): <b style={{color:cob.cobertura_agregada_pct>=100?D.green:D.red}}>{cob.cobertura_agregada_pct.toLocaleString("pt-BR",{maximumFractionDigits:1})}%</b>
                   {cob.alerta&&<b style={{color:D.red}}> · ⚠️ {cob.alerta}</b>}</>
-              : "sem distribuição registrada nos períodos"}
+              : `sem distribuição registrada nos ${cob.janela} trimestres`}
           </p>
-          <GraficoFfoFii pontos={cob.pontos} currency={currency}/>
-          {/* a legenda do negativo só faz sentido se o trimestre negativo estiver
-              DENTRO da janela exibida (16 trimestres) — senão aponta para algo
-              que não está no gráfico. O MXRF11 tem negativo em 2016-12, fora. */}
-          {cob.pontos.slice(-16).some(p=>p.negativo)&&<p style={{fontSize:10,color:D.text3,margin:"2px 0 0"}}><span style={{color:D.red}}>■</span> trimestre com FFO negativo (resultado operacional no vermelho)</p>}
-          {cob.tem_ffo_negativo&&!cob.pontos.slice(-16).some(p=>p.negativo)&&<p style={{fontSize:10,color:D.text3,margin:"2px 0 0"}}>houve trimestre com FFO negativo antes da janela exibida</p>}
+          <div style={{overflowX:"auto",flexShrink:0}}>
+            <table style={{width:"100%",borderCollapse:"collapse",minWidth:300}}>
+              <thead><tr>
+                {["Trimestre","FFO","Distribuído","Cobertura"].map((h,i)=>
+                  <th key={h} style={{...td,color:D.text3,fontWeight:600,textAlign:i?"right":"left",borderBottom:`1px solid ${D.border}`}}>{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {cob.linhas.map(l=><tr key={l.mes}>
+                  <td style={{...td,color:D.text2}}>{l.mes}</td>
+                  {/* FFO negativo mantém o sinal e ganha cor — não vira módulo */}
+                  <td style={{...td,textAlign:"right",color:l.ffo_negativo?D.red:D.text}}>{mi(l.ffo)}</td>
+                  {/* sem distribuição confiável: "—", NUNCA 0,00 */}
+                  <td style={{...td,textAlign:"right",color:l.distribuido==null?D.text3:D.gold}}>{mi(l.distribuido)}</td>
+                  <td style={{...td,textAlign:"right",fontWeight:700,
+                       color:l.cobertura_pct==null?D.text3:(l.cobertura_pct>=100?D.green:D.red)}}>
+                    {l.cobertura_pct==null?(l.ffo_negativo?"n/a":"—"):`${l.cobertura_pct.toLocaleString("pt-BR",{maximumFractionDigits:1})}%`}
+                  </td>
+                </tr>)}
+              </tbody>
+            </table>
+          </div>
+          {cob.tem_ffo_negativo&&<p style={{fontSize:10,color:D.text3,margin:"4px 0 0"}}>trimestre com FFO negativo aparece em vermelho e sem cobertura — percentual sobre resultado negativo não tem sentido</p>}
           <div style={{height:14}}/>
         </>;
       })()}
@@ -695,7 +715,15 @@ function GraficoRendFii({serie,currency}){
   if(!vals.length)return <p style={{fontSize:12,color:D.text3}}>Sem histórico de rendimentos.</p>;
   const max=Math.max(...vals), W=Math.max(300,serie.length*9), H=90;
   const lw=W/serie.length;
-  return <div style={{overflowX:"auto"}}>
+  // ⚠️ flexShrink:0 + minHeight NÃO são decoração. O card do Modal é
+  // display:flex/column com max-height:90vh, e pela spec do flexbox um item
+  // com overflow != visible perde o min-height:auto (vira 0) — fica livremente
+  // compressível. Medido: este wrapper era esmagado de 106px para 51px, e o
+  // card sequer rolava (scrollHeight == clientHeight), porque a folga saía toda
+  // daqui. Com shrink travado, o transbordo volta para o overflow-y do card,
+  // que existe justamente para isso. A rolagem horizontal fica: 36 pontos
+  // precisam dela.
+  return <div style={{overflowX:"auto",flexShrink:0,minHeight:H+16}}>
     <svg viewBox={`0 0 ${W} ${H+16}`} style={{width:"100%",minWidth:300,height:106,display:"block"}}>
       {serie.map((p,i)=>{
         const x=i*lw;
@@ -710,45 +738,6 @@ function GraficoRendFii({serie,currency}){
       })}
       <line x1={0} y1={H} x2={W} y2={H} stroke={D.border} strokeWidth={1}/>
     </svg>
-  </div>;
-}
-
-// ── FFO vs distribuição ─────────────────────────────────────────────────────
-// Barras pareadas com LINHA DO ZERO explícita: FFO negativo desce abaixo dela,
-// em vez de sumir ou virar valor absoluto (o MXRF11 teve −323.638 em 2017-03).
-// Compara as duas grandezas na mesma unidade — é o que responde se a
-// distribuição cabe no resultado.
-function GraficoFfoFii({pontos,currency}){
-  const p=(pontos||[]).slice(-16);
-  if(p.length<2)return <p style={{fontSize:12,color:D.text3}}>Série insuficiente.</p>;
-  const vals=p.flatMap(x=>[x.ffo,x.distribuido].filter(v=>Number.isFinite(v)));
-  const max=Math.max(...vals,0), min=Math.min(...vals,0);
-  const W=Math.max(300,p.length*34), H=96, amp=(max-min)||1;
-  const y=v=>H-((v-min)/amp)*(H-8)-4;
-  const y0=y(0);
-  const lw=W/p.length;
-  const mi=v=>`${(v/1e6).toLocaleString("pt-BR",{maximumFractionDigits:1})}M`;
-  return <div style={{overflowX:"auto"}}>
-    <svg viewBox={`0 0 ${W} ${H+4}`} style={{width:"100%",minWidth:300,height:112,display:"block"}}>
-      {p.map((x,i)=>{
-        const cx=i*lw, bw=lw*0.3;
-        const barra=(v,dx,cor)=>{
-          if(!Number.isFinite(v))return null;
-          const yv=y(v);
-          return <rect x={cx+dx} y={Math.min(yv,y0)} width={bw} height={Math.max(1.5,Math.abs(y0-yv))} fill={cor} opacity={0.9}/>;
-        };
-        return <g key={i}>
-          {barra(x.ffo,lw*0.15,x.negativo?D.red:D.blue)}
-          {barra(x.distribuido,lw*0.52,D.gold)}
-        </g>;
-      })}
-      {/* zero explícito: sem isto, barra negativa fica indistinguível */}
-      <line x1={0} y1={y0} x2={W} y2={y0} stroke={D.text3} strokeWidth={1} strokeDasharray={min<0?"3 3":"0"}/>
-    </svg>
-    <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:D.text3}}>
-      <span>{p[0].mes} · <span style={{color:D.blue}}>■</span> FFO <span style={{color:D.gold}}>■</span> distribuído</span>
-      <span>{mi(min)} a {mi(max)} · {p[p.length-1].mes}</span>
-    </div>
   </div>;
 }
 

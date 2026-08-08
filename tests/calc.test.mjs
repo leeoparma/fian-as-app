@@ -1606,50 +1606,83 @@ test("FII resumo: fundo que parou de pagar acusa o tempo parado", ()=>{
   assert.equal(r.meses_desde_ultimo,36);      // nada na janela inteira
 });
 
-// ── Cobertura da distribuição pelo FFO ──────────────────────────────────────
-test("FII FFO: cobertura com números reais do MXRF11", ()=>{
-  // 2025-12: 120.266.970 / 131.197.589 = 91,67% → 91,7
-  // 2026-03: 120.253.668 / 179.518.966 = 66,99% → 67,0
+// ── Cobertura da distribuição pelo FFO (agregada) ───────────────────────────
+test("FII FFO: cobertura AGREGADA, não média de percentuais", ()=>{
+  // soma FFO 300 / soma dist 400 = 75,0%
+  // (a média dos percentuais daria (100+50)/2 = 75 por coincidência aqui, então
+  //  o caso seguinte usa tamanhos diferentes para separar os métodos)
   const r=coberturaFfoFii(
-    [{mes:"2025-12",valor:120266970},{mes:"2026-03",valor:120253668}],
-    [{mes:"2025-12",valor:131197589},{mes:"2026-03",valor:179518966}]);
-  assert.equal(r.pontos[0].cobertura_pct,91.7);
-  assert.equal(r.pontos[1].cobertura_pct,67);
-  assert.equal(r.periodos_descobertos,2);
+    [{mes:"2025-09",valor:100},{mes:"2025-12",valor:200}],
+    [{mes:"2025-09",valor:100},{mes:"2025-12",valor:300}]);
+  assert.equal(r.soma_ffo,300); assert.equal(r.soma_distribuido,400);
+  assert.equal(r.cobertura_agregada_pct,75);
+});
+
+test("FII FFO: agregada dá peso por tamanho, média de percentuais não", ()=>{
+  // trimestre pequeno com 200% e trimestre grande com 50%:
+  //   média de percentuais = 125% (parece saudável)
+  //   agregada = (20+500)/(10+1000) = 51,5% (a verdade)
+  const r=coberturaFfoFii(
+    [{mes:"2025-09",valor:20},{mes:"2025-12",valor:500}],
+    [{mes:"2025-09",valor:10},{mes:"2025-12",valor:1000}]);
+  assert.equal(r.cobertura_agregada_pct,51.5);
+  assert.notEqual(r.cobertura_agregada_pct,125);
+});
+
+test("FII FFO: cobertura é FFO÷distribuído — <100% significa pagar além do que ganha", ()=>{
+  // A régua de cor (<100 vermelho) só fecha nesta direção. Com dist÷FFO, um
+  // fundo distribuindo acima do resultado daria >100% e sairia verde.
+  const r=coberturaFfoFii([{mes:"2026-03",valor:115164429}],[{mes:"2026-03",valor:135779512}]);
+  assert.equal(r.linhas[0].cobertura_pct,84.8);
+  assert.ok(r.cobertura_agregada_pct<100);
   assert.equal(r.alerta,"distribuindo acima do resultado");
 });
 
-test("FII FFO: negativo continua NEGATIVO, não vira zero nem absoluto", ()=>{
-  // MXRF11 em 2017-03 teve FFO −323.638. Zerar ou usar módulo esconderia
-  // trimestre de prejuízo operacional.
-  const r=coberturaFfoFii([{mes:"2017-03",valor:-323638}],[{mes:"2017-03",valor:100000}]);
-  assert.equal(r.pontos[0].ffo,-323638);
-  assert.equal(r.pontos[0].negativo,true);
-  assert.equal(r.pontos[0].cobertura_pct,-323.6);   // negativa, como deve ser
+test("FII FFO: trimestre sem distribuição NÃO some — vira null e conta zero", ()=>{
+  // Zero-filler, 5ª vez: "—" na tela, nunca 0,00. E entra no agregado como
+  // zero, porque não distribuir é informação.
+  const r=coberturaFfoFii(
+    [{mes:"2025-09",valor:100},{mes:"2025-12",valor:100}],
+    [{mes:"2025-09",valor:0}, {mes:"2025-12",valor:100}]);
+  assert.equal(r.linhas.length,2);                    // as duas aparecem
+  const semDist=r.linhas.find(l=>l.mes==="2025-09");
+  assert.equal(semDist.distribuido,null);             // null, NÃO 0
+  assert.notEqual(semDist.distribuido,0);
+  assert.equal(semDist.cobertura_pct,null);           // "—", não Infinity
+  assert.equal(r.soma_distribuido,100);               // contou como zero
+  assert.equal(r.cobertura_agregada_pct,200);         // 200/100
+  assert.equal(r.trimestres_sem_distribuicao,1);
+});
+
+test("FII FFO: negativo mostra o valor e marca cobertura n/a", ()=>{
+  const r=coberturaFfoFii([{mes:"2024-03",valor:-155513142}],[{mes:"2024-03",valor:100000000}]);
+  assert.equal(r.linhas[0].ffo,-155513142);           // valor negativo preservado
+  assert.equal(r.linhas[0].cobertura_pct,null);       // n/a, não percentual torto
+  assert.equal(r.linhas[0].ffo_negativo,true);
   assert.equal(r.tem_ffo_negativo,true);
-  assert.notEqual(r.pontos[0].ffo,0);
-  assert.notEqual(r.pontos[0].ffo,323638);
 });
 
-test("FII FFO: período sem distribuição tem cobertura null, não zero nem infinita", ()=>{
-  const r=coberturaFfoFii([{mes:"2017-06",valor:5850780}],[{mes:"2017-06",valor:0}]);
-  assert.equal(r.pontos[0].cobertura_pct,null);
-  assert.equal(r.cobertura_media_4t,null);
-});
-
-test("FII FFO: cobertura saudável não dispara alerta", ()=>{
-  const ffo=[1,2,3,4].map(i=>({mes:`2025-0${i*3}`,valor:150}));
-  const div=[1,2,3,4].map(i=>({mes:`2025-0${i*3}`,valor:100}));
-  const r=coberturaFfoFii(ffo,div);
-  assert.equal(r.cobertura_media_4t,150);
-  assert.equal(r.periodos_descobertos,0);
-  assert.equal(r.alerta,null);
-});
-
-test("FII FFO: média olha só os 4 últimos períodos com distribuição", ()=>{
+test("FII FFO: janela padrão 12 e o rótulo reflete a quantidade REAL", ()=>{
   const ffo=[],div=[];
-  for(let i=1;i<=8;i++){ffo.push({mes:`2025-${String(i).padStart(2,"0")}`,valor:i<=4?50:200});
-                        div.push({mes:`2025-${String(i).padStart(2,"0")}`,valor:100});}
-  // 4 primeiros 50% (ruins), 4 últimos 200% (bons) → média dos 4 ÚLTIMOS = 200
-  assert.equal(coberturaFfoFii(ffo,div).cobertura_media_4t,200);
+  for(let i=0;i<38;i++){const y=2017+Math.floor(i/4),m=String((i%4)*3+3).padStart(2,"0");
+    ffo.push({mes:`${y}-${m}`,valor:100}); div.push({mes:`${y}-${m}`,valor:100});}
+  const r=coberturaFfoFii(ffo,div);
+  assert.equal(r.linhas.length,12);
+  assert.equal(r.janela,12);                          // rótulo usa isto
+  // série curta: janela reporta o que existe, não o pedido
+  const curta=coberturaFfoFii(ffo.slice(-5),div.slice(-5));
+  assert.equal(curta.janela,5);
+});
+
+test("FII FFO: linhas vêm mais recente primeiro", ()=>{
+  const r=coberturaFfoFii(
+    [{mes:"2025-09",valor:1},{mes:"2025-12",valor:2},{mes:"2026-03",valor:3}],
+    [{mes:"2025-09",valor:1},{mes:"2025-12",valor:2},{mes:"2026-03",valor:3}]);
+  assert.deepEqual(r.linhas.map(l=>l.mes),["2026-03","2025-12","2025-09"]);
+});
+
+test("FII FFO: sem distribuição alguma na janela devolve null, não zero", ()=>{
+  const r=coberturaFfoFii([{mes:"2025-12",valor:100}],[{mes:"2025-12",valor:0}]);
+  assert.equal(r.cobertura_agregada_pct,null);
+  assert.equal(r.alerta,null);
 });
