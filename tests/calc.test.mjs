@@ -1662,6 +1662,36 @@ test("FII FFO: negativo mostra o valor e marca cobertura n/a", ()=>{
   assert.equal(r.tem_ffo_negativo,true);
 });
 
+test("FII FFO: negativo SUBTRAI do agregado — não é descartado nem vira n/a global", ()=>{
+  // 3 trimestres: +100, -40, +100 · distribuído 50 em cada um.
+  // Agregado correto = (100-40+100)/150 = 106,7%.
+  // Se o negativo fosse DESCARTADO daria 200/100 = 200% — um fundo que teve
+  // prejuízo operacional pareceria o dobro de coberto. É o erro que este teste barra.
+  const r=coberturaFfoFii(
+    [{mes:"2025-06",valor:100},{mes:"2025-09",valor:-40},{mes:"2025-12",valor:100}],
+    [{mes:"2025-06",valor:50},{mes:"2025-09",valor:50},{mes:"2025-12",valor:50}]);
+  assert.equal(r.soma_ffo,160);                       // 100-40+100, com o sinal
+  assert.equal(r.soma_distribuido,150);               // o trimestre negativo pagou: conta
+  assert.equal(r.cobertura_agregada_pct,106.7);
+  assert.notEqual(r.cobertura_agregada_pct,200);      // descarte silencioso
+  assert.notEqual(r.cobertura_agregada_pct,null);     // "n/a" contaminando o agregado
+  assert.equal(r.linhas.find(l=>l.mes==="2025-09").cobertura_pct,null);  // só a LINHA é n/a
+  assert.equal(r.janela,3);                           // continua na janela, não sumiu
+});
+
+test("FII FFO: tem_ffo_negativo olha só a janela, não a série inteira", ()=>{
+  // MXRF11 real: único FFO negativo é 2016-12, fora dos 12 trimestres exibidos.
+  // O aviso não pode disparar apontando para algo que não está na tela — foi
+  // exatamente esse o defeito da legenda do gráfico antigo.
+  const ffo=[{mes:"2016-12",valor:-155513142}],div=[{mes:"2016-12",valor:1}];
+  for(let i=0;i<12;i++){const y=2023+Math.floor(i/4),m=String((i%4)*3+3).padStart(2,"0");
+    ffo.push({mes:`${y}-${m}`,valor:100}); div.push({mes:`${y}-${m}`,valor:100});}
+  const r=coberturaFfoFii(ffo,div);
+  assert.equal(r.janela,12);
+  assert.equal(r.tem_ffo_negativo,false);             // o negativo ficou fora
+  assert.equal(r.soma_ffo,1200);                      // e não contaminou o agregado
+});
+
 test("FII FFO: janela padrão 12 e o rótulo reflete a quantidade REAL", ()=>{
   const ffo=[],div=[];
   for(let i=0;i<38;i++){const y=2017+Math.floor(i/4),m=String((i%4)*3+3).padStart(2,"0");

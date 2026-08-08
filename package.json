@@ -2,6 +2,7 @@
   "name": "financas-app",
   "version": "1.0.0",
   "scripts": {
+    "test": "node --test tests/calc.test.mjs",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
