@@ -110,6 +110,18 @@ O que continua válido sem viewport (não depende de layout): texto extraído do
 
 Caso real (30/07/2026): dois gráficos do modal de FII eram esmagados de 106px para 51px por um `overflow-x:auto` dentro de um flex column, e a verificação anterior — feita com viewport 0×0 — não só não pegou como sugeria que o gráfico saudável é que estava quebrado.
 
+## "Commitado ≠ no ar" — REGRA
+
+**Nenhum relatório de trabalho concluído vale sem o artefato identificado.** Dizer "pronto", "commitado" ou "corrigido" sem nomear O QUE exatamente está onde é relatório vazio — e pior que vazio, porque autoriza um teste que não testa nada. O artefato é um destes três, explícito:
+
+- **hash do bundle** publicado (`index-<hash>.js`), quando a afirmação é sobre o app no ar;
+- **commit presente no remoto** (`git log origin/main`), quando é sobre código entregue — commit local **não** é entrega, `git commit` não dispara deploy nenhum;
+- **número medido na tela**, quando é sobre comportamento.
+
+Ao terminar qualquer trabalho, dizer também o que FALTA para ele chegar ao usuário. Se o passo seguinte é `git push`, dizer isso na mesma frase em que se diz "pronto".
+
+Caso real (10/08/2026): a trava anti-base64 foi commitada em `89b1499` e reportada como "código pronto e commitado", com lista de arquivos. Os 3 commits nunca foram para o remoto. O Leo montou um teste de produção — anexar foto real, medir a aba Network — contra o bundle `index-022357da.js`, que era o build de `120773e`, anterior à trava e a todo o trabalho de FII. O teste "falhou" e não mediu nada sobre a trava; a Vercel tinha publicado corretamente o que existia no remoto. O diagnóstico da falsa falha custou uma rodada inteira. Confirmação barata que teria evitado tudo: `git log origin/main..HEAD` antes de anunciar, e comparar o hash do bundle esperado com o carregado.
+
 ## Fluxo de trabalho com o Leo
 
 - Mostrar o diff e explicar o que mudou ANTES de commitar.

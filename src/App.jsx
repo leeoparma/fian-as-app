@@ -124,7 +124,7 @@ let _pendenteDeSalvar=false; // true enquanto existir uma gravação que ainda n
 // Incidente 29/06-11/07/2026: uma foto de NF de 2,82MB dentro de
 // `transacoes[].nfImg` fazia TODO boot baixar 2,13MB (gzip). Enquanto a
 // limpeza estiver neste choke point, nenhum caminho de entrada — setData,
-// importar(), restauração de backup, build velho em cache de service worker —
+// importar(), restauração de backup, aba antiga ainda aberta com build velho —
 // consegue pôr imagem em `profiles.data`, mesmo um caminho que ainda não
 // existe. A ordem é enfileirar → limpar → gravar: inverter perde a foto.
 async function sanitizarParaNuvem(id,dados){
@@ -5079,11 +5079,15 @@ function AppInner(){
   // Fila de fotos de NF → Storage. Sobe o que estiver pendente e grava o
   // `nfPath` de volta na transação. Duas origens alimentam esta fila:
   //  1. anexo novo cujo upload falhou (offline) — a foto nunca entra no perfil;
-  //  2. base64 que a trava do salvarComRetry barrou. Isso inclui o caso de um
-  //     aparelho rodando build VELHO pelo cache do service worker (public/sw.js
-  //     existe, então versão antiga em cache é cenário real, não hipótese): ele
-  //     grava base64 na nuvem, este aqui carrega, sobe e limpa. É a auto-cura,
-  //     e é o mesmo caminho que migra qualquer `nfImg` legado que apareça.
+  //  2. base64 que a trava do salvarComRetry barrou, ou que já estava na nuvem
+  //     gravado por uma versão anterior do app: aba antiga deixada aberta,
+  //     outro aparelho que ainda não recarregou, ou import de um export legado.
+  //     Este efeito carrega, sobe e limpa — é a auto-cura, e o mesmo caminho
+  //     que migra qualquer `nfImg` legado que apareça.
+  //     ⚠️ NÃO é o service worker: public/sw.js é só push, sem handler de
+  //     fetch e sem cache, então ele nunca serve bundle velho. Uma versão
+  //     anterior desta linha afirmava o contrário — errado, e escrito sem ler
+  //     o arquivo.
   useEffect(()=>{
     if(!session)return;
     let cancelado=false,rodando=false;
