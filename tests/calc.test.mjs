@@ -12,7 +12,7 @@ import {
   totaisTransacoes,saldoBanco,parcelaValor,parcelaData,
   calcSaldos,calcDividas,totaisPorPessoa,
   salarioMensal,converteMoeda,taxaMensalSim,simularJuros,
-  semFotos,mesclarFotos,projetarFluxo,ocorrenciasRecorrencia,addDias,marcarDuplicatas,montarAgendaPush,compraAcao,vendaAcao,
+  semFotos,mesclarFotos,extraiFotosBase64,contemBase64,projetarFluxo,ocorrenciasRecorrencia,addDias,marcarDuplicatas,montarAgendaPush,compraAcao,vendaAcao,
   ocorrenciasSWAte,pendentesRecorrenciaSW,relatorioMensal,compararMeses,serieGastoAcumulado,extratoComSaldo,
 rentabilidadeRF,serieRentabilidadeRF,composicaoAcoes,
 rentabilidadeAcoesDesdeInicio,ganhoAcoesEntreSnapshots,rentabilidadeAcoes,isRFAtivo,calcValorLiquidoRF,
@@ -340,6 +340,62 @@ test("backup: transação que só existe no backup fica sem foto (sem inventar)"
   const backup={br:{transacoes:[{id:"tX",valor:10,nfImg:null}]}};
   const r=mesclarFotos(backup,dadosComFoto);
   assert.equal(r.br.transacoes[0].nfImg,null);
+});
+test("mesclarFotos: prefere nfPath (Storage) e não ressuscita base64 por cima", ()=>{
+  const atual={br:{transacoes:[{id:"t1",valor:50,nfPath:"u/t1.jpg"}]}};
+  const r=mesclarFotos({br:{transacoes:[{id:"t1",valor:50}]}},atual);
+  assert.equal(r.br.transacoes[0].nfPath,"u/t1.jpg");
+  assert.equal(r.br.transacoes[0].nfImg,undefined);   // referência, nunca imagem
+});
+
+// ── Trava anti-base64 (incidente de 2,82MB, 29/06-11/07/2026) ────────────────
+test("extraiFotosBase64: tira o data-URL do payload e DEVOLVE a foto", ()=>{
+  const {limpo,fotos}=extraiFotosBase64(dadosComFoto);
+  // a foto sai do payload…
+  assert.equal(limpo.br.transacoes[0].nfImg,null);
+  assert.equal(contemBase64(limpo),false);
+  // …mas NÃO é jogada fora: quem chama precisa dela para enfileirar antes de gravar.
+  // Limpar sem devolver seria perder a nota fiscal do usuário em silêncio.
+  assert.equal(fotos.length,1);
+  assert.deepEqual({...fotos[0]},{perfil:"br",txId:"t1",dataUrl:"data:image/jpeg;base64,AAAA"});
+  assert.equal(limpo.br.transacoes[0].nfPendente,true); // a tela mostra "aguardando envio"
+  assert.equal(limpo.br.transacoes[0].valor,50);        // resto intacto
+  assert.equal(dadosComFoto.br.transacoes[0].nfImg,"data:image/jpeg;base64,AAAA"); // não muta
+});
+test("extraiFotosBase64: nfPath e null passam intocados — só data: sai", ()=>{
+  const all={br:{transacoes:[
+    {id:"a",nfPath:"u/a.jpg"},          // já migrada
+    {id:"b",nfImg:null},                // os 161 campos legados de hoje
+    {id:"c"},                           // sem campo nenhum
+    {id:"d",nfImg:"https://x/y.jpg"},   // URL, não base64
+  ]}};
+  const {limpo,fotos}=extraiFotosBase64(all);
+  assert.equal(fotos.length,0);
+  assert.equal(limpo.br,all.br);        // sem mudança = mesma referência, sem cópia inútil
+  assert.equal(limpo.br.transacoes[0].nfPath,"u/a.jpg");
+  assert.equal(limpo.br.transacoes[3].nfImg,"https://x/y.jpg");
+});
+test("extraiFotosBase64: pega foto em QUALQUER perfil, não só no primeiro", ()=>{
+  const all={br:{transacoes:[{id:"x"}]},au:{transacoes:[{id:"y",nfImg:"data:image/png;base64,BBBB"}]}};
+  const {limpo,fotos}=extraiFotosBase64(all);
+  assert.equal(fotos.length,1);
+  assert.equal(fotos[0].perfil,"au");
+  assert.equal(contemBase64(limpo),false);
+});
+test("extraiFotosBase64: sobrevive a perfil corrompido sem derrubar o save", ()=>{
+  // um save que joga exceção deixa o dado só no aparelho — a trava não pode ser
+  // o motivo de a nuvem parar de receber.
+  const {limpo,fotos}=extraiFotosBase64({br:null,au:"lixo",us:[1,2],ok:{transacoes:[{id:"z",nfImg:"data:image/jpeg;base64,CCCC"}]}});
+  assert.equal(fotos.length,1);
+  assert.equal(limpo.br,null);
+  assert.equal(limpo.au,"lixo");
+  assert.equal(contemBase64(limpo),false);
+});
+test("contemBase64: detecta o que a trava tem que barrar", ()=>{
+  assert.equal(contemBase64(dadosComFoto),true);
+  assert.equal(contemBase64({br:{transacoes:[{id:"a",nfPath:"u/a.jpg"}]}}),false);
+  assert.equal(contemBase64({}),false);
+  assert.equal(contemBase64(null),false);
 });
 
 // ── Projeção de fluxo de caixa ───────────────────────────────────────────────

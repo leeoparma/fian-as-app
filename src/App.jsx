@@ -8,7 +8,7 @@ import {
   totaisTransacoes, saldoBanco as saldoBancoCalc, parcelaValor, parcelaData,
   calcSaldos as calcSaldosPure, calcDividas as calcDividasPure, totaisPorPessoa as totaisPorPessoaPure,
   salarioMensal, converteMoeda, taxaMensalSim, simularJuros,
-  semFotos, mesclarFotos, projetarFluxo, addDias, marcarDuplicatas, montarAgendaPush,
+  semFotos, mesclarFotos, extraiFotosBase64, projetarFluxo, addDias, marcarDuplicatas, montarAgendaPush,
   compraAcao, vendaAcao, pendentesRecorrenciaSW, relatorioMensal, compararMeses, serieGastoAcumulado, extratoComSaldo,
   totalPagoFatura, calcFaturaPagamentos, posicaoRV,
 rentabilidadeRF, serieRentabilidadeRF, composicaoAcoes,
@@ -18,6 +18,7 @@ calcValorLiquidoRF,
 grahamDefensivo, numeroGraham, precoTetoBazin, checklistBuyAndHold, CHECKLIST_PADRAO, cagrLucro,
 filtraFii, FII_PADRAO, serieRendimentosFii, resumoRendimentosFii, serieRecortada, coberturaFfoFii,
 } from "./calc.mjs";
+import {configurarNf, enfileirar, drenar, urlAssinada} from "./nfstore.mjs";
 
 // Chave pública VAPID (par gerado para este app; a privada é secret no Cloudflare)
 const VAPID_PUBLIC="BPG9T3yvnIUJjBeIhAJz28UPwa8qSRuRFqlu-R4tnHcXqHQ20-4BwnZ4IFCSBB_k87dD5pxpgWS1E-eHjx8W6JI";
@@ -83,6 +84,9 @@ const supa={
   async saveShared(codigo,d){await com401(async t=>{const r=await fetch(`${SUPA_URL}/rest/v1/rpc/save_shared`,{method:"POST",headers:supa.ah(t),body:JSON.stringify({p_codigo:codigo,p_data:d})});if(!r.ok){const e=new Error("save_shared HTTP "+r.status);e.status=r.status;throw e;}});},
 };
 
+// Token lido NA HORA (não preso em closure) — mesmo motivo de salvarComRetry.
+configurarNf({url:SUPA_URL,key:SUPA_KEY,getToken:async()=>lsGet("session")?.token||(await renovarSessao())?.token});
+
 const D={bg:"#0a0e1a",bg2:"#0f1629",bg3:"#151d35",card:"#111827",card2:"#1a2235",border:"#1e2d4a",border2:"#253352",green:"#00d084",red:"#ff4757",blue:"#3b82f6",gold:"#f59e0b",purple:"#8b5cf6",text:"#f1f5f9",text2:"#94a3b8",text3:"#64748b"};
 const CORES=[D.green,D.blue,D.purple,D.gold,D.red,"#06b6d4","#ec4899"];
 // ── Sessão: renovação automática do token ─────────────────────────────────────
@@ -116,11 +120,26 @@ function parseSupaTs(s){
 let _saveErroGlobal="";const _saveErroOuvintes=new Set();
 function setSaveErro(msg){_saveErroGlobal=msg;_saveErroOuvintes.forEach(fn=>fn(msg));}
 let _pendenteDeSalvar=false; // true enquanto existir uma gravação que ainda não foi confirmada pela nuvem
+// ⚠️ PONTO ÚNICO DE GRAVAÇÃO — a trava anti-base64 mora aqui de propósito.
+// Incidente 29/06-11/07/2026: uma foto de NF de 2,82MB dentro de
+// `transacoes[].nfImg` fazia TODO boot baixar 2,13MB (gzip). Enquanto a
+// limpeza estiver neste choke point, nenhum caminho de entrada — setData,
+// importar(), restauração de backup, build velho em cache de service worker —
+// consegue pôr imagem em `profiles.data`, mesmo um caminho que ainda não
+// existe. A ordem é enfileirar → limpar → gravar: inverter perde a foto.
+async function sanitizarParaNuvem(id,dados){
+  const {limpo,fotos}=extraiFotosBase64(dados);
+  if(!fotos.length)return dados;                    // caminho normal, custo zero
+  console.warn("[nf] base64 barrado no payload:",fotos.length,"foto(s) — indo para a fila local");
+  await enfileirar(id,fotos);                       // se JOGAR, o save aborta e a foto fica no perfil
+  return limpo;
+}
 async function salvarComRetry(id,dados){
   const t=lsGet("session")?.token;
   if(!t)return;
   const marcarLocal=()=>{try{lsSet(kAllProfilesTs(id),String(Date.now()));}catch{}};
   try{
+    dados=await sanitizarParaNuvem(id,dados);
     await supa.save(t,id,dados);
     marcarLocal();setSaveErro("");_pendenteDeSalvar=false;
   }catch(e){
@@ -146,20 +165,38 @@ async function salvarComRetry(id,dados){
 // fundo com backoff crescente.
 function iniciarVigiaDeSalvamento(getSessionId){
   const ESPERAS=[4000,10000,25000,45000,60000];
-  let tentativa=0,timer=null,rodando=false;
+  // ⚠️ Teto adicionado em 08/08/2026. O fix de 19/07 capou o `tentar()` do sync
+  // principal (MAX_TENTATIVAS=20) mas NÃO este — e o CLAUDE.md deixava parecer
+  // que os dois tinham sido capados. Aqui `tentativa` saturava só o INTERVALO
+  // em 60s e a linha final reagendava para sempre. Baixo custo de egress (é
+  // POST), mas `importar()` aceita arquivo arbitrário: um import grande que
+  // falhe punha um POST de megabytes num loop sem fim.
+  const MAX_FALHAS=20;
+  let tentativa=0,falhas=0,timer=null,rodando=false,esgotado=false;
   async function tentar(){
-    if(rodando)return;
+    if(rodando||esgotado)return;
     if(!_pendenteDeSalvar){timer=setTimeout(tentar,ESPERAS[0]);return;}
     const id=getSessionId();
     if(!id){timer=setTimeout(tentar,ESPERAS[0]);return;}
     rodando=true;
     const dados=lsGet(kAllProfiles(id));
-    try{if(dados)await salvarComRetry(id,dados);tentativa=0;}
-    catch(erro){console.error("[vigia] falha ao salvar:",erro?.status,erro?.message||erro);tentativa=Math.min(tentativa+1,ESPERAS.length-1);}
+    try{if(dados)await salvarComRetry(id,dados);tentativa=0;falhas=0;}
+    catch(erro){
+      console.error("[vigia] falha ao salvar:",erro?.status,erro?.message||erro);
+      tentativa=Math.min(tentativa+1,ESPERAS.length-1);
+      if(++falhas>=MAX_FALHAS){
+        esgotado=true;rodando=false;
+        setSaveErro("Não consegui salvar na nuvem depois de várias tentativas. Seus dados estão seguros neste aparelho — recarregue a página.");
+        console.error("[vigia] esgotado após",MAX_FALHAS,"falhas — parando de tentar sozinho");
+        return; // não reagenda: só reload ou nova sessão recomeça
+      }
+    }
     rodando=false;
     timer=setTimeout(tentar,ESPERAS[tentativa]);
   }
-  const retomar=()=>{clearTimeout(timer);tentar();};
+  // `esgotado` é variável de closure, não state — mesmo motivo documentado no
+  // tentar() do sync: retomar() é definido uma vez e leria state obsoleto.
+  const retomar=()=>{if(esgotado)return;clearTimeout(timer);tentar();};
   window.addEventListener("online",retomar);
   document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")retomar();});
   timer=setTimeout(tentar,ESPERAS[0]);
@@ -1164,6 +1201,36 @@ function LineChart({data,currency}){
 }
 
 // ── OCR Nota Fiscal ───────────────────────────────────────────────────────────
+// ── Leitura da foto de NF ────────────────────────────────────────────────────
+// `nfPath` (Storage) vira URL assinada SOB DEMANDA — é exatamente isto que
+// troca "todo boot baixa todas as fotos" por "só a foto que você abriu".
+// `nfImg` só aparece como legado (dado antigo) ou pendente de upload.
+const temNF=t=>!!(t&&(t.nfImg||t.nfPath||t.nfPendente));
+function useNfSrc(t){
+  const [src,setSrc]=useState(t?.nfImg||null);
+  useEffect(()=>{
+    let vivo=true;
+    if(t?.nfImg){setSrc(t.nfImg);return;}
+    if(!t?.nfPath){setSrc(null);return;}
+    urlAssinada(t.nfPath).then(u=>{if(vivo)setSrc(u);}).catch(()=>{});
+    return()=>{vivo=false;};
+  },[t?.nfImg,t?.nfPath]);
+  return src;
+}
+const PreviaNF=({t})=>{
+  const src=useNfSrc(t);
+  if(!src)return <p style={{fontSize:10,color:D.text3,marginTop:4}}>⏳ Foto aguardando envio — já está guardada neste aparelho.</p>;
+  return <img src={src} style={{width:"100%",borderRadius:8,marginTop:8,maxHeight:160,objectFit:"cover",border:`1px solid ${D.green}44`}}/>;
+};
+const NfMini=({t,size=22,onVer})=>{
+  const src=useNfSrc(t);
+  // pendente sem src = foto na fila local, ainda não subiu. Dizer isso é melhor
+  // do que sumir com o ícone e o usuário achar que a foto se perdeu.
+  if(!src)return t?.nfPendente?<span title="Foto aguardando envio" style={{fontSize:11,flexShrink:0}}>⏳</span>:null;
+  return <img src={src} onClick={()=>onVer&&onVer(src)} title="Ver NF"
+    style={{width:size,height:size,objectFit:"cover",borderRadius:size>24?4:3,cursor:"pointer",flexShrink:0,...(size>24?{border:`1px solid ${D.green}`}:{})}}/>;
+};
+
 function NFModal({onClose,onSave,currency}){
   const [mode,setMode]=useState("choice");
   const [img,setImg]=useState(null);const [b64,setB64]=useState(null);const [mt,setMt]=useState("image/jpeg");
@@ -1522,7 +1589,7 @@ function LancamentosTab({data,setData,currency,mes,profileId}){
 
   function addCat(tipo,nome){if(!nome.trim())return;setData(d=>({...d,[tipo==="D"?"catD":"catR"]:[...(tipo==="D"?d.catD||CAT_D_DEF:d.catR||CAT_R_DEF),nome.trim()]}));}
 
-  function exportarNFsPDF(){
+  async function exportarNFsPDF(){
     const ini=isAU?new Date(fyPdf,6,1,0,0,0):new Date(fyPdf,0,1,0,0,0);
     const fim=isAU?new Date(fyPdf+1,5,30,23,59,59):new Date(fyPdf,11,31,23,59,59);
     const itens=nfsComNF.filter(t=>{const d=new Date(t.data);return d>=ini&&d<=fim;}).sort((a,b)=>a.data.localeCompare(b.data));
@@ -1532,11 +1599,19 @@ function LancamentosTab({data,setData,currency,mes,profileId}){
     const tituloPeriodo=isAU?`Ano fiscal ${fyLabel}`:`Ano-calendário ${fyLabel}`;
     const subPeriodo=isAU?`Período 1 jul ${fyPdf} – 30 jun ${fyPdf+1}`:`Período 1 jan ${fyPdf} – 31 dez ${fyPdf}`;
     const escH=s=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-    const lista=itens.map(t=>`<tr><td>${escH(t.data)}</td><td>${escH(t.descricao)}</td><td>${escH(t.categoria)}</td><td style="text-align:right">${fmtM(t.valor,currency)}</td><td style="text-align:center">${t.nfImg?"✓":"—"}</td></tr>`).join("");
+    // As URLs assinadas precisam ser resolvidas ANTES de montar o HTML — o
+    // documento é gerado de uma vez e não dá para esperar promessa dentro do
+    // template. Expiram em 1h, de sobra para imprimir/salvar em PDF.
+    const srcs=new Map();
+    for(const t of itens){
+      if(t.nfImg)srcs.set(t.id,t.nfImg);
+      else if(t.nfPath){const u=await urlAssinada(t.nfPath,3600).catch(()=>null);if(u)srcs.set(t.id,u);}
+    }
+    const lista=itens.map(t=>`<tr><td>${escH(t.data)}</td><td>${escH(t.descricao)}</td><td>${escH(t.categoria)}</td><td style="text-align:right">${fmtM(t.valor,currency)}</td><td style="text-align:center">${srcs.has(t.id)?"✓":"—"}</td></tr>`).join("");
     const paginas=itens.map(t=>`<div class="nf">
       <h2>${escH(t.descricao||"Nota fiscal")}</h2>
       <table class="meta"><tr><td>Data</td><td>${escH(t.data)}</td></tr><tr><td>Categoria</td><td>${escH(t.categoria)}</td></tr><tr><td>Valor</td><td>${fmtM(t.valor,currency)}</td></tr></table>
-      ${t.nfImg?`<img src="${t.nfImg}"/>`:'<p class="sem">Sem foto — lançamento manual</p>'}
+      ${srcs.has(t.id)?`<img src="${escH(srcs.get(t.id))}"/>`:'<p class="sem">Sem foto — lançamento manual</p>'}
     </div>`).join("");
     const html=`<!doctype html><html><head><meta charset="utf-8"><title>NFs ${tituloPeriodo}</title>
 <style>body{font-family:system-ui,Arial,sans-serif;color:#111;margin:0;padding:24px}h1{font-size:18px;margin:0 0 4px}h2{font-size:15px;margin:0 0 8px}.cover{margin-bottom:8px}.nf{page-break-before:always;padding-top:8px}.nf img{max-width:100%;max-height:760px;object-fit:contain;border:1px solid #ccc;border-radius:6px;margin-top:8px}table.meta{border-collapse:collapse;font-size:13px;margin-bottom:6px}table.meta td{border:1px solid #ddd;padding:4px 10px}table.meta td:first-child{color:#666;font-weight:600}.sem{color:#999;font-style:italic}table.lista{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}table.lista th,table.lista td{border-bottom:1px solid #eee;padding:5px 8px;text-align:left}table.lista th{background:#f4f4f4}</style>
@@ -1581,7 +1656,7 @@ ${paginas}
       for(let k=0;k<np;k++){
         const dstr=parcelaData(inicio,k);           // testado em calc.mjs
         const val=parcelaValor(valorNum,np,k);      // testado em calc.mjs
-        novas.push({id:uid(),tipo:"despesa",descricao:`${desc} (${k+1}/${np})`,valor:val,categoria:cat,data:dstr,bancoId:form.bancoId||null,nfImg:k===0?(form.nfImg||null):null,nfManual:false,parceladoId:grupo});
+        novas.push({id:uid(),tipo:"despesa",descricao:`${desc} (${k+1}/${np})`,valor:val,categoria:cat,data:dstr,bancoId:form.bancoId||null,nfImg:k===0?(form.nfImg||null):null,nfPath:k===0?(form.nfPath||null):null,nfManual:false,parceladoId:grupo});
       }
       setData(d=>({...d,transacoes:[...d.transacoes,...novas]}));
       setModal(null);setForm({});
@@ -1590,7 +1665,7 @@ ${paginas}
     const t={id:form.editId||uid(),tipo:form.tipo||"despesa",descricao:form.descricao||"Sem descrição",
       valor:valorNum,categoria:form.categoria||(form.tipo==="receita"?catR[0]:catD[0]),
       data:form.data||hoje.toISOString().slice(0,10),bancoId:form.bancoId||null,
-      nfImg:form.nfImg||null,nfManual:form.nfManual||false};
+      nfImg:form.nfImg||null,nfPath:form.nfPath||null,nfPendente:form.nfPendente||false,nfManual:form.nfManual||false};
     setData(d=>({...d,transacoes:form.editId?d.transacoes.map(x=>x.id===form.editId?t:x):[...d.transacoes,t]}));
     setModal(null);setForm({});
   }
@@ -1649,7 +1724,7 @@ ${paginas}
     const diaDeIni=ini?parseInt(ini.slice(8,10)):null;
     const dsemDeIni=ini?new Date(ini+"T00:00:00").getDay():null;
     const r={id:recForm.editId||uid(),tipo:recForm.tipo||"despesa",descricao:recForm.descricao||"",valor:parseFloat(recForm.valor)||0,categoria:recForm.categoria||catD[0],frequencia:recForm.frequencia||"mensal",dia:ini?diaDeIni:(parseInt(recForm.dia)||1),diaSemana:ini?dsemDeIni:(recForm.diaSemana!=null?parseInt(recForm.diaSemana):1),inicio:ini,bancoId:recForm.bancoId||null};setData(d=>({...d,recorrencias:recForm.editId?(d.recorrencias||[]).map(x=>x.id===recForm.editId?r:x):[...(d.recorrencias||[]),r]}));setModalRec(false);setRecForm({});}
-  const nfsComNF=data.transacoes.filter(t=>t.nfImg||t.nfManual);
+  const nfsComNF=data.transacoes.filter(t=>temNF(t)||t.nfManual);
 
   const nfFileRef=useRef(null);
   function handleNFFile(e){
@@ -1759,7 +1834,7 @@ ${paginas}
             {[FY_ATUAL,FY_ATUAL-1,FY_ATUAL-2].map(y=><option key={y} value={y}>{isAU?`Ano fiscal ${y}–${String(y+1).slice(2)}`:`Ano ${y}`}</option>)}
           </select>
           <Btn sm color={D.blue} onClick={exportarNFsPDF}>{isAU?"📄 PDF ano fiscal":"📄 PDF do ano"}</Btn>
-          <Btn sm color={D.green} onClick={()=>{const csv=["Data,Descrição,Categoria,Valor,Tipo",...nfsComNF.map(t=>`${t.data},"${t.descricao}",${t.categoria},${t.valor},${t.nfImg?"Foto":"Manual"}`)].join("\n");const b=new Blob([csv],{type:"text/csv"});const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download="NFs_IR.csv";a.click();}}>⬇️ CSV</Btn>
+          <Btn sm color={D.green} onClick={()=>{const csv=["Data,Descrição,Categoria,Valor,Tipo",...nfsComNF.map(t=>`${t.data},"${t.descricao}",${t.categoria},${t.valor},${temNF(t)?"Foto":"Manual"}`)].join("\n");const b=new Blob([csv],{type:"text/csv"});const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download="NFs_IR.csv";a.click();}}>⬇️ CSV</Btn>
           <button onClick={()=>setShowExtratoNF(false)} style={{border:"none",background:"none",cursor:"pointer",color:D.text3,fontSize:18}}>✕</button>
         </div>
       </div>
@@ -1777,8 +1852,8 @@ ${paginas}
           <td style={{padding:"8px"}}><Badge color={D.purple}>{t.categoria}</Badge></td>
           <td style={{padding:"8px",textAlign:"right",color:D.red,fontWeight:600}}>{fmtM(t.valor,currency)}</td>
           <td style={{padding:"8px",textAlign:"center"}}>
-            {t.nfImg
-              ?<img src={t.nfImg} style={{width:32,height:32,objectFit:"cover",borderRadius:4,cursor:"pointer",border:`1px solid ${D.green}`}} onClick={()=>setNfView(t.nfImg)}/>
+            {temNF(t)
+              ?<NfMini t={t} size={32} onVer={setNfView}/>
               :<span style={{fontSize:10,color:D.text3}}>Manual</span>}
           </td>
         </tr>)}</tbody>
@@ -1821,7 +1896,7 @@ ${paginas}
       {txVis.map(t=><Card key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"0.75rem 1rem"}}>
       <div style={{width:36,height:36,borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center",background:t.tipo==="receita"?D.green+"22":D.red+"22",fontSize:16,flexShrink:0}}>{t.tipo==="receita"?"↑":"↓"}</div>
       <div style={{flex:1,minWidth:0}}>
-        <div style={{display:"flex",alignItems:"center",gap:6}}><p style={{margin:0,fontSize:13,fontWeight:600,color:D.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</p>{t.nfImg&&<img src={t.nfImg} style={{width:22,height:22,objectFit:"cover",borderRadius:3,cursor:"pointer",flexShrink:0}} onClick={()=>setNfView(t.nfImg)} title="Ver NF"/>}{!t.nfImg&&t.nfManual&&<span title="NF Manual" style={{fontSize:11}}>📋</span>}</div>
+        <div style={{display:"flex",alignItems:"center",gap:6}}><p style={{margin:0,fontSize:13,fontWeight:600,color:D.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.descricao}</p>{temNF(t)&&<NfMini t={t} onVer={setNfView}/>}{!temNF(t)&&t.nfManual&&<span title="NF Manual" style={{fontSize:11}}>📋</span>}</div>
         <p style={{margin:0,fontSize:11,color:D.text3}}>{t.categoria} · {t.data}{t.bancoId?` · 🏦 ${data.bancos.find(b=>b.id===t.bancoId)?.nome||""}`:""}</p>
       </div>
       <span style={{fontWeight:700,color:t.tipo==="receita"?D.green:D.red,fontSize:14,flexShrink:0}}>{t.tipo==="receita"?"+":"-"}{fmtM(t.valor,currency)}</span>
@@ -1867,12 +1942,12 @@ ${paginas}
         <input ref={nfFileRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handleNFFile}/>
         <div style={{display:"flex",gap:8}}>
           <button onClick={()=>nfFileRef.current.click()} style={{flex:1,padding:"8px",borderRadius:8,border:`1px dashed ${D.border2}`,background:D.bg3,cursor:"pointer",fontSize:12,color:D.text3,textAlign:"center"}}>
-            {form.nfImg?"🖼 Trocar foto":"📷 Anexar foto da NF"}
+            {(form.nfImg||form.nfPath)?"🖼 Trocar foto":"📷 Anexar foto da NF"}
           </button>
-          {form.nfImg&&<button onClick={()=>setForm(f=>({...f,nfImg:null}))} style={{padding:"8px 12px",borderRadius:8,border:`1px solid ${D.red}44`,background:"transparent",cursor:"pointer",fontSize:12,color:D.red}}>✕</button>}
+          {(form.nfImg||form.nfPath)&&<button onClick={()=>setForm(f=>({...f,nfImg:null,nfPath:null,nfPendente:false}))} style={{padding:"8px 12px",borderRadius:8,border:`1px solid ${D.red}44`,background:"transparent",cursor:"pointer",fontSize:12,color:D.red}}>✕</button>}
         </div>
-        {form.nfImg&&<img src={form.nfImg} style={{width:"100%",borderRadius:8,marginTop:8,maxHeight:160,objectFit:"cover",border:`1px solid ${D.green}44`}}/>}
-        {!form.nfImg&&<p style={{fontSize:10,color:D.text3,marginTop:4}}>Sem foto — aparecerá como lançamento manual no extrato de NFs</p>}
+        {(form.nfImg||form.nfPath)&&<PreviaNF t={form}/>}
+        {!(form.nfImg||form.nfPath)&&<p style={{fontSize:10,color:D.text3,marginTop:4}}>Sem foto — aparecerá como lançamento manual no extrato de NFs</p>}
       </div>
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn outline color={D.text3} onClick={()=>setModal(null)}>Cancelar</Btn><Btn onClick={saveT}>Salvar</Btn></div>
     </Modal>}
@@ -5001,6 +5076,44 @@ function AppInner(){
     return()=>{cancelado=true;clearInterval(iv);document.removeEventListener("visibilitychange",aoFoco);window.removeEventListener("focus",puxar);};
   },[session?.token]);
 
+  // Fila de fotos de NF → Storage. Sobe o que estiver pendente e grava o
+  // `nfPath` de volta na transação. Duas origens alimentam esta fila:
+  //  1. anexo novo cujo upload falhou (offline) — a foto nunca entra no perfil;
+  //  2. base64 que a trava do salvarComRetry barrou. Isso inclui o caso de um
+  //     aparelho rodando build VELHO pelo cache do service worker (public/sw.js
+  //     existe, então versão antiga em cache é cenário real, não hipótese): ele
+  //     grava base64 na nuvem, este aqui carrega, sobe e limpa. É a auto-cura,
+  //     e é o mesmo caminho que migra qualquer `nfImg` legado que apareça.
+  useEffect(()=>{
+    if(!session)return;
+    let cancelado=false,rodando=false;
+    async function escoar(){
+      if(cancelado||rodando||!loadOk.current)return;
+      rodando=true;
+      try{
+        const {ok,falhou}=await drenar(session.user.id);
+        if(falhou.length)console.warn("[nf] upload pendente falhou:",falhou);
+        if(cancelado||!ok.length)return;
+        setAllData(all=>{
+          const novo={...all};
+          for(const {perfil,txId,nfPath} of ok){
+            const p=novo[perfil];if(!p||typeof p!=="object")continue;
+            novo[perfil]={...p,transacoes:(p.transacoes||[]).map(t=>
+              t&&String(t.id)===String(txId)?{...t,nfPath,nfPendente:false,nfImg:null}:t)};
+          }
+          if(session?.user?.id)lsSet(kAllProfiles(session.user.id),novo);
+          salvarComRetry(session.user.id,novo).catch(()=>{});
+          return novo;
+        });
+      }catch(e){console.warn("[nf] fila:",e?.message||e);}
+      finally{rodando=false;}
+    }
+    escoar();
+    const iv=setInterval(escoar,60000);
+    window.addEventListener("online",escoar);
+    return()=>{cancelado=true;clearInterval(iv);window.removeEventListener("online",escoar);};
+  },[session?.token]);
+
   useEffect(()=>{
     if(!session) return;
     loadOk.current=false;
@@ -5280,8 +5393,24 @@ function AppInner(){
     return()=>clearTimeout(t);
   },[profileId,session]);
 
-  function exportar(){const p={version:4,exportedAt:new Date().toISOString(),all_profiles:allData,watchlist_br:lsGet("watchlist_br")||[],watchlist_au:lsGet("watchlist_au")||[]};const b=new Blob([JSON.stringify(p,null,2)],{type:"application/json"});const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download=`financas_${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(u);}
-  function importar(e){const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=ev=>{try{const p=JSON.parse(ev.target.result);if(!p.all_profiles){alert("Arquivo inválido.");return;}if(!window.confirm("Substituir todos os dados?"))return;if(session?.user?.id)lsSet(kAllProfiles(session.user.id),p.all_profiles);if(p.watchlist_br)lsSet("watchlist_br",p.watchlist_br);if(p.watchlist_au)lsSet("watchlist_au",p.watchlist_au);setAllData(p.all_profiles);if(session)salvarComRetry(session.user.id,p.all_profiles).catch(()=>{});alert("✅ Dados restaurados!");}catch{alert("Arquivo inválido.");}};r.readAsText(file);e.target.value="";}
+  // Decisão (08/08/2026): o export leva só `nfPath`, NUNCA base64. Ele é backup
+  // dos dados financeiros; foto de NF é anexo e fica no Storage. O guard abaixo
+  // é redundante enquanto a trava do salvarComRetry funcionar — e é exatamente
+  // por isso que fica: se alguém furar a trava, o arquivo exportado não vira o
+  // veículo de volta (foi um export de 28/06 que documentou o incidente).
+  function exportar(){const p={version:5,exportedAt:new Date().toISOString(),all_profiles:extraiFotosBase64(allData).limpo,watchlist_br:lsGet("watchlist_br")||[],watchlist_au:lsGet("watchlist_au")||[]};const b=new Blob([JSON.stringify(p,null,2)],{type:"application/json"});const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download=`financas_${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(u);}
+  // ⚠️ Import é a porta de entrada mais perigosa que existe: aceita um arquivo
+  // ARBITRÁRIO. Os exports de 28-29/06/2026 no disco do Leo têm 2,82MB de
+  // base64 dentro — importar um deles hoje recolocaria a foto em
+  // `profiles.data` e recriaria o incidente de egress inteiro. Aqui o payload
+  // passa pela MESMA trava antes de tocar localStorage, state ou nuvem.
+  function importar(e){const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=async ev=>{try{const p=JSON.parse(ev.target.result);if(!p.all_profiles){alert("Arquivo inválido.");return;}if(!window.confirm("Substituir todos os dados?"))return;
+    const uid=session?.user?.id;
+    const {limpo,fotos}=extraiFotosBase64(p.all_profiles);
+    // enfileirar ANTES de descartar: um import antigo com foto não pode perdê-la
+    if(fotos.length&&uid){try{await enfileirar(uid,fotos);}catch(err){alert(`Não consegui guardar ${fotos.length} foto(s) do arquivo (${err?.message||err}). Import cancelado para não perder as imagens.`);return;}}
+    if(uid)lsSet(kAllProfiles(uid),limpo);if(p.watchlist_br)lsSet("watchlist_br",p.watchlist_br);if(p.watchlist_au)lsSet("watchlist_au",p.watchlist_au);setAllData(limpo);if(session)salvarComRetry(uid,limpo).catch(()=>{});
+    alert(fotos.length?`✅ Dados restaurados! ${fotos.length} foto(s) de NF na fila de envio.`:"✅ Dados restaurados!");}catch{alert("Arquivo inválido.");}};r.readAsText(file);e.target.value="";}
 
   // Link de recovery tem prioridade sobre uma sessão já existente — o usuário
   // clicou no link com a intenção explícita de trocar a senha.

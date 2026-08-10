@@ -220,16 +220,57 @@ export function semFotos(all){
   }
   return out;
 }
+// ── Trava anti-base64: nada de imagem entra em profiles.data ────────────────
+// Incidente 29/06-11/07/2026: UMA foto de NF de 2,82MB morava dentro de
+// `transacoes[].nfImg` como data-URL, ou seja, dentro da coluna `data` do
+// Supabase — e `supa.load()` faz `select=data` sem filtro, então TODO boot
+// baixava os 2,82MB. Custo real medido: 2,13MB por load com gzip (base64 de
+// JPEG não comprime), 130× o payload de hoje.
+//
+// Esta função é o ponto único que impede a recaída. Ela NÃO joga a foto fora:
+// devolve o payload limpo E as fotos separadas, para quem chamar enfileirar
+// ANTES de gravar. A ordem importa — limpar antes de enfileirar perde a foto.
+export function extraiFotosBase64(all){
+  const fotos=[];
+  const out={};
+  for(const k of Object.keys(all||{})){
+    const p=all[k];
+    if(!p||typeof p!=="object"||Array.isArray(p)){out[k]=p;continue;}
+    let mudou=false;
+    const txs=(p.transacoes||[]).map(t=>{
+      // só data-URL sai; `nfPath` (a referência do Storage) e null ficam
+      if(!t||typeof t.nfImg!=="string"||!t.nfImg.startsWith("data:"))return t;
+      mudou=true;
+      fotos.push({perfil:k,txId:t.id??null,dataUrl:t.nfImg});
+      // nfPendente marca a transação enquanto o upload não confirmou, para a
+      // tela poder dizer "foto aguardando envio" em vez de fingir que não existe
+      const {nfImg,...resto}=t;
+      return {...resto,nfImg:null,nfPendente:true};
+    });
+    out[k]=mudou?{...p,transacoes:txs}:p;
+  }
+  return {limpo:out,fotos};
+}
+// Guarda de asserção — usada em teste e no log de diagnóstico. Não corrige nada.
+export function contemBase64(all){
+  for(const k of Object.keys(all||{})){
+    const p=all[k];
+    if(!p||typeof p!=="object"||Array.isArray(p))continue;
+    for(const t of (p.transacoes||[]))if(t&&typeof t.nfImg==="string"&&t.nfImg.startsWith("data:"))return true;
+  }
+  return false;
+}
 export function mesclarFotos(backup,atual){
   const fotos={};
   for(const k of Object.keys(atual||{})){
-    for(const t of (atual[k]?.transacoes||[]))if(t&&t.id&&t.nfImg)fotos[t.id]=t.nfImg;
+    // nfPath é a referência do Storage; nfImg só sobrevive aqui como legado
+    for(const t of (atual[k]?.transacoes||[]))if(t&&t.id&&(t.nfPath||t.nfImg))fotos[t.id]=t.nfPath?{nfPath:t.nfPath}:{nfImg:t.nfImg};
   }
   const out={};
   for(const k of Object.keys(backup||{})){
     const p=backup[k];
     if(!p||typeof p!=="object"||Array.isArray(p)){out[k]=p;continue;}
-    out[k]={...p,transacoes:(p.transacoes||[]).map(t=>t&&t.id&&!t.nfImg&&fotos[t.id]?{...t,nfImg:fotos[t.id]}:t)};
+    out[k]={...p,transacoes:(p.transacoes||[]).map(t=>t&&t.id&&!t.nfImg&&!t.nfPath&&fotos[t.id]?{...t,...fotos[t.id]}:t)};
   }
   return out;
 }
