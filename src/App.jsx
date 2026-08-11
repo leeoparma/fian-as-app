@@ -9,7 +9,7 @@ import {
   calcSaldos as calcSaldosPure, calcDividas as calcDividasPure, totaisPorPessoa as totaisPorPessoaPure,
   salarioMensal, converteMoeda, taxaMensalSim, simularJuros,
   semFotos, mesclarFotos, extraiFotosBase64, projetarFluxo,
-  soAtivos, soEncerrados, encerrarInvestimento, addDias, marcarDuplicatas, montarAgendaPush,
+  soAtivos, soEncerrados, encerrarInvestimento, casaProvento, proventosDoAtivo, addDias, marcarDuplicatas, montarAgendaPush,
   compraAcao, vendaAcao, pendentesRecorrenciaSW, relatorioMensal, compararMeses, serieGastoAcumulado, extratoComSaldo,
   totalPagoFatura, calcFaturaPagamentos, posicaoRV,
 rentabilidadeRF, serieRentabilidadeRF, composicaoAcoes,
@@ -2240,9 +2240,12 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
     }
     setData(d=>({...d,investimentos:form.editId?d.investimentos.map(x=>x.id===form.editId?i:x):[...d.investimentos,i],transacoes:novasTx.length?[...d.transacoes,...novasTx]:d.transacoes}));setModal(false);setForm({});
   }
-  function saveDiv(){const d={id:divForm.editId||uid(),ticker:divForm.ticker||"",valor:parseFloat(divForm.valor)||0,data:divForm.data||hoje.toISOString().slice(0,10),tipo:divForm.tipo||"Dividendo"};setData(dd=>({...dd,dividendos:divForm.editId?(dd.dividendos||[]).map(x=>x.id===divForm.editId?d:x):[...(dd.dividendos||[]),d]}));setModalDiv(false);setDivForm({});}
+  // Provento guarda `investimentoId` além do ticker. O ticker continua gravado
+  // (é o que você lê na lista, e é o fallback dos lançamentos antigos), mas o
+  // id é quem resolve ticker reaproveitado e duas posições do mesmo papel.
+  function saveDiv(){const d={id:divForm.editId||uid(),ticker:divForm.ticker||"",investimentoId:divForm.investimentoId||null,valor:parseFloat(divForm.valor)||0,data:divForm.data||hoje.toISOString().slice(0,10),tipo:divForm.tipo||"Dividendo"};setData(dd=>({...dd,dividendos:divForm.editId?(dd.dividendos||[]).map(x=>x.id===divForm.editId?d:x):[...(dd.dividendos||[]),d]}));setModalDiv(false);setDivForm({});}
   function saveAg(){const q=parseFloat(agForm.quantidade)||0,va=parseFloat(agForm.valorAcao)||0;const a={id:agForm.editId||uid(),ticker:(agForm.ticker||"").toUpperCase(),valorAcao:va,quantidade:q,dataPagamento:agForm.dataPagamento||hojeStr,dataCom:agForm.dataCom||"",tipo:agForm.tipo||"Dividendo"};setData(dd=>({...dd,proventosAgendados:agForm.editId?(dd.proventosAgendados||[]).map(x=>x.id===agForm.editId?a:x):[...(dd.proventosAgendados||[]),a]}));setModalAg(false);setAgForm({});}
-  function receberAg(a){const total=totalAgTotal(a);if(!window.confirm(`Marcar como recebido? Vai lançar ${fmtM(total,currency)} de ${a.ticker} nos proventos recebidos.`))return;setData(dd=>({...dd,dividendos:[...(dd.dividendos||[]),{id:uid(),ticker:a.ticker,valor:Math.round(total*100)/100,data:a.dataPagamento,tipo:a.tipo||"Dividendo"}],proventosAgendados:(dd.proventosAgendados||[]).filter(x=>x.id!==a.id)}));}
+  function receberAg(a){const total=totalAgTotal(a);if(!window.confirm(`Marcar como recebido? Vai lançar ${fmtM(total,currency)} de ${a.ticker} nos proventos recebidos.`))return;setData(dd=>({...dd,dividendos:[...(dd.dividendos||[]),{id:uid(),ticker:a.ticker,investimentoId:(casaProvento({ticker:a.ticker,data:a.dataPagamento},dd.investimentos)||{}).id||null,valor:Math.round(total*100)/100,data:a.dataPagamento,tipo:a.tipo||"Dividendo"}],proventosAgendados:(dd.proventosAgendados||[]).filter(x=>x.id!==a.id)}));}
   function delAg(id){setData(dd=>({...dd,proventosAgendados:(dd.proventosAgendados||[]).filter(x=>x.id!==id)}));}
 
   const isRFForm=form.tipo==="Renda Fixa"||form.tipo==="Tesouro Direto";
@@ -2627,7 +2630,8 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
         <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:10}}><Btn outline color={D.text3} onClick={()=>{setModalVenda(null);setVendaForm({});}}>Cancelar</Btn><Btn color={D.gold} onClick={vender}>Confirmar venda</Btn></div>
       </Modal>;})()}
     {modalDiv&&<Modal title="Registrar provento" onClose={()=>setModalDiv(false)}>
-      <label style={{fontSize:12,color:D.text3}}>Ticker<input value={divForm.ticker||""} onChange={e=>setDivForm(f=>({...f,ticker:e.target.value.toUpperCase()}))} style={{marginTop:4}}/></label>
+      {soAtivos(data.investimentos).filter(i=>i.ticker).length>0&&<label style={{fontSize:12,color:D.text3}}>Ativo da carteira<select value={divForm.investimentoId||""} onChange={e=>{const inv=data.investimentos.find(i=>i.id===e.target.value);setDivForm(f=>({...f,investimentoId:e.target.value||null,...(inv?{ticker:(inv.ticker||"").toUpperCase()}:{})}));}} style={{marginTop:4}}><option value="">— avulso (só ticker) —</option>{soAtivos(data.investimentos).filter(i=>i.ticker).map(i=><option key={i.id} value={i.id}>{i.ticker}</option>)}</select></label>}
+      <label style={{fontSize:12,color:D.text3}}>Ticker<input value={divForm.ticker||""} onChange={e=>setDivForm(f=>({...f,ticker:e.target.value.toUpperCase(),investimentoId:null}))} style={{marginTop:4}}/></label>
       <label style={{fontSize:12,color:D.text3}}>Valor recebido ({currency})<input type="number" value={divForm.valor||""} onChange={e=>setDivForm(f=>({...f,valor:e.target.value}))} style={{marginTop:4}}/></label>
       <label style={{fontSize:12,color:D.text3}}>Tipo<select value={divForm.tipo||"Dividendo"} onChange={e=>setDivForm(f=>({...f,tipo:e.target.value}))} style={{marginTop:4}}><option>Dividendo</option><option>JCP</option><option>JUROS SOBRE CAPITAL PROPRIO</option><option>Rendimento FII</option><option>Rendimento ETF</option></select></label>
       <label style={{fontSize:12,color:D.text3}}>Data de pagamento<input type="date" value={divForm.data||hoje.toISOString().slice(0,10)} onChange={e=>setDivForm(f=>({...f,data:e.target.value}))} style={{marginTop:4}}/></label>

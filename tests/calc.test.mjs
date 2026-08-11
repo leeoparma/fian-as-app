@@ -16,7 +16,7 @@ import {
   ocorrenciasSWAte,pendentesRecorrenciaSW,relatorioMensal,compararMeses,serieGastoAcumulado,extratoComSaldo,
 rentabilidadeRF,serieRentabilidadeRF,composicaoAcoes,
 rentabilidadeAcoesDesdeInicio,ganhoAcoesEntreSnapshots,rentabilidadeAcoes,isRFAtivo,calcValorLiquidoRF,
-estaEncerrado,soAtivos,soEncerrados,encerrarInvestimento,
+estaEncerrado,soAtivos,soEncerrados,encerrarInvestimento,casaProvento,proventosDoAtivo,
 INDICES_RATE,
 compoeFatorDiario,compoeFatorMensal,calcValorAtualRFHistorico,mesclarIPCAcomPrevia,compoeFatorMensalProRata,
 posicaoRV,
@@ -915,6 +915,61 @@ test("relatorioMensal: RF encerrada não vira linha de zeros no relatório", ()=
   assert.equal(R.rf.length,0);
 });
 
+
+// ── Vínculo provento ↔ ativo (item 4) ───────────────────────────────────────
+const CARTEIRA=[
+  {id:"i1",ticker:"BBAS3",quantidade:100},
+  {id:"i2",ticker:"CPLE3",quantidade:50},
+  {id:"i0",ticker:"BBAS3",encerrado:true,dataEncerramento:"2026-05-31"},
+];
+test("casaProvento: o id vence o ticker", ()=>{
+  // ticker aponta para o vivo, id aponta para o encerrado: manda o id.
+  const m=casaProvento({ticker:"BBAS3",investimentoId:"i0",data:"2026-04-01"},CARTEIRA);
+  assert.equal(m.id,"i0");
+});
+test("casaProvento: sem id, cai no ticker e prefere a posição VIVA", ()=>{
+  const m=casaProvento({ticker:"BBAS3",data:"2026-07-01"},CARTEIRA);
+  assert.equal(m.id,"i1");   // nunca a encerrada quando existe viva
+  // ⚠️ com a encerrada PRIMEIRO no array: sem esta ordem invertida o teste
+  // passa por acaso (o find pega o vivo porque ele vem antes), e a mutação
+  // que remove a preferência por vivos sobrevive. Aconteceu em 11/08/2026.
+  const invertida=[CARTEIRA[2],CARTEIRA[0]];
+  assert.equal(casaProvento({ticker:"BBAS3",data:"2026-04-01"},invertida).id,"i1");
+});
+test("casaProvento: ticker normaliza caixa e espaço (registro antigo digitado à mão)", ()=>{
+  assert.equal(casaProvento({ticker:" bbas3 "},CARTEIRA).id,"i1");
+});
+test("casaProvento: só encerrada — aceita provento ANTERIOR ao encerramento", ()=>{
+  const so=[CARTEIRA[2]];
+  assert.equal(casaProvento({ticker:"BBAS3",data:"2026-04-10"},so).id,"i0");
+  // e recusa o posterior: dividendo depois da venda é lançamento errado,
+  // não histórico — casar seria inventar renda de posição que não existia.
+  assert.equal(casaProvento({ticker:"BBAS3",data:"2026-09-10"},so),null);
+});
+test("casaProvento: id que não existe mais cai no fallback por ticker", ()=>{
+  const m=casaProvento({ticker:"CPLE3",investimentoId:"apagado"},CARTEIRA);
+  assert.equal(m.id,"i2");
+});
+test("casaProvento: sem ticker e sem id não inventa vínculo", ()=>{
+  assert.equal(casaProvento({valor:10},CARTEIRA),null);
+  assert.equal(casaProvento({ticker:"XXXX9"},CARTEIRA),null);
+  assert.equal(casaProvento(null,CARTEIRA),null);
+  assert.equal(casaProvento({ticker:"BBAS3"},null),null);
+});
+test("proventosDoAtivo: soma só o que casa, e não vaza entre posições", ()=>{
+  const divs=[
+    {id:"d1",ticker:"BBAS3",valor:120.50,data:"2026-07-01"},
+    {id:"d2",ticker:"CPLE3",valor:80,data:"2026-07-02"},
+    {id:"d3",ticker:"BBAS3",valor:60,data:"2026-08-01"},
+    {id:"d4",ticker:"BBAS3",investimentoId:"i0",valor:40,data:"2026-04-01"},
+  ];
+  const vivo=proventosDoAtivo(CARTEIRA[0],divs,CARTEIRA);
+  assert.equal(vivo.itens.length,2);
+  assert.equal(vivo.total,180.50);          // 120,50 + 60 — o de i0 fica fora
+  const enc=proventosDoAtivo(CARTEIRA[2],divs,CARTEIRA);
+  assert.equal(enc.total,40);               // encerrada mantém o que recebeu
+  assert.equal(proventosDoAtivo(null,divs,CARTEIRA).total,0);
+});
 test("composicaoAcoes: carteira vazia devolve lista vazia sem dividir por zero", ()=>{
   assert.deepEqual(composicaoAcoes([]),[]);
 });

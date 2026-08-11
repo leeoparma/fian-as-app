@@ -448,6 +448,37 @@ export function encerrarInvestimento(inv,{data,venda}={}){
     encerrado:true,dataEncerramento:data,
     vendas:[...(inv?.vendas||[]),...(venda?[venda]:[])]};
 }
+// ── Vínculo provento ↔ ativo ────────────────────────────────────────────────
+// `dividendos[]` sempre casou por `ticker` string. Isso quebra em dois casos
+// reais: ticker reaproveitado (mudança de nome/incorporação) e duas posições
+// do mesmo papel. Agora o registro carrega `investimentoId`; o ticker fica
+// como FALLBACK para os lançamentos antigos, que não têm o id.
+//
+// Só casa com ativo ENCERRADO quando o provento é anterior ao encerramento —
+// dividendo com data posterior à venda é lançamento errado, não histórico.
+export function casaProvento(div,investimentos){
+  const lista=(investimentos||[]).filter(Boolean);
+  if(!div)return null;
+  if(div.investimentoId){
+    const porId=lista.find(i=>i.id===div.investimentoId);
+    if(porId)return porId;                      // id vence sempre
+  }
+  const tk=String(div.ticker||"").trim().toUpperCase();
+  if(!tk)return null;
+  const mesmoTicker=lista.filter(i=>String(i.ticker||"").trim().toUpperCase()===tk);
+  if(!mesmoTicker.length)return null;
+  const vivos=mesmoTicker.filter(i=>!i.encerrado);
+  if(vivos.length)return vivos[0];
+  // só encerrados: aceita se o provento é de quando você ainda tinha o ativo
+  const cabe=mesmoTicker.filter(i=>!div.data||!i.dataEncerramento||div.data<=i.dataEncerramento);
+  return cabe.length?cabe[0]:null;
+}
+// Proventos de um ativo, já resolvido o vínculo. Base do retorno total (fase 2).
+export function proventosDoAtivo(inv,dividendos,investimentos){
+  if(!inv)return {itens:[],total:0};
+  const itens=(dividendos||[]).filter(d=>{const m=casaProvento(d,investimentos);return m&&m.id===inv.id;});
+  return {itens,total:Math.round(itens.reduce((a,d)=>a+(d.valor||0),0)*100)/100};
+}
 export function posicaoRV(inv){
   const qtd=inv?.quantidade||0,pm=inv?.precoMedio||0;
   const custo=qtd*pm>0?qtd*pm:(inv?.valorInvestido||inv?.valor||0);

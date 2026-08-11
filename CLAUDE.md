@@ -41,6 +41,7 @@ App de controle financeiro pessoal usado por Leo e sua parceira Carol. Suporta p
 
 - Token brapi: o hardcode foi resolvido (código atual do Worker lê de `env.BRAPI_TOKEN`, secret no Cloudflare — confirmado ao versionar `worker/worker.js` em 25/07/2026). **Falta confirmar se o token antigo exposto foi ROTACIONADO** (gerar um novo no brapi e trocar o secret) — mover pra env não invalida o token que já vazou em versões antigas. Fora do alcance do Claude: painel do brapi + painel da Cloudflare.
 - **Bug latente no Worker (`/push-send`)**: achado ao versionar o código em 25/07/2026 — o endpoint usa `user.email` mas nunca define `user` (falta o `const user=await ur.json()` que o `/push-test` tem). Todo push de Splitwise via `/push-send` deve estar retornando 500 ("user is not defined") silenciosamente. Corrigir exige editar `worker/worker.js` E fazer o deploy manual no painel da Cloudflare.
+- **⚠️ ABERTO E DISTORCENDO NÚMERO HOJE — dupla subtração de aportes em `ganhoAcoesEntreSnapshots`** (achado em 11/08/2026 ao montar o teste do ativo encerrado; NÃO corrigido, escopo de outra fase). A função desconta `aportesPeriodo` a partir de `${mesAnterior}-01`, mas o snapshot daquele mês é gravado **ao abrir o app**, ou seja, tipicamente no FIM do mês — então os aportes feitos durante o mês já estão dentro da base `ini.valorAtual` e são descontados de novo. Prova nos dados reais do Leo: o snapshot `2026-07` do BBAS3 já registra 385 unidades, e os dois aportes de julho (09/07 e 23/07, R$ 2.785,80 juntos) caem dentro da janela `2026-07-01 → hoje`. Afeta "No mês" e "No ano" da aba de rentabilidade de RV, sempre subestimando o ganho de quem aportou no período. Correção provável: a janela de aportes deve começar na data em que o snapshot foi tirado, não no dia 1 — o que exige gravar essa data no snapshot (`historico[]` hoje só guarda `mes`).
 
 ## Estado das features
 
@@ -109,6 +110,27 @@ App de controle financeiro pessoal usado por Leo e sua parceira Carol. Suporta p
 O que continua válido sem viewport (não depende de layout): texto extraído do DOM, contagem de elementos, coordenadas internas de `viewBox` de SVG, `localStorage`, contagem de requisições de rede. O que **não** vale: qualquer afirmação sobre aparência, altura, largura, sobreposição ou "está bonito na tela".
 
 Caso real (30/07/2026): dois gráficos do modal de FII eram esmagados de 106px para 51px por um `overflow-x:auto` dentro de um flex column, e a verificação anterior — feita com viewport 0×0 — não só não pegou como sugeria que o gráfico saudável é que estava quebrado.
+
+## Antipadrão do `||` com zero — REGRA
+
+```js
+valorAtual || valorInvestido || valor || 0     // ⚠️ NUNCA para dinheiro
+```
+
+**`0` é falsy, então o `||` pula todo campo zerado e pousa no primeiro campo não-zerado — que costuma ser o campo podre.** A cadeia parece um fallback ("usa o melhor disponível"); na prática é "usa o primeiro que não for zero", e zero é um valor legítimo em dinheiro, não ausência de dado.
+
+**Três ocorrências até agora, sempre com dias entre o defeito e a descoberta:**
+
+1. **CXSE3 (23/07/2026)** — `saveInv` na edição preservava um `valorInvestido` velho; o card dividia o ganho por ele e mostrava +34,8% onde a conta dava 24,6%.
+2. **Os 8 totais de patrimônio (11/08/2026)** — ao introduzir ativo encerrado, os totais "somavam zero" só porque todos os três campos estavam zerados. Bastaria um sobrar podre para o encerrado voltar ao patrimônio. Resolvido com filtro explícito pela flag (`soAtivos`), não pela zeragem.
+3. **Rentabilidade com ativo encerrado (11/08/2026)** — um `valor:9999` esquecido virou **"rentabilidade R$ 11.299,00" numa carteira de R$ 1.300**. Passou 242 testes e o build; apareceu só na tela.
+
+**Regras:**
+- Para valor monetário, escolher a fonte por **condição explícita** (`x != null ? x : y`) ou por **flag de estado**, nunca por `||` encadeado.
+- Estado (encerrado, inativo, arquivado) se testa pela **flag**, jamais inferindo de valores zerados.
+- Quando um registro sai de circulação, ele contribui com **zero explícito**, não com "o que sobrou nos campos".
+
+**Método que pegou o caso 3, e que os testes não pegaram: plantar um campo podre DE PROPÓSITO no seed.** Um fixture "limpo" (todos os campos coerentemente zerados) passa em tudo e não prova nada — ele testa o caminho feliz de um bug cuja essência é a incoerência entre campos. Ao verificar qualquer coisa que dependa de fallback, semear um valor absurdo (`9999`) no campo que deveria ser ignorado: se ele aparecer na tela, o fallback está errado.
 
 ## "Commitado ≠ no ar" — REGRA
 
