@@ -16,7 +16,7 @@ import {
   ocorrenciasSWAte,pendentesRecorrenciaSW,relatorioMensal,compararMeses,serieGastoAcumulado,extratoComSaldo,
 rentabilidadeRF,serieRentabilidadeRF,composicaoAcoes,
 rentabilidadeAcoesDesdeInicio,ganhoAcoesEntreSnapshots,rentabilidadeAcoes,isRFAtivo,calcValorLiquidoRF,
-estaEncerrado,soAtivos,soEncerrados,encerrarInvestimento,casaProvento,proventosDoAtivo,
+estaEncerrado,soAtivos,soEncerrados,encerrarInvestimento,casaProvento,proventosDoAtivo,valorMercado,
 INDICES_RATE,
 compoeFatorDiario,compoeFatorMensal,calcValorAtualRFHistorico,mesclarIPCAcomPrevia,compoeFatorMensalProRata,
 posicaoRV,
@@ -969,6 +969,35 @@ test("proventosDoAtivo: soma só o que casa, e não vaza entre posições", ()=>
   const enc=proventosDoAtivo(CARTEIRA[2],divs,CARTEIRA);
   assert.equal(enc.total,40);               // encerrada mantém o que recebeu
   assert.equal(proventosDoAtivo(null,divs,CARTEIRA).total,0);
+});
+
+// ── valorMercado: fim da cadeia || no snapshot (ocorrência nº 8) ─────────────
+test("valorMercado: valorAtual ZERO é respeitado, não pulado", ()=>{
+  // O coração do antipadrão: `valorAtual||valorInvestido||valor||0` devolveria
+  // 7777 aqui, porque 0 é falsy. Um ativo que de fato vale zero (delistado,
+  // mico) teria o custo velho congelado no historico[] por 24 meses.
+  const i={valorAtual:0,valorInvestido:5000,valor:7777,quantidade:100,precoMedio:50};
+  assert.equal(valorMercado(i),0);
+  assert.equal(i.valorAtual||i.valorInvestido||i.valor||0,5000); // a cadeia erra
+});
+test("valorMercado: sem cotação cai em qtd×PM, não no campo gravado", ()=>{
+  // valorInvestido podre de uma edição antiga (bug do CXSE3) não pode ganhar
+  // de qtd×PM, que é a base recalculável.
+  assert.equal(valorMercado({quantidade:10,precoMedio:12,valorInvestido:9999}),120);
+});
+test("valorMercado: RF e legado sem PM usam o valor aplicado", ()=>{
+  assert.equal(valorMercado({tipo:"Renda Fixa",valorInvestido:3000}),3000);
+  assert.equal(valorMercado({tipo:"Outros",valor:450}),450);
+  assert.equal(valorMercado({tipo:"Outros",valor:0}),0);      // zero legítimo
+});
+test("valorMercado: encerrado vale ZERO mesmo com todos os campos podres", ()=>{
+  assert.equal(valorMercado({encerrado:true,valorAtual:800,valorInvestido:900,valor:9999,quantidade:10,precoMedio:50}),0);
+});
+test("valorMercado: lixo não derruba o snapshot", ()=>{
+  for(const x of [null,undefined,"texto",42,[],{}]) assert.equal(valorMercado(x),0);
+  // NaN/Infinity nunca passam adiante — congelariam no histórico para sempre
+  assert.equal(valorMercado({valorAtual:NaN,valorInvestido:100}),100);
+  assert.equal(valorMercado({valorAtual:Infinity,valorInvestido:100}),100);
 });
 test("composicaoAcoes: carteira vazia devolve lista vazia sem dividir por zero", ()=>{
   assert.deepEqual(composicaoAcoes([]),[]);

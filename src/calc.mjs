@@ -448,6 +448,30 @@ export function encerrarInvestimento(inv,{data,venda}={}){
     encerrado:true,dataEncerramento:data,
     vendas:[...(inv?.vendas||[]),...(venda?[venda]:[])]};
 }
+// ── Valor de mercado de um ativo, SEM a cadeia `||` ─────────────────────────
+// Substitui `valorAtual||valorInvestido||valor||0`. A diferença não é estilo:
+// `0` é falsy, então a cadeia PULA um valorAtual legitimamente zerado e pousa
+// no primeiro campo não-zerado — em geral o resto podre de uma edição antiga.
+// Aqui a escolha é por `Number.isFinite`, então zero é respeitado como zero.
+//
+// Usada primeiro no snapshot de `historico[]` (ocorrência nº 8), que é a mais
+// grave das oito: as outras erram na LEITURA e se curam quando o dado é
+// corrigido; esta CONGELA o número errado por 24 meses, e a foto congelada
+// vira base de `ganhoAcoesEntreSnapshots` e `relatorioMensal` depois.
+//
+// Ordem deliberada: cotação conhecida → qtd×PM (melhor conhecido sem cotação)
+// → valor aplicado (caminho da RF e do ativo legado sem PM).
+export function valorMercado(inv){
+  if(!inv||typeof inv!=="object")return 0;
+  if(estaEncerrado(inv))return 0;                       // encerrado vale 0, sempre
+  if(Number.isFinite(inv.valorAtual))return inv.valorAtual;
+  const qtd=inv.quantidade,pm=inv.precoMedio;
+  if(Number.isFinite(qtd)&&Number.isFinite(pm)&&qtd>0&&pm>0)return qtd*pm;
+  if(Number.isFinite(inv.valorInvestido))return inv.valorInvestido;
+  if(Number.isFinite(inv.valor))return inv.valor;
+  return 0;
+}
+
 // ── Vínculo provento ↔ ativo ────────────────────────────────────────────────
 // `dividendos[]` sempre casou por `ticker` string. Isso quebra em dois casos
 // reais: ticker reaproveitado (mudança de nome/incorporação) e duas posições

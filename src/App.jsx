@@ -9,7 +9,7 @@ import {
   calcSaldos as calcSaldosPure, calcDividas as calcDividasPure, totaisPorPessoa as totaisPorPessoaPure,
   salarioMensal, converteMoeda, taxaMensalSim, simularJuros,
   semFotos, mesclarFotos, extraiFotosBase64, projetarFluxo,
-  soAtivos, soEncerrados, encerrarInvestimento, casaProvento, proventosDoAtivo, addDias, marcarDuplicatas, montarAgendaPush,
+  soAtivos, soEncerrados, encerrarInvestimento, casaProvento, proventosDoAtivo, valorMercado, addDias, marcarDuplicatas, montarAgendaPush,
   compraAcao, vendaAcao, pendentesRecorrenciaSW, relatorioMensal, compararMeses, serieGastoAcumulado, extratoComSaldo,
   totalPagoFatura, calcFaturaPagamentos, posicaoRV,
 rentabilidadeRF, serieRentabilidadeRF, composicaoAcoes,
@@ -5423,12 +5423,12 @@ function AppInner(){
       const hojeD=new Date();
       const mesKey=`${hojeD.getFullYear()}-${String(hojeD.getMonth()+1).padStart(2,"0")}`;
       const tB=(p.bancos||[]).reduce((acc,b)=>{const txs=(p.transacoes||[]).filter(t=>t.bancoId===b.id);return acc+(b.saldoInicial||0)+txs.filter(t=>t.tipo==="receita").reduce((a,x)=>a+x.valor,0)-txs.filter(t=>t.tipo==="despesa").reduce((a,x)=>a+x.valor,0);},0);
-      const tI=soAtivos(p.investimentos).reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0);
+      const tI=soAtivos(p.investimentos).reduce((a,b)=>a+valorMercado(b),0);
       const pat=Math.round((tB+tI)*100)/100;
       const hist=p.historico||[];
       const existente=hist.find(h=>h.mes===mesKey);
       if(existente&&existente.ativos&&Math.abs((existente.patrimonio||0)-pat)<0.01){snapDone.current=true;return;}
-      const novoHist=[...hist.filter(h=>h.mes!==mesKey),{mes:mesKey,patrimonio:pat,bancos:Math.round(tB*100)/100,investimentos:Math.round(tI*100)/100,ativos:soAtivos(p.investimentos).map(i=>({id:i.id,ticker:i.ticker||null,descricao:i.descricao||null,quantidade:i.quantidade||null,valorAtual:Math.round((i.valorAtual||i.valorInvestido||i.valor||0)*100)/100}))}].sort((a,b)=>a.mes.localeCompare(b.mes)).slice(-24);
+      const novoHist=[...hist.filter(h=>h.mes!==mesKey),{mes:mesKey,patrimonio:pat,bancos:Math.round(tB*100)/100,investimentos:Math.round(tI*100)/100,ativos:soAtivos(p.investimentos).map(i=>({id:i.id,ticker:i.ticker||null,descricao:i.descricao||null,quantidade:i.quantidade||null,valorAtual:Math.round(valorMercado(i)*100)/100}))}].sort((a,b)=>a.mes.localeCompare(b.mes)).slice(-24);
       setData(d=>({...d,historico:novoHist}));
       snapDone.current=true;
     },3000);
