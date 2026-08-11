@@ -8,7 +8,8 @@ import {
   totaisTransacoes, saldoBanco as saldoBancoCalc, parcelaValor, parcelaData,
   calcSaldos as calcSaldosPure, calcDividas as calcDividasPure, totaisPorPessoa as totaisPorPessoaPure,
   salarioMensal, converteMoeda, taxaMensalSim, simularJuros,
-  semFotos, mesclarFotos, extraiFotosBase64, projetarFluxo, addDias, marcarDuplicatas, montarAgendaPush,
+  semFotos, mesclarFotos, extraiFotosBase64, projetarFluxo,
+  soAtivos, soEncerrados, encerrarInvestimento, addDias, marcarDuplicatas, montarAgendaPush,
   compraAcao, vendaAcao, pendentesRecorrenciaSW, relatorioMensal, compararMeses, serieGastoAcumulado, extratoComSaldo,
   totalPagoFatura, calcFaturaPagamentos, posicaoRV,
 rentabilidadeRF, serieRentabilidadeRF, composicaoAcoes,
@@ -1327,7 +1328,7 @@ function ScoreCard({data}){
   const txMes=data.transacoes.filter(t=>{const d=new Date(t.data);return d.getMonth()===MES_ATUAL&&d.getFullYear()===ANO_ATUAL;});
   const r=txMes.filter(t=>t.tipo==="receita").reduce((a,b)=>a+b.valor,0);
   const d=txMes.filter(t=>t.tipo==="despesa").reduce((a,b)=>a+b.valor,0);
-  const inv=data.investimentos.reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0);
+  const inv=soAtivos(data.investimentos).reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0);
   let score=0;
   if(r>0&&d/r<0.7)score+=25;else if(r>0&&d/r<0.9)score+=15;
   if(inv>0)score+=25;if(data.metas.length>0)score+=15;if(data.bancos.length>0)score+=20;if(data.orcamentos?.length>0)score+=15;
@@ -1470,7 +1471,7 @@ function ResetPasswordScreen({token,onDone,onCancel}){
 function BancoCard({b,data,setData,currency,extratoBanco,setExtratoBanco,onEdit}){
   const [exp,setExp]=useState(false);
   function sc(){const txs=data.transacoes.filter(t=>t.bancoId===b.id);return(b.saldoInicial||0)+txs.filter(t=>t.tipo==="receita").reduce((a,x)=>a+x.valor,0)-txs.filter(t=>t.tipo==="despesa").reduce((a,x)=>a+x.valor,0);}
-  function si(){return data.investimentos.filter(i=>i.bancoId===b.id).reduce((a,i)=>a+(i.valorAtual||i.valorInvestido||i.valor||0),0);}
+  function si(){return soAtivos(data.investimentos).filter(i=>i.bancoId===b.id).reduce((a,i)=>a+(i.valorAtual||i.valorInvestido||i.valor||0),0);}
   const sC=sc(),sI=si();
   return <Card>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
@@ -1488,7 +1489,7 @@ function BancoCard({b,data,setData,currency,extratoBanco,setExtratoBanco,onEdit}
       <span style={{fontSize:10,color:D.text3}}>{exp?"▲":"▼"}</span>
     </div>
     {exp&&<div style={{marginTop:8,borderTop:`1px solid ${D.border}`,paddingTop:8}}>
-      {data.investimentos.filter(i=>i.bancoId===b.id).length===0?<p style={{fontSize:11,color:D.text3}}>Nenhum investimento.</p>:data.investimentos.filter(i=>i.bancoId===b.id).map(i=><div key={i.id} style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}><span style={{color:D.text2}}>{i.ticker||i.descricao||i.tipo}</span><span style={{fontWeight:600,color:D.blue}}>{fmtM(i.valorAtual||i.valorInvestido||0,currency)}</span></div>)}
+      {soAtivos(data.investimentos).filter(i=>i.bancoId===b.id).length===0?<p style={{fontSize:11,color:D.text3}}>Nenhum investimento.</p>:soAtivos(data.investimentos).filter(i=>i.bancoId===b.id).map(i=><div key={i.id} style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}><span style={{color:D.text2}}>{i.ticker||i.descricao||i.tipo}</span><span style={{fontWeight:600,color:D.blue}}>{fmtM(i.valorAtual||i.valorInvestido||0,currency)}</span></div>)}
     </div>}
     {b.limite>0&&<p style={{margin:"4px 0 0",fontSize:11,color:D.text3}}>Limite: {fmtM(b.limite,currency)}</p>}
   </Card>;
@@ -1503,7 +1504,7 @@ function BancosTab({data,setData,currency}){
   function doTransf(){const v=parseFloat(transf.valor);if(!v||!transf.de||!transf.para||transf.de===transf.para)return;const dt=hoje.toISOString().slice(0,10);setData(d=>({...d,transacoes:[...d.transacoes,{id:uid(),tipo:"despesa",descricao:`Transf. → ${d.bancos.find(b=>b.id===transf.para)?.nome}`,valor:v,categoria:"Transferência",data:dt,bancoId:transf.de},{id:uid(),tipo:"receita",descricao:`Transf. ← ${d.bancos.find(b=>b.id===transf.de)?.nome}`,valor:v,categoria:"Transferência",data:dt,bancoId:transf.para}]}));setTransf({de:"",para:"",valor:""});}
   function sc(b){const txs=data.transacoes.filter(t=>t.bancoId===b.id);return(b.saldoInicial||0)+txs.filter(t=>t.tipo==="receita").reduce((a,x)=>a+x.valor,0)-txs.filter(t=>t.tipo==="despesa").reduce((a,x)=>a+x.valor,0);}
   const totalC=data.bancos.reduce((a,b)=>a+sc(b),0);
-  const totalI=data.bancos.reduce((a,b)=>a+data.investimentos.filter(i=>i.bancoId===b.id).reduce((x,y)=>x+(y.valorAtual||y.valorInvestido||y.valor||0),0),0);
+  const totalI=data.bancos.reduce((a,b)=>a+soAtivos(data.investimentos).filter(i=>i.bancoId===b.id).reduce((x,y)=>x+(y.valorAtual||y.valorInvestido||y.valor||0),0),0);
   const bExtr=extratoBanco?data.bancos.find(b=>b.id===extratoBanco):null;
   const txExtr=bExtr?extratoComSaldo(bExtr,data.transacoes):[]; // testado em calc.mjs (invariante: 1ª linha = saldo do banco)
   const qE=buscaExt.trim().toLowerCase();
@@ -2003,7 +2004,7 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
   // ficava preso mostrando "fórmula" até o cache vencer sozinho, 12h depois
   // (bug real, achado em 15/07/2026 comparando com o extrato do C6).
   function _dataMinRF(investimentos){
-    const rfAtivos=(investimentos||[]).filter(i=>i&&(i.tipo==="Renda Fixa"||i.tipo==="Tesouro Direto")&&i.indice!=="Prefixado"&&i.data);
+    const rfAtivos=soAtivos(investimentos).filter(i=>i&&(i.tipo==="Renda Fixa"||i.tipo==="Tesouro Direto")&&i.indice!=="Prefixado"&&i.data);
     if(!rfAtivos.length)return null;
     return rfAtivos.reduce((min,i)=>i.data<min?i.data:min,rfAtivos[0].data);
   }
@@ -2092,8 +2093,11 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
     const pmX=inv.precoMedio||0;
     const desc=`Venda: ${q} ${inv.ticker||inv.descricao||""} (${r.resultado>=0?"lucro":"prejuízo"} ${fmtM(Math.abs(r.resultado),currency)})`;
     setData(d=>({...d,
+      // Venda total ENCERRA, não apaga: até 11/08/2026 o `filter` abaixo
+      // destruía aportes[], vendas[], custo e o vínculo de proventos do ativo
+      // — uma posição fechada não deixava rastro nenhum.
       investimentos:r.vendeuTudo
-        ?d.investimentos.filter(x=>x.id!==inv.id)
+        ?d.investimentos.map(x=>x.id!==inv.id?x:encerrarInvestimento(x,{data:dt,venda:{data:dt,quantidade:q,preco:p,...(c>0?{corretagem:c}:{}),resultado:Math.round(r.resultado*100)/100}}))
         :d.investimentos.map(x=>x.id!==inv.id?x:{...x,quantidade:r.qtdRestante,valorInvestido:Math.round(pmX*r.qtdRestante*100)/100,valor:Math.round(pmX*r.qtdRestante*100)/100,valorAtual:Math.round((x.preco_atual||pmX)*r.qtdRestante*100)/100,lucro:Math.round(((x.preco_atual||pmX)-pmX)*r.qtdRestante*100)/100,vendas:[...(x.vendas||[]),{data:dt,quantidade:q,preco:p,...(c>0?{corretagem:c}:{}),resultado:Math.round(r.resultado*100)/100}]}),
       transacoes:(bid&&r.recebidoBruto>0)?[...d.transacoes,
         {id:uid(),tipo:"receita",descricao:desc,valor:Math.round(r.recebidoBruto*100)/100,categoria:"Resgate",data:dt,bancoId:bid},
@@ -2107,17 +2111,22 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
   // RF ao vivo com a série real do BCB (mesmo caminho do card/totalRF); RV usa
   // b.valorAtual normalmente (ali é preço de mercado buscado, não fórmula
   // congelada — problema achado em 15/07/2026 era só nos ativos de RF).
-  const totalInvest=data.investimentos.reduce((a,b)=>a+(isRFAtivo(b)?calcValorAtualRFHistorico(b,seriesBCB,new Date()).valor:(b.valorAtual||b.valorInvestido||b.valor||0)),0);
+  const totalInvest=soAtivos(data.investimentos).reduce((a,b)=>a+(isRFAtivo(b)?calcValorAtualRFHistorico(b,seriesBCB,new Date()).valor:(b.valorAtual||b.valorInvestido||b.valor||0)),0);
   // Custo de RV vem de qtd×PM (posicaoRV), NUNCA do campo gravado valorInvestido
   // — mesmo motivo do card (bug real, 23/07/2026: valorInvestido podre depois de
   // edição manual contaminava a % geral da carteira aqui também).
-  const totalInvestido=data.investimentos.reduce((a,b)=>a+(isRFAtivo(b)?(b.valorInvestido||b.valor||0):posicaoRV(b).custo),0);
+  const totalInvestido=soAtivos(data.investimentos).reduce((a,b)=>a+(isRFAtivo(b)?(b.valorInvestido||b.valor||0):posicaoRV(b).custo),0);
   const totalLucro=totalInvest-totalInvestido;
   const rentTotal=totalInvestido>0?((totalInvest-totalInvestido)/totalInvestido)*100:0;
 
-  const rendaVariavel=data.investimentos.filter(i=>["Ações","FII","ETF","Cripto"].includes(i.tipo));
-  const rendaFixa=data.investimentos.filter(i=>["Renda Fixa","Tesouro Direto"].includes(i.tipo));
-  const outros=data.investimentos.filter(i=>i.tipo==="Outros");
+  const rendaVariavel=soAtivos(data.investimentos).filter(i=>["Ações","FII","ETF","Cripto"].includes(i.tipo));
+  const rendaFixa=soAtivos(data.investimentos).filter(i=>["Renda Fixa","Tesouro Direto"].includes(i.tipo));
+  const outros=soAtivos(data.investimentos).filter(i=>i.tipo==="Outros");
+  // Encerrados ficam visíveis numa aba própria: dado que ninguém confere é
+  // dado morto, e o ponto de preservar a posição fechada é justamente poder
+  // auditar o realizado depois.
+  const encerrados=soEncerrados(data.investimentos).sort((a,b)=>String(b.dataEncerramento||"").localeCompare(String(a.dataEncerramento||"")));
+  const realizadoTotal=encerrados.reduce((a,i)=>a+(i.vendas||[]).reduce((s,v)=>s+(v.resultado||0),0),0);
   const totalRV=rendaVariavel.reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||0),0);
   // Ao vivo com a série real do BCB (mesmo caminho do card) — NÃO usa b.valorAtual
   // (campo congelado, gravado com a fórmula de taxa fixa; bug real, achado em 15/07/2026).
@@ -2128,9 +2137,9 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
   const totDiv=divMes.reduce((a,b)=>a+b.valor,0);
   const hojeStr=hoje.toISOString().slice(0,10);
   // Próximos dividendos: só os com data futura (ou no máximo 7 dias atrás), evita datas velhas
-  const proxDiv=data.investimentos.filter(i=>i.prox_dividendo&&i.prox_dividendo>=hojeStr).sort((a,b)=>a.prox_dividendo.localeCompare(b.prox_dividendo));
+  const proxDiv=soAtivos(data.investimentos).filter(i=>i.prox_dividendo&&i.prox_dividendo>=hojeStr).sort((a,b)=>a.prox_dividendo.localeCompare(b.prox_dividendo));
   // Dividendos com data já vencida (para avisar que precisam atualizar)
-  const divVencidos=data.investimentos.filter(i=>i.prox_dividendo&&i.prox_dividendo<hojeStr);
+  const divVencidos=soAtivos(data.investimentos).filter(i=>i.prox_dividendo&&i.prox_dividendo<hojeStr);
   // Proventos agendados manualmente (a receber)
   const agendados=(data.proventosAgendados||[]).slice().sort((a,b)=>(a.dataPagamento||"").localeCompare(b.dataPagamento||""));
   const agFuturos=agendados.filter(a=>(a.dataPagamento||"")>=hojeStr);
@@ -2140,7 +2149,7 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
   const em7=new Date(hoje.getTime()+7*864e5).toISOString().slice(0,10);
   const agProximos=agFuturos.filter(a=>(a.dataPagamento||"")<=em7);
   // Estimativa de renda passiva pelo DY histórico
-  const estDY=data.investimentos.filter(i=>i.dy>0&&(i.valorAtual||i.valorInvestido||i.valor)>0).map(i=>({ticker:i.ticker||i.descricao||i.tipo,dy:i.dy,anual:(i.valorAtual||i.valorInvestido||i.valor||0)*i.dy/100})).sort((a,b)=>b.anual-a.anual);
+  const estDY=soAtivos(data.investimentos).filter(i=>i.dy>0&&(i.valorAtual||i.valorInvestido||i.valor)>0).map(i=>({ticker:i.ticker||i.descricao||i.tipo,dy:i.dy,anual:(i.valorAtual||i.valorInvestido||i.valor||0)*i.dy/100})).sort((a,b)=>b.anual-a.anual);
   const totEstAnual=estDY.reduce((s,x)=>s+x.anual,0);
 
   async function buscarDados(inv){
@@ -2193,7 +2202,7 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
   const invRefreshRef = useRef(null);
   useEffect(()=>{
     invRefreshRef.current=setInterval(async()=>{
-      const ativos=data.investimentos.filter(i=>i.ticker||(i.tipo==="Renda Fixa"||i.tipo==="Tesouro Direto"));
+      const ativos=soAtivos(data.investimentos).filter(i=>i.ticker||(i.tipo==="Renda Fixa"||i.tipo==="Tesouro Direto"));
       for(const inv of ativos) await buscarDados(inv);
     },60000);
     return()=>clearInterval(invRefreshRef.current);
@@ -2201,7 +2210,7 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
 
   async function atualizarTodos(){
     setAtualizandoTodos(true);
-    const ativos=data.investimentos.filter(i=>i.ticker||i.tipo==="Renda Fixa"||i.tipo==="Tesouro Direto");
+    const ativos=soAtivos(data.investimentos).filter(i=>i.ticker||i.tipo==="Renda Fixa"||i.tipo==="Tesouro Direto");
     for(const inv of ativos){await buscarDados(inv);}
     setAtualizandoTodos(false);
   }
@@ -2311,7 +2320,7 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
     </Card>
 
     {(()=>{ // 📈 Rentabilidade da Renda Fixa (dia/mês/ano/desde o início) — testado em calc.mjs
-      const rf=data.investimentos.filter(isRFAtivo);
+      const rf=soAtivos(data.investimentos).filter(isRFAtivo);
       if(!rf.length)return null;
       const hoje=new Date();
       const R=rentabilidadeRF(rf,hoje,seriesBCB);
@@ -2344,7 +2353,7 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
       </Card>;})()}
 
     {(()=>{ // 📊 Rentabilidade da Renda Variável (ações) — testado em calc.mjs
-      const acoes=data.investimentos.filter(i=>!isRFAtivo(i)); // corrigido 15/07 (mesma classe do bug de ontem — cópia que escapou)
+      const acoes=soAtivos(data.investimentos).filter(i=>!isRFAtivo(i)); // corrigido 15/07 (mesma classe do bug de ontem — cópia que escapou)
       if(!acoes.length)return null;
       const R=rentabilidadeAcoes(data.investimentos,data.historico,new Date());
       const valorAtual=R.desdeInicio.valorAtual;
@@ -2365,7 +2374,7 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
       </Card>;})()}
 
     {(()=>{ // 🥧 Composição da carteira de ações — testado em calc.mjs
-      const C=composicaoAcoes(data.investimentos);
+      const C=composicaoAcoes(soAtivos(data.investimentos));
       if(C.length<2)return null;
       const CS=2*Math.PI*42;let off=0;
       return <Card>
@@ -2391,7 +2400,7 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
         <Btn sm color={D.green} onClick={()=>setData(d=>({...d,aporteMensal:parseFloat(aporteInput)||0}))}>Salvar meta</Btn>
       </div>
       {data.aporteMensal>0&&(()=>{
-        const invMes=data.investimentos.filter(i=>{const dt=new Date(i.data);return dt.getMonth()===MES_ATUAL&&dt.getFullYear()===ANO_ATUAL;}).reduce((a,b)=>a+(b.valorInvestido||b.valor||0),0);
+        const invMes=soAtivos(data.investimentos).filter(i=>{const dt=new Date(i.data);return dt.getMonth()===MES_ATUAL&&dt.getFullYear()===ANO_ATUAL;}).reduce((a,b)=>a+(b.valorInvestido||b.valor||0),0);
         const pct=Math.min(100,Math.round(invMes/data.aporteMensal*100));
         const cor=pct>=100?D.green:pct>=50?D.gold:D.red;
         return <div style={{marginTop:8}}>
@@ -2406,7 +2415,7 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
     </Card>
 
     <div style={{display:"flex",gap:4,background:D.card,borderRadius:10,padding:4,border:`1px solid ${D.border}`}}>
-      {[["classe","Por Classe"],["rv","Renda Variável"],["rf","Renda Fixa"],["proventos","Proventos"]].map(([v,l])=><button key={v} onClick={()=>setView(v)} style={{flex:1,padding:"7px 8px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:view===v?700:400,background:view===v?D.blue:"transparent",color:view===v?"#fff":D.text3,whiteSpace:"nowrap"}}>{l}</button>)}
+      {[["classe","Por Classe"],["rv","Renda Variável"],["rf","Renda Fixa"],["proventos","Proventos"],...(encerrados.length?[["encerrados",`Encerrados (${encerrados.length})`]]:[])].map(([v,l])=><button key={v} onClick={()=>setView(v)} style={{flex:1,padding:"7px 8px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:view===v?700:400,background:view===v?D.blue:"transparent",color:view===v?"#fff":D.text3,whiteSpace:"nowrap"}}>{l}</button>)}
     </div>
 
     {view==="classe"&&<div style={{display:"flex",flexDirection:"column",gap:10}}>
@@ -2432,6 +2441,27 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
         <Badge color={D.blue}>{rendaVariavel.length} ativos</Badge>
       </div>
       <InvList invs={rendaVariavel} emptyMsg="Nenhum ativo de renda variável cadastrado."/>
+    </div>}
+
+    {view==="encerrados"&&<div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <div><p style={{margin:0,fontSize:14,fontWeight:700,color:D.text}}>🔒 Posições encerradas</p>
+          <p style={{margin:0,fontSize:11,color:D.text3}}>Resultado realizado: <span style={{color:realizadoTotal>=0?D.green:D.red,fontWeight:700}}>{fmtM(realizadoTotal,currency)}</span></p></div>
+        <Badge color={D.text3}>{encerrados.length}</Badge>
+      </div>
+      <p style={{fontSize:10,color:D.text3,margin:"0 0 10px",lineHeight:1.5}}>Vendidas por inteiro. Não entram no patrimônio nem em nenhum total — ficam aqui para o histórico de aportes, o resultado realizado e os proventos recebidos enquanto você as tinha.</p>
+      {encerrados.map(i=>{const res=(i.vendas||[]).reduce((s,v)=>s+(v.resultado||0),0);return <Card key={i.id} style={{opacity:.75}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+          <div style={{minWidth:0}}>
+            <p style={{margin:0,fontSize:13,fontWeight:700,color:D.text}}>{i.ticker||i.descricao||i.tipo}</p>
+            <p style={{margin:"2px 0 0",fontSize:11,color:D.text3}}>encerrada em {(i.dataEncerramento||"").split("-").reverse().join("/")||"—"} · {(i.aportes||[]).length} aporte(s) · {(i.vendas||[]).length} venda(s)</p>
+          </div>
+          <div style={{textAlign:"right",flexShrink:0}}>
+            <p style={{margin:0,fontSize:10,color:D.text3}}>realizado</p>
+            <p style={{margin:0,fontSize:13,fontWeight:700,color:res>=0?D.green:D.red}}>{fmtM(res,currency)}</p>
+          </div>
+        </div>
+      </Card>;})}
     </div>}
 
     {view==="rf"&&<div>
@@ -2605,7 +2635,7 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
     </Modal>}
     {modalAg&&<Modal title={agForm.editId?"Editar agendamento":"Agendar provento"} onClose={()=>{setModalAg(false);setAgForm({});}}>
       <p style={{fontSize:11,color:D.text3,marginTop:0,lineHeight:1.5}}>Registre o que a corretora anunciou. Ex.: a XP diz que ITUB4 paga R$ 0,80/ação em 15/08 → preencha abaixo e o app calcula quanto você recebe.</p>
-      {data.investimentos.filter(i=>i.ticker).length>0&&<label style={{fontSize:12,color:D.text3}}>Puxar da carteira (opcional)<select value="" onChange={e=>{const inv=data.investimentos.find(i=>i.id===e.target.value);if(inv)setAgForm(f=>({...f,ticker:(inv.ticker||"").toUpperCase(),quantidade:inv.quantidade||f.quantidade}));}} style={{marginTop:4}}><option value="">— escolher ativo —</option>{data.investimentos.filter(i=>i.ticker).map(i=><option key={i.id} value={i.id}>{i.ticker} ({i.quantidade||0} ações)</option>)}</select></label>}
+      {soAtivos(data.investimentos).filter(i=>i.ticker).length>0&&<label style={{fontSize:12,color:D.text3}}>Puxar da carteira (opcional)<select value="" onChange={e=>{const inv=data.investimentos.find(i=>i.id===e.target.value);if(inv)setAgForm(f=>({...f,ticker:(inv.ticker||"").toUpperCase(),quantidade:inv.quantidade||f.quantidade}));}} style={{marginTop:4}}><option value="">— escolher ativo —</option>{soAtivos(data.investimentos).filter(i=>i.ticker).map(i=><option key={i.id} value={i.id}>{i.ticker} ({i.quantidade||0} ações)</option>)}</select></label>}
       <label style={{fontSize:12,color:D.text3}}>Ticker<input value={agForm.ticker||""} onChange={e=>setAgForm(f=>({...f,ticker:e.target.value.toUpperCase()}))} placeholder="Ex: ITUB4" style={{marginTop:4}}/></label>
       <label style={{fontSize:12,color:D.text3}}>Quantidade de ações<input type="number" value={agForm.quantidade||""} onChange={e=>setAgForm(f=>({...f,quantidade:e.target.value}))} style={{marginTop:4}}/></label>
       <label style={{fontSize:12,color:D.text3}}>Valor por ação ({currency})<input type="number" step="0.0001" value={agForm.valorAcao||""} onChange={e=>setAgForm(f=>({...f,valorAcao:e.target.value}))} placeholder="Ex: 0.80" style={{marginTop:4}}/></label>
@@ -3296,7 +3326,11 @@ function SplitwiseTab({currency,userEmail,userId}){
 
 
 // ── Análise Tab ───────────────────────────────────────────────────────────────
-function AnaliseTab({data,setData,investimentos,profileId,market,currency,userId}){
+function AnaliseTab({data,setData,investimentos:investimentosTodos,profileId,market,currency,userId}){
+  // Ativo encerrado fica FORA de toda a aba: dos totais, do contexto mandado
+  // à IA (recomendação sobre posição que não existe mais) e da busca de
+  // preços — cotação de ativo vendido é requisição recorrente à toa.
+  const investimentos=soAtivos(investimentosTodos);
   // Watchlist agora vem do Supabase (data.watchlist), sincroniza entre dispositivos
   const watchlist=data.watchlist||[];
   const setWatchlist=(updater)=>{
@@ -5385,12 +5419,12 @@ function AppInner(){
       const hojeD=new Date();
       const mesKey=`${hojeD.getFullYear()}-${String(hojeD.getMonth()+1).padStart(2,"0")}`;
       const tB=(p.bancos||[]).reduce((acc,b)=>{const txs=(p.transacoes||[]).filter(t=>t.bancoId===b.id);return acc+(b.saldoInicial||0)+txs.filter(t=>t.tipo==="receita").reduce((a,x)=>a+x.valor,0)-txs.filter(t=>t.tipo==="despesa").reduce((a,x)=>a+x.valor,0);},0);
-      const tI=(p.investimentos||[]).reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0);
+      const tI=soAtivos(p.investimentos).reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0);
       const pat=Math.round((tB+tI)*100)/100;
       const hist=p.historico||[];
       const existente=hist.find(h=>h.mes===mesKey);
       if(existente&&existente.ativos&&Math.abs((existente.patrimonio||0)-pat)<0.01){snapDone.current=true;return;}
-      const novoHist=[...hist.filter(h=>h.mes!==mesKey),{mes:mesKey,patrimonio:pat,bancos:Math.round(tB*100)/100,investimentos:Math.round(tI*100)/100,ativos:(p.investimentos||[]).map(i=>({id:i.id,ticker:i.ticker||null,descricao:i.descricao||null,quantidade:i.quantidade||null,valorAtual:Math.round((i.valorAtual||i.valorInvestido||i.valor||0)*100)/100}))}].sort((a,b)=>a.mes.localeCompare(b.mes)).slice(-24);
+      const novoHist=[...hist.filter(h=>h.mes!==mesKey),{mes:mesKey,patrimonio:pat,bancos:Math.round(tB*100)/100,investimentos:Math.round(tI*100)/100,ativos:soAtivos(p.investimentos).map(i=>({id:i.id,ticker:i.ticker||null,descricao:i.descricao||null,quantidade:i.quantidade||null,valorAtual:Math.round((i.valorAtual||i.valorInvestido||i.valor||0)*100)/100}))}].sort((a,b)=>a.mes.localeCompare(b.mes)).slice(-24);
       setData(d=>({...d,historico:novoHist}));
       snapDone.current=true;
     },3000);
@@ -5436,11 +5470,11 @@ function AppInner(){
 
   const txMes=data.transacoes.filter(t=>{const d=new Date(t.data);return d.getMonth()===mes&&d.getFullYear()===ANO_ATUAL;});
   const {receitas:totR,despesas:totD}=totaisTransacoes(txMes); // testado em calc.mjs (exclui categorias internas)
-  const totInv=data.investimentos.reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0);
+  const totInv=soAtivos(data.investimentos).reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0);
   function saldoBanco(b){return saldoBancoCalc(b,data.transacoes);} // testado em calc.mjs
   const totBancos=data.bancos.reduce((a,b)=>a+saldoBanco(b),0);
   const patrimonioLiq=totBancos+totInv;
-  const tiposI=TIPOS_INV.map(t=>({t,v:data.investimentos.filter(i=>i.tipo===t).reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0)})).filter(x=>x.v>0);
+  const tiposI=TIPOS_INV.map(t=>({t,v:soAtivos(data.investimentos).filter(i=>i.tipo===t).reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0)})).filter(x=>x.v>0);
   const ultimos6=Array.from({length:6},(_,i)=>{const d=new Date(ANO_ATUAL,MES_ATUAL-5+i,1),m=d.getMonth(),a=d.getFullYear();const txs=data.transacoes.filter(t=>{const td=new Date(t.data);return td.getMonth()===m&&td.getFullYear()===a&&!CAT_INTERNAS.includes(t.categoria);});const tt=totaisTransacoes(txs);return{label:MESES[m],r:tt.receitas,d:tt.despesas};});
   let acc=0;const lineData=ultimos6.map(d=>{acc+=d.r-d.d;return{label:d.label,v:acc};});
   const catPieD=catD.map((c,i)=>({label:c,cat:c,v:txMes.filter(t=>t.tipo==="despesa"&&t.categoria===c).reduce((a,b)=>a+b.valor,0),color:CORES[i%CORES.length]})).filter(x=>x.v>0).sort((a,b)=>b.v-a.v);

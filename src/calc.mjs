@@ -429,6 +429,25 @@ export function vendaAcao(qtdAtual,pm,qtdVendida,preco,corretagem){
 // CXSE3 mostrando +34,8% quando os próprios números do card davam 24,6%).
 // Fallback: ativo legado SEM PM/quantidade (ex: tipo "Outros" só com valor)
 // continua usando valorInvestido||valor, como sempre foi.
+// ── Ativo encerrado ─────────────────────────────────────────────────────────
+// Venda total NÃO apaga mais o investimento: ele fica com quantidade 0,
+// `encerrado:true` e `dataEncerramento`, para não destruir aportes[], vendas[]
+// e o vínculo de proventos. Sai das telas de carteira e dos totais.
+//
+// ⚠️ Por que filtro EXPLÍCITO e não confiar na zeragem: os totais usam a
+// cadeia `valorAtual||valorInvestido||valor||0`, e 0 é falsy — basta um dos
+// campos ficar com valor velho para o `||` pular nele e o encerrado voltar a
+// somar. É a mecânica exata do bug do CXSE3 (23/07/2026), onde um
+// valorInvestido podre sobreviveu a uma edição e contaminou a %.
+export const estaEncerrado=i=>!!(i&&i.encerrado);
+export const soAtivos=lista=>(lista||[]).filter(i=>i&&!i.encerrado);
+export const soEncerrados=lista=>(lista||[]).filter(i=>i&&i.encerrado);
+export function encerrarInvestimento(inv,{data,venda}={}){
+  return {...inv,
+    quantidade:0,valorInvestido:0,valor:0,valorAtual:0,lucro:0,
+    encerrado:true,dataEncerramento:data,
+    vendas:[...(inv?.vendas||[]),...(venda?[venda]:[])]};
+}
 export function posicaoRV(inv){
   const qtd=inv?.quantidade||0,pm=inv?.precoMedio||0;
   const custo=qtd*pm>0?qtd*pm:(inv?.valorInvestido||inv?.valor||0);
@@ -497,7 +516,7 @@ export function relatorioMensal({mesKey,transacoes=[],investimentos=[],snapIni=n
   const [y,m]=mesKey.split("-").map(Number);
   const fimD=new Date(y,m,0), iniD=new Date(y,m-1,0);   // último dia do mês / do anterior
   const fimStr=_ymdC(fimD);
-  const rf=(investimentos||[]).filter(i=>isRFAtivo(i)&&i.data&&i.data<=fimStr).map(i=>{
+  const rf=soAtivos(investimentos).filter(i=>isRFAtivo(i)&&i.data&&i.data<=fimStr).map(i=>{
     const vFim=calcValorAtualRF(i,fimD), vIni=calcValorAtualRF(i,iniD);
     const investido=(i.valorInvestido||i.valor||0);
     return {descricao:i.descricao||i.ticker||"Renda fixa",rendMes:vFim-vIni,acumulado:vFim-investido,valorFim:vFim};
@@ -622,7 +641,9 @@ export function serieRentabilidadeRF(investimentosRF,inicio,fim,series=null){
 // ── Composição da carteira de ações (para o donut) ───────────────────────────
 // % de cada ativo sobre o total investido em renda variável (não-RF).
 export function composicaoAcoes(investimentos){
-  const acoes=(investimentos||[]).filter(i=>!isRFAtivo(i));
+  // alocação é da carteira ATUAL: encerrado fora (o filtro de valor>0.005 abaixo
+  // já excluiria, mas depender disso é depender de zeragem — ver estaEncerrado)
+  const acoes=soAtivos(investimentos).filter(i=>!isRFAtivo(i));
   const itens=acoes.map(i=>({ticker:i.ticker||i.descricao||"Ativo",valor:i.valorAtual||i.valorInvestido||i.valor||0}))
     .filter(x=>x.valor>0.005);
   const total=itens.reduce((a,x)=>a+x.valor,0);
@@ -636,14 +657,24 @@ export function composicaoAcoes(investimentos){
 // registradas nelas. "No mês"/"No ano" comparam a foto mensal mais próxima
 // do início do período contra os valores ATUAIS (ao vivo), descontando
 // aportes e somando vendas do período — igual ao relatório mensal.
-// LIMITE HONESTO: não existe granularidade diária (sem "1 dia"/"1 ano" tick-a-tick);
-// e um ativo TOTALMENTE vendido sai da carteira e seu ganho realizado
-// histórico não é mais somado aqui (seguindo o mesmo limite já aceito no
-// relatório mensal).
+// LIMITE HONESTO: não existe granularidade diária (sem "1 dia"/"1 ano" tick-a-tick).
+//
+// ⚠️ AQUI NÃO SE FILTRA `encerrado` — de propósito. Até 11/08/2026 a venda
+// total APAGAVA o ativo e o ganho realizado dele sumia desta conta (o limite
+// que este comentário admitia). Agora o encerrado fica, com valores zerados:
+// entra com 0 em valorAtual e custo, e contribui com o `resultado` das vendas.
+// Filtrar aqui reintroduziria a perda. Coberto por teste.
 export function rentabilidadeAcoesDesdeInicio(investimentos){
-  const acoes=(investimentos||[]).filter(i=>!isRFAtivo(i));
-  const valorAtual=acoes.reduce((a,i)=>a+(i.valorAtual||i.valorInvestido||i.valor||0),0);
-  const custo=acoes.reduce((a,i)=>a+(i.valorInvestido||i.valor||0),0);
+  const acoes=(investimentos||[]).filter(i=>!isRFAtivo(i));   // encerrados INCLUSOS
+  // ⚠️ Encerrado contribui SÓ com o realizado — nunca com valor nem com custo.
+  // Não basta ele estar zerado: a cadeia `valorAtual||valorInvestido||valor`
+  // pula todo campo 0 (falsy) e pousa em qualquer resto podre. Achado na
+  // verificação em tela de 11/08/2026: um `valor:9999` esquecido virou
+  // "rentabilidade R$ 11.299,00". Mesma mecânica do CXSE3, terceira aparição.
+  const vAtual=i=>estaEncerrado(i)?0:(i.valorAtual||i.valorInvestido||i.valor||0);
+  const vCusto=i=>estaEncerrado(i)?0:(i.valorInvestido||i.valor||0);
+  const valorAtual=acoes.reduce((a,i)=>a+vAtual(i),0);
+  const custo=acoes.reduce((a,i)=>a+vCusto(i),0);
   const realizado=acoes.reduce((a,i)=>a+(i.vendas||[]).reduce((s,v)=>s+(v.resultado||0),0),0);
   const valor=Math.round((valorAtual-custo+realizado)*100)/100;
   return {valor,pct:custo>0?Math.round((valorAtual-custo)/custo*100*10000)/10000:null,valorAtual:Math.round(valorAtual*100)/100};
@@ -652,11 +683,14 @@ export function rentabilidadeAcoesDesdeInicio(investimentos){
 export function ganhoAcoesEntreSnapshots(investimentos,snapIni,iniStr,fimStr){
   if(!Array.isArray(snapIni)||!snapIni.length)return {temBase:false,valor:0,pct:null};
   let ganho=0,baseTotal=0;
+  // ⚠️ encerrados INCLUSOS de propósito: o ativo estava no snapshot inicial e
+  // foi vendido no período. Incluindo-o a conta fecha (0 − base − aportes +
+  // vendas); excluindo-o, some a base E o resultado, e o mês ignora a venda.
   const vivos=(investimentos||[]).filter(i=>!isRFAtivo(i));
   for(const f of vivos){
     const ini=snapIni.find(x=>x&&x.id===f.id);
     if(!ini)continue; // ativo novo no período — sem base, não entra na conta
-    const valorFim=f.valorAtual||f.valorInvestido||f.valor||0;
+    const valorFim=estaEncerrado(f)?0:(f.valorAtual||f.valorInvestido||f.valor||0); // idem: encerrado vale 0, não o resto podre
     const aportesPeriodo=(f.aportes||[]).filter(a=>a&&a.data&&a.data>=iniStr&&a.data<=fimStr).reduce((s,a)=>s+(a.quantidade||0)*(a.preco||0),0);
     const vendasPeriodo=(f.vendas||[]).filter(v=>v&&v.data&&v.data>=iniStr&&v.data<=fimStr).reduce((s,v)=>s+(v.quantidade||0)*(v.preco||0),0);
     ganho+=valorFim-(ini.valorAtual||0)-aportesPeriodo+vendasPeriodo;

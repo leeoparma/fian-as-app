@@ -16,6 +16,7 @@ import {
   ocorrenciasSWAte,pendentesRecorrenciaSW,relatorioMensal,compararMeses,serieGastoAcumulado,extratoComSaldo,
 rentabilidadeRF,serieRentabilidadeRF,composicaoAcoes,
 rentabilidadeAcoesDesdeInicio,ganhoAcoesEntreSnapshots,rentabilidadeAcoes,isRFAtivo,calcValorLiquidoRF,
+estaEncerrado,soAtivos,soEncerrados,encerrarInvestimento,
 INDICES_RATE,
 compoeFatorDiario,compoeFatorMensal,calcValorAtualRFHistorico,mesclarIPCAcomPrevia,compoeFatorMensalProRata,
 posicaoRV,
@@ -788,6 +789,132 @@ test("composicaoAcoes: percentuais somam ~100% e ordena por valor desc", ()=>{
   aprox(C[0].pct,60);aprox(C[1].pct,40);
   aprox(C.reduce((a,x)=>a+x.pct,0),100);
 });
+
+// ── Ativo encerrado: venda total preserva o histórico (11/08/2026) ───────────
+const VENDA={data:"2026-08-11",quantidade:100,preco:22.50,resultado:250};
+const ATIVO_VENDIDO={id:"a1",tipo:"Ações",ticker:"XPTO3",quantidade:100,precoMedio:20,
+  valorInvestido:2000,valor:2000,valorAtual:2250,lucro:250,
+  aportes:[{data:"2026-03-01",quantidade:100,preco:20}],prox_dividendo:"2099-01-01",dy:8};
+
+test("encerrarInvestimento: zera os valores, marca a flag e PRESERVA o histórico", ()=>{
+  const e=encerrarInvestimento(ATIVO_VENDIDO,{data:"2026-08-11",venda:VENDA});
+  assert.equal(e.encerrado,true);
+  assert.equal(e.dataEncerramento,"2026-08-11");
+  assert.equal(e.quantidade,0);
+  for(const k of ["valorInvestido","valor","valorAtual","lucro"]) assert.equal(e[k],0,`${k} devia zerar`);
+  // o ponto do fix: nada do histórico pode sumir
+  assert.equal(e.aportes.length,1);
+  assert.equal(e.vendas.length,1);
+  assert.equal(e.vendas[0].resultado,250);
+});
+test("encerrarInvestimento: venda ANTERIOR sobrevive ao encerramento", ()=>{
+  // caso real: vender metade hoje e o resto depois. Se o encerramento
+  // sobrescrevesse vendas[] em vez de concatenar, a venda parcial sumiria e
+  // com ela o ganho realizado dela. A mutação que trocou o spread por
+  // `vendas:(venda?[venda]:[])` passava no teste acima, porque o fixture não
+  // tinha venda prévia — este fecha o buraco.
+  const parcial={...ATIVO_VENDIDO,quantidade:50,
+    vendas:[{data:"2026-06-01",quantidade:50,preco:21,resultado:50}]};
+  const e=encerrarInvestimento(parcial,{data:"2026-08-11",venda:VENDA});
+  assert.equal(e.vendas.length,2);
+  assert.equal(e.vendas[0].resultado,50);            // a antiga continua lá
+  assert.equal(e.vendas[1].resultado,250);           // e a nova entra no fim
+  assert.equal(rentabilidadeAcoesDesdeInicio([e]).valor,300);  // 50+250 realizados
+  assert.equal(e.ticker,"XPTO3");                    // vínculo p/ proventos órfãos
+  assert.equal(e.precoMedio,20);                     // base de cálculo futura
+  assert.equal(ATIVO_VENDIDO.quantidade,100);        // não muta o original
+});
+
+test("soAtivos: exclui encerrado MESMO com valor velho não-zerado (armadilha do ||)", ()=>{
+  // Regra do CXSE3: `valorAtual||valorInvestido||valor||0` pula campo zerado,
+  // porque 0 é falsy. Se o filtro dependesse da zeragem, um único campo podre
+  // faria o encerrado voltar a somar no patrimônio. Este teste fixa que o
+  // filtro é pela FLAG, não pelos números.
+  const podre={id:"z",encerrado:true,quantidade:0,valorAtual:0,valorInvestido:0,valor:9999};
+  assert.equal(soAtivos([podre]).length,0);
+  assert.equal(estaEncerrado(podre),true);
+  const total=soAtivos([podre]).reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0);
+  assert.equal(total,0);                             // sem o filtro daria 9999
+  // e a cadeia || realmente cai no 9999 se ninguém filtrar — a armadilha é real
+  assert.equal([podre].reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0),9999);
+});
+test("soAtivos/soEncerrados: partição completa, tolerante a lixo", ()=>{
+  const l=[{id:"a"},{id:"b",encerrado:true},null,{id:"c",encerrado:false}];
+  assert.deepEqual(soAtivos(l).map(x=>x.id),["a","c"]);
+  assert.deepEqual(soEncerrados(l).map(x=>x.id),["b"]);
+  assert.deepEqual(soAtivos(null),[]);
+});
+
+test("rentabilidadeAcoesDesdeInicio: encerrado SOMA o realizado (antes ele sumia)", ()=>{
+  const vivo={id:"v",tipo:"Ações",quantidade:10,precoMedio:10,valorInvestido:100,valor:100,valorAtual:130};
+  const enc=encerrarInvestimento(ATIVO_VENDIDO,{data:"2026-08-11",venda:VENDA});
+  const antes=rentabilidadeAcoesDesdeInicio([vivo]);              // como era: apagado
+  const depois=rentabilidadeAcoesDesdeInicio([vivo,enc]);         // como é: encerrado
+  assert.equal(antes.valor,30);                                   // 130-100
+  assert.equal(depois.valor,280);                                 // 130-100 + 250 realizado
+  assert.equal(depois.valor-antes.valor,250);                     // exatamente o resultado da venda
+  // o encerrado NÃO mexe em valorAtual nem no % da posição viva
+  assert.equal(depois.valorAtual,antes.valorAtual);
+  assert.equal(depois.pct,antes.pct);
+});
+test("rentabilidadeAcoesDesdeInicio: encerrado com campo PODRE não vira patrimônio", ()=>{
+  // Achado na tela em 11/08/2026: a encerrada tinha valorAtual:0 e valorInvestido:0
+  // (corretos) mas um `valor:9999` esquecido. A cadeia || pulou os dois zeros e
+  // pousou no 9999 → a tela mostrou "rentabilidade R$ 11.299,00". Encerrado tem
+  // de contribuir SÓ com o realizado.
+  const viva={id:"v",tipo:"Ações",quantidade:100,precoMedio:10,valorInvestido:1000,valor:1000,valorAtual:1300};
+  const podre={id:"m",tipo:"Ações",encerrado:true,quantidade:0,valorInvestido:0,valorAtual:0,valor:9999,
+    vendas:[{data:"2026-08-11",quantidade:100,preco:22.5,resultado:250}]};
+  const r=rentabilidadeAcoesDesdeInicio([viva,podre]);
+  assert.equal(r.valorAtual,1300);     // era 11299
+  assert.equal(r.valor,550);           // 300 não realizado + 250 realizado
+  assert.equal(r.pct,30);              // 300/1000 — era 2,7275 com o custo contaminado
+});
+test("ganhoAcoesEntreSnapshots: encerrado podre não infla o valor final", ()=>{
+  const podre={id:"a1",tipo:"Ações",encerrado:true,valorAtual:0,valorInvestido:0,valor:9999,
+    aportes:[],vendas:[{data:"2026-08-05",quantidade:100,preco:12,resultado:200}]};
+  const r=ganhoAcoesEntreSnapshots([podre],[{id:"a1",valorAtual:1000}],"2026-08-01","2026-08-31");
+  assert.equal(r.valor,200);           // 0 − 1000 + 1200, e não 9999 − 1000 + 1200
+});
+test("rentabilidadeAcoesDesdeInicio: NÃO filtrar encerrado é intencional", ()=>{
+  // guarda contra um refactor futuro "limpar" a função com soAtivos: se alguém
+  // filtrar aqui, o ganho realizado da posição fechada some de novo.
+  const enc=encerrarInvestimento(ATIVO_VENDIDO,{data:"2026-08-11",venda:VENDA});
+  assert.equal(rentabilidadeAcoesDesdeInicio([enc]).valor,250);
+  assert.notEqual(rentabilidadeAcoesDesdeInicio([enc]).valor,0);
+});
+
+test("ganhoAcoesEntreSnapshots: encerrado fecha a conta (base sai, venda entra)", ()=>{
+  // ativo valia 1000 na foto inicial, sem aporte no período, vendido por 1200.
+  const enc={...ATIVO_VENDIDO,quantidade:0,valorInvestido:0,valor:0,valorAtual:0,encerrado:true,
+    aportes:[],vendas:[{data:"2026-08-05",quantidade:100,preco:12,resultado:200}]};
+  const snap=[{id:"a1",valorAtual:1000}];
+  const r=ganhoAcoesEntreSnapshots([enc],snap,"2026-08-01","2026-08-31");
+  assert.equal(r.temBase,true);
+  assert.equal(r.valor,200);            // 0 − 1000 + 1200
+  // sem o encerrado o ativo some da lista e o mês IGNORA a venda inteira
+  const semEle=ganhoAcoesEntreSnapshots([],snap,"2026-08-01","2026-08-31");
+  assert.equal(semEle.valor,0);
+});
+
+test("composicaoAcoes: encerrado fora da alocação, mesmo com valor podre", ()=>{
+  const c=composicaoAcoes([
+    {id:"a",tipo:"Ações",ticker:"AAA",valorAtual:600},
+    {id:"b",tipo:"Ações",ticker:"BBB",valorAtual:400},
+    {id:"z",tipo:"Ações",ticker:"ZZZ",encerrado:true,valorAtual:0,valor:5000},
+  ]);
+  assert.equal(c.length,2);
+  assert.equal(c.find(x=>x.ticker==="ZZZ"),undefined);
+  assert.equal(Math.round(c.reduce((a,x)=>a+x.pct,0)),100);
+});
+test("relatorioMensal: RF encerrada não vira linha de zeros no relatório", ()=>{
+  const rfEnc={id:"r",tipo:"Renda Fixa",descricao:"CDB velho",data:"2026-01-01",
+    indice:"CDI",pctIndice:100,rfTipo:"pct",taxaRF:0,encerrado:true,
+    quantidade:0,valorInvestido:0,valor:0,valorAtual:0};
+  const R=relatorioMensal({mesKey:"2026-08",transacoes:[],investimentos:[rfEnc]});
+  assert.equal(R.rf.length,0);
+});
+
 test("composicaoAcoes: carteira vazia devolve lista vazia sem dividir por zero", ()=>{
   assert.deepEqual(composicaoAcoes([]),[]);
 });
