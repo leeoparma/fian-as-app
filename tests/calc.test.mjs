@@ -17,7 +17,7 @@ import {
 rentabilidadeRF,serieRentabilidadeRF,composicaoAcoes,
 rentabilidadeAcoesDesdeInicio,ganhoAcoesEntreSnapshots,rentabilidadeAcoes,isRFAtivo,calcValorLiquidoRF,
 estaEncerrado,soAtivos,soEncerrados,encerrarInvestimento,casaProvento,proventosDoAtivo,valorMercado,
-validaInvestimento,corretagemDeCompra,TIPOS_RF,
+validaInvestimento,corretagemDeCompra,TIPOS_RF,valorAplicado,
 INDICES_RATE,
 compoeFatorDiario,compoeFatorMensal,calcValorAtualRFHistorico,mesclarIPCAcomPrevia,compoeFatorMensalProRata,
 posicaoRV,
@@ -1143,6 +1143,50 @@ test("rentabilidadeAcoesDesdeInicio: custo vem de qtd×PM, não do campo gravado
   const r=rentabilidadeAcoesDesdeInicio([cxse]);
   assert.equal(r.valor,81.4);            // 2600 − 2518,60
   assert.notEqual(r.valor,819.08);       // o que a leitura podre dava
+});
+
+// ── Bloco D: o padrão do || fechado ─────────────────────────────────────────
+test("valorAplicado: valorInvestido ZERO é respeitado, não pulado", ()=>{
+  // irmão de valorMercado, para o caminho da RF. Um aporte legitimamente
+  // zerado não pode cair num `valor` velho.
+  assert.equal(valorAplicado({valorInvestido:0,valor:8888}),0);
+  assert.equal({valorInvestido:0,valor:8888}.valorInvestido||8888,8888); // a cadeia erra
+  assert.equal(valorAplicado({valor:450}),450);
+  assert.equal(valorAplicado({encerrado:true,valorInvestido:900}),0);
+  for(const x of [null,undefined,"x",{}]) assert.equal(valorAplicado(x),0);
+  assert.equal(valorAplicado({valorInvestido:NaN,valor:120}),120);
+});
+test("composicaoAcoes: alocação usa valorMercado, não a cadeia (ocorrência 4)", ()=>{
+  // ativo que vale zero com `valor` podre: antes entrava na pizza com 5000
+  const c=composicaoAcoes([
+    {id:"a",tipo:"Ações",ticker:"AAA",valorAtual:600},
+    {id:"z",tipo:"Ações",ticker:"ZZZ",valorAtual:0,valorInvestido:0,valor:5000},
+  ]);
+  assert.equal(c.length,1);
+  assert.equal(c[0].pct,100);
+});
+test("ganhoAcoesEntreSnapshots: base do snapshot com valorAtual 0 é ZERO (ocorrência 5)", ()=>{
+  // `ini.valorAtual||0` já dava 0 aqui, mas a leitura agora é explícita:
+  // uma foto que registrou zero é zero, não "sem dado".
+  const inv=[{id:"a1",tipo:"Ações",quantidade:10,precoMedio:10,valorAtual:150}];
+  const r=ganhoAcoesEntreSnapshots(inv,[{id:"a1",valorAtual:0}],"2026-08-01","2026-08-31");
+  assert.equal(r.valor,150);
+  assert.equal(r.pct,null);   // base zero não vira divisão por zero
+});
+test("Bloco D: Δ ZERO — nenhum dos 22 ativos reais muda de valor", ()=>{
+  // A higiene só pode ser aplicada porque cadeia e função coincidem em TODA a
+  // base real (dry-run de 11/08/2026). Este teste fixa a equivalência nos
+  // formatos que os 22 ativos usam: RV com cotação, RV sem cotação, RF.
+  const amostras=[
+    {tipo:"Ações",quantidade:385,precoMedio:20,valorInvestido:7698.55,valor:7698.55,valorAtual:8085},
+    {tipo:"Ações",quantidade:140,precoMedio:17.99,valorInvestido:1780.92,valor:1780.92,valorAtual:2600},
+    {tipo:"Renda Fixa",precoMedio:0,valorInvestido:5000,valor:5000,valorAtual:5123.45},
+    {tipo:"Outros",valor:450},
+  ];
+  for(const i of amostras){
+    assert.equal(valorMercado(i),i.valorAtual||i.valorInvestido||i.valor||0);
+    assert.equal(valorAplicado(i),i.valorInvestido||i.valor||0);
+  }
 });
 test("composicaoAcoes: carteira vazia devolve lista vazia sem dividir por zero", ()=>{
   assert.deepEqual(composicaoAcoes([]),[]);

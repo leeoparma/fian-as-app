@@ -10,7 +10,7 @@ import {
   salarioMensal, converteMoeda, taxaMensalSim, simularJuros,
   semFotos, mesclarFotos, extraiFotosBase64, projetarFluxo,
   soAtivos, soEncerrados, encerrarInvestimento, casaProvento, proventosDoAtivo, valorMercado,
-  validaInvestimento, corretagemDeCompra, addDias, marcarDuplicatas, montarAgendaPush,
+  validaInvestimento, corretagemDeCompra, valorAplicado, addDias, marcarDuplicatas, montarAgendaPush,
   compraAcao, vendaAcao, pendentesRecorrenciaSW, relatorioMensal, compararMeses, serieGastoAcumulado, extratoComSaldo,
   totalPagoFatura, calcFaturaPagamentos, posicaoRV,
 rentabilidadeRF, serieRentabilidadeRF, composicaoAcoes,
@@ -1329,7 +1329,7 @@ function ScoreCard({data}){
   const txMes=data.transacoes.filter(t=>{const d=new Date(t.data);return d.getMonth()===MES_ATUAL&&d.getFullYear()===ANO_ATUAL;});
   const r=txMes.filter(t=>t.tipo==="receita").reduce((a,b)=>a+b.valor,0);
   const d=txMes.filter(t=>t.tipo==="despesa").reduce((a,b)=>a+b.valor,0);
-  const inv=soAtivos(data.investimentos).reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0);
+  const inv=soAtivos(data.investimentos).reduce((a,b)=>a+valorMercado(b),0);
   let score=0;
   if(r>0&&d/r<0.7)score+=25;else if(r>0&&d/r<0.9)score+=15;
   if(inv>0)score+=25;if(data.metas.length>0)score+=15;if(data.bancos.length>0)score+=20;if(data.orcamentos?.length>0)score+=15;
@@ -1472,7 +1472,7 @@ function ResetPasswordScreen({token,onDone,onCancel}){
 function BancoCard({b,data,setData,currency,extratoBanco,setExtratoBanco,onEdit}){
   const [exp,setExp]=useState(false);
   function sc(){const txs=data.transacoes.filter(t=>t.bancoId===b.id);return(b.saldoInicial||0)+txs.filter(t=>t.tipo==="receita").reduce((a,x)=>a+x.valor,0)-txs.filter(t=>t.tipo==="despesa").reduce((a,x)=>a+x.valor,0);}
-  function si(){return soAtivos(data.investimentos).filter(i=>i.bancoId===b.id).reduce((a,i)=>a+(i.valorAtual||i.valorInvestido||i.valor||0),0);}
+  function si(){return soAtivos(data.investimentos).filter(i=>i.bancoId===b.id).reduce((a,i)=>a+valorMercado(i),0);}
   const sC=sc(),sI=si();
   return <Card>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
@@ -1490,7 +1490,7 @@ function BancoCard({b,data,setData,currency,extratoBanco,setExtratoBanco,onEdit}
       <span style={{fontSize:10,color:D.text3}}>{exp?"▲":"▼"}</span>
     </div>
     {exp&&<div style={{marginTop:8,borderTop:`1px solid ${D.border}`,paddingTop:8}}>
-      {soAtivos(data.investimentos).filter(i=>i.bancoId===b.id).length===0?<p style={{fontSize:11,color:D.text3}}>Nenhum investimento.</p>:soAtivos(data.investimentos).filter(i=>i.bancoId===b.id).map(i=><div key={i.id} style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}><span style={{color:D.text2}}>{i.ticker||i.descricao||i.tipo}</span><span style={{fontWeight:600,color:D.blue}}>{fmtM(i.valorAtual||i.valorInvestido||0,currency)}</span></div>)}
+      {soAtivos(data.investimentos).filter(i=>i.bancoId===b.id).length===0?<p style={{fontSize:11,color:D.text3}}>Nenhum investimento.</p>:soAtivos(data.investimentos).filter(i=>i.bancoId===b.id).map(i=><div key={i.id} style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}><span style={{color:D.text2}}>{i.ticker||i.descricao||i.tipo}</span><span style={{fontWeight:600,color:D.blue}}>{fmtM(valorMercado(i),currency)}</span></div>)}
     </div>}
     {b.limite>0&&<p style={{margin:"4px 0 0",fontSize:11,color:D.text3}}>Limite: {fmtM(b.limite,currency)}</p>}
   </Card>;
@@ -1505,7 +1505,7 @@ function BancosTab({data,setData,currency}){
   function doTransf(){const v=parseFloat(transf.valor);if(!v||!transf.de||!transf.para||transf.de===transf.para)return;const dt=hoje.toISOString().slice(0,10);setData(d=>({...d,transacoes:[...d.transacoes,{id:uid(),tipo:"despesa",descricao:`Transf. → ${d.bancos.find(b=>b.id===transf.para)?.nome}`,valor:v,categoria:"Transferência",data:dt,bancoId:transf.de},{id:uid(),tipo:"receita",descricao:`Transf. ← ${d.bancos.find(b=>b.id===transf.de)?.nome}`,valor:v,categoria:"Transferência",data:dt,bancoId:transf.para}]}));setTransf({de:"",para:"",valor:""});}
   function sc(b){const txs=data.transacoes.filter(t=>t.bancoId===b.id);return(b.saldoInicial||0)+txs.filter(t=>t.tipo==="receita").reduce((a,x)=>a+x.valor,0)-txs.filter(t=>t.tipo==="despesa").reduce((a,x)=>a+x.valor,0);}
   const totalC=data.bancos.reduce((a,b)=>a+sc(b),0);
-  const totalI=data.bancos.reduce((a,b)=>a+soAtivos(data.investimentos).filter(i=>i.bancoId===b.id).reduce((x,y)=>x+(y.valorAtual||y.valorInvestido||y.valor||0),0),0);
+  const totalI=data.bancos.reduce((a,b)=>a+soAtivos(data.investimentos).filter(i=>i.bancoId===b.id).reduce((x,y)=>x+valorMercado(y),0),0);
   const bExtr=extratoBanco?data.bancos.find(b=>b.id===extratoBanco):null;
   const txExtr=bExtr?extratoComSaldo(bExtr,data.transacoes):[]; // testado em calc.mjs (invariante: 1ª linha = saldo do banco)
   const qE=buscaExt.trim().toLowerCase();
@@ -2112,11 +2112,11 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
   // RF ao vivo com a série real do BCB (mesmo caminho do card/totalRF); RV usa
   // b.valorAtual normalmente (ali é preço de mercado buscado, não fórmula
   // congelada — problema achado em 15/07/2026 era só nos ativos de RF).
-  const totalInvest=soAtivos(data.investimentos).reduce((a,b)=>a+(isRFAtivo(b)?calcValorAtualRFHistorico(b,seriesBCB,new Date()).valor:(b.valorAtual||b.valorInvestido||b.valor||0)),0);
+  const totalInvest=soAtivos(data.investimentos).reduce((a,b)=>a+(isRFAtivo(b)?calcValorAtualRFHistorico(b,seriesBCB,new Date()).valor:valorMercado(b)),0);
   // Custo de RV vem de qtd×PM (posicaoRV), NUNCA do campo gravado valorInvestido
   // — mesmo motivo do card (bug real, 23/07/2026: valorInvestido podre depois de
   // edição manual contaminava a % geral da carteira aqui também).
-  const totalInvestido=soAtivos(data.investimentos).reduce((a,b)=>a+(isRFAtivo(b)?(b.valorInvestido||b.valor||0):posicaoRV(b).custo),0);
+  const totalInvestido=soAtivos(data.investimentos).reduce((a,b)=>a+(isRFAtivo(b)?valorAplicado(b):posicaoRV(b).custo),0);
   const totalLucro=totalInvest-totalInvestido;
   const rentTotal=totalInvestido>0?((totalInvest-totalInvestido)/totalInvestido)*100:0;
 
@@ -2128,11 +2128,11 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
   // auditar o realizado depois.
   const encerrados=soEncerrados(data.investimentos).sort((a,b)=>String(b.dataEncerramento||"").localeCompare(String(a.dataEncerramento||"")));
   const realizadoTotal=encerrados.reduce((a,i)=>a+(i.vendas||[]).reduce((s,v)=>s+(v.resultado||0),0),0);
-  const totalRV=rendaVariavel.reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||0),0);
+  const totalRV=rendaVariavel.reduce((a,b)=>a+valorMercado(b),0);
   // Ao vivo com a série real do BCB (mesmo caminho do card) — NÃO usa b.valorAtual
   // (campo congelado, gravado com a fórmula de taxa fixa; bug real, achado em 15/07/2026).
   const totalRF=rendaFixa.reduce((a,b)=>a+calcValorAtualRFHistorico(b,seriesBCB,new Date()).valor,0);
-  const totalOu=outros.reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||0),0);
+  const totalOu=outros.reduce((a,b)=>a+valorMercado(b),0);
 
   const divMes=(data.dividendos||[]).filter(d=>{const dt=new Date(d.data);return dt.getMonth()===MES_ATUAL&&dt.getFullYear()===ANO_ATUAL;});
   const totDiv=divMes.reduce((a,b)=>a+b.valor,0);
@@ -2150,7 +2150,7 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
   const em7=new Date(hoje.getTime()+7*864e5).toISOString().slice(0,10);
   const agProximos=agFuturos.filter(a=>(a.dataPagamento||"")<=em7);
   // Estimativa de renda passiva pelo DY histórico
-  const estDY=soAtivos(data.investimentos).filter(i=>i.dy>0&&(i.valorAtual||i.valorInvestido||i.valor)>0).map(i=>({ticker:i.ticker||i.descricao||i.tipo,dy:i.dy,anual:(i.valorAtual||i.valorInvestido||i.valor||0)*i.dy/100})).sort((a,b)=>b.anual-a.anual);
+  const estDY=soAtivos(data.investimentos).filter(i=>i.dy>0&&valorMercado(i)>0).map(i=>({ticker:i.ticker||i.descricao||i.tipo,dy:i.dy,anual:valorMercado(i)*i.dy/100})).sort((a,b)=>b.anual-a.anual);
   const totEstAnual=estDY.reduce((s,x)=>s+x.anual,0);
 
   async function buscarDados(inv){
@@ -2275,7 +2275,7 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
         // nunca do campo gravado valorInvestido, que podia estar podre depois de
         // uma edição manual (bug real, 23/07/2026: CXSE3 com % errada no card).
         const rvCalc=isRFItem?null:posicaoRV(inv);
-        const custo=isRFItem?(inv.valorInvestido||inv.valor||0):rvCalc.custo;
+        const custo=isRFItem?valorAplicado(inv):rvCalc.custo;
         const atual=isRFItem?rfCalc.valor:rvCalc.atual;
         const lucro=isRFItem?(atual-custo):rvCalc.lucro;
         const lpct=isRFItem?(custo>0?(lucro/custo*100):0):rvCalc.pct;
@@ -2305,7 +2305,7 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
               <button onClick={()=>buscarDados(inv)} disabled={loadingId===inv.id} style={{border:"none",background:"none",cursor:"pointer",fontSize:15,opacity:loadingId===inv.id?0.4:1,color:D.green,flexShrink:0}}>{loadingId===inv.id?"⏳":"🔄"}</button>
               {!isRFItem&&<button onClick={()=>{setModalAporte(inv.id);setAporteForm({});}} title="Aportar mais (recalcula preço médio)" style={{border:"none",background:"none",cursor:"pointer",fontSize:14,color:D.blue}}>➕</button>}
               {!isRFItem&&<button onClick={()=>{setModalVenda(inv.id);setVendaForm({preco:inv.preco_atual?String(inv.preco_atual):"",bancoId:inv.bancoId||""});}} title="Vender (parcial ou total)" style={{border:"none",background:"none",cursor:"pointer",fontSize:14,color:D.gold}}>➖</button>}
-              <button onClick={()=>{setModalResgate(inv.id);setResgateForm({valor:String(inv.valorAtual||inv.valorInvestido||inv.valor||0),bancoId:inv.bancoId||""});}} title="Resgatar (devolver à conta)" style={{border:"none",background:"none",cursor:"pointer",fontSize:14,color:D.green}}>💵</button>
+              <button onClick={()=>{setModalResgate(inv.id);setResgateForm({valor:String(valorMercado(inv)),bancoId:inv.bancoId||""});}} title="Resgatar (devolver à conta)" style={{border:"none",background:"none",cursor:"pointer",fontSize:14,color:D.green}}>💵</button>
               <button onClick={()=>{setModal(true);setForm({...inv,editId:inv.id});}} style={{border:"none",background:"none",cursor:"pointer",fontSize:12,color:D.text3}}>✏️</button>
               <button onClick={()=>setData(d=>({...d,investimentos:d.investimentos.filter(x=>x.id!==inv.id),transacoes:inv.aplicacaoTxId?d.transacoes.filter(t=>t.id!==inv.aplicacaoTxId):d.transacoes}))} style={{border:"none",background:"none",cursor:"pointer",fontSize:12,color:D.red}}>🗑</button>
             </div>
@@ -2433,7 +2433,7 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
         // CONSUMIDOR 2 migrado (11/08/2026): RV usa posicaoRV(qtd×PM); RF segue
         // no valor digitado, que lá é a verdade. Δ zero nos dados de hoje —
         // os 2 ativos do mês são RF, cujo caminho não mudou.
-        const invMes=soAtivos(data.investimentos).filter(i=>{const dt=new Date(i.data);return dt.getMonth()===MES_ATUAL&&dt.getFullYear()===ANO_ATUAL;}).reduce((a,b)=>a+(isRFAtivo(b)?(b.valorInvestido||b.valor||0):posicaoRV(b).custo),0);
+        const invMes=soAtivos(data.investimentos).filter(i=>{const dt=new Date(i.data);return dt.getMonth()===MES_ATUAL&&dt.getFullYear()===ANO_ATUAL;}).reduce((a,b)=>a+(isRFAtivo(b)?valorAplicado(b):posicaoRV(b).custo),0);
         const pct=Math.min(100,Math.round(invMes/data.aporteMensal*100));
         const cor=pct>=100?D.green:pct>=50?D.gold:D.red;
         return <div style={{marginTop:8}}>
@@ -2601,7 +2601,7 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
     {modalResgate&&(()=>{const inv=data.investimentos.find(x=>x.id===modalResgate);if(!inv)return null;
       return <Modal title="💵 Resgatar investimento" onClose={()=>setModalResgate(null)}>
         <p style={{fontSize:13,color:D.text2,margin:"0 0 4px"}}><b>{inv.ticker||inv.descricao||inv.tipo}</b></p>
-        <p style={{fontSize:11,color:D.text3,margin:"0 0 12px",lineHeight:1.5}}>Valor de mercado: {fmtM(inv.valorAtual||inv.valorInvestido||0,currency)} · aplicado: {fmtM(inv.valorInvestido||inv.valor||0,currency)}. Ajuste abaixo para o que <b>realmente caiu na conta</b> (após IR/taxas, se houver).</p>
+        <p style={{fontSize:11,color:D.text3,margin:"0 0 12px",lineHeight:1.5}}>Valor de mercado: {fmtM(valorMercado(inv),currency)} · aplicado: {fmtM(valorAplicado(inv),currency)}. Ajuste abaixo para o que <b>realmente caiu na conta</b> (após IR/taxas, se houver).</p>
         <label style={{fontSize:12,color:D.text3}}>Valor que voltou ({currency})<input type="number" value={resgateForm.valor||""} onChange={e=>setResgateForm(f=>({...f,valor:e.target.value}))} style={{marginTop:4}}/></label>
         <label style={{fontSize:12,color:D.text3,display:"block",marginTop:8}}>Creditar no banco<select value={resgateForm.bancoId||""} onChange={e=>setResgateForm(f=>({...f,bancoId:e.target.value}))} style={{marginTop:4}}><option value="">Não creditar (só remover)</option>{data.bancos.map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}</select></label>
         <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}><Btn outline color={D.text3} onClick={()=>setModalResgate(null)}>Cancelar</Btn><Btn color={D.green} onClick={()=>{const v=parseFloat(resgateForm.valor)||0;const bid=resgateForm.bancoId;setData(d=>({...d,investimentos:d.investimentos.filter(x=>x.id!==inv.id),transacoes:(bid&&v>0)?[...d.transacoes,{id:uid(),tipo:"receita",descricao:`Resgate: ${inv.ticker||inv.descricao||inv.tipo}`,valor:v,categoria:"Resgate",data:hoje.toISOString().slice(0,10),bancoId:bid}]:d.transacoes}));setModalResgate(null);setResgateForm({});}}>Resgatar</Btn></div>
@@ -3479,8 +3479,8 @@ function AnaliseTab({data,setData,investimentos:investimentosTodos,profileId,mar
       const r=await fetch(`${WORKER}/indice?symbol=${encodeURIComponent(symbol)}`);
       const d=await r.json();
       const varIndice=d?.variacao_12m;
-      const totInvestido=investimentos.reduce((a,b)=>a+(b.valorInvestido||b.valor||0),0);
-      const totAtual=investimentos.reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0);
+      const totInvestido=investimentos.reduce((a,b)=>a+(isRFAtivo(b)?valorAplicado(b):posicaoRV(b).custo),0);
+      const totAtual=investimentos.reduce((a,b)=>a+valorMercado(b),0);
       const rentCarteira=totInvestido>0?((totAtual-totInvestido)/totInvestido)*100:0;
       setIndiceData({rentCarteira,varIndice:varIndice!=null?varIndice:null,nomeIndice:nomeIndice(profileId)});
     }catch(e){
@@ -3589,7 +3589,7 @@ function AnaliseTab({data,setData,investimentos:investimentosTodos,profileId,mar
     setChatMsgs(novaMsgs);setChatInput("");setChatLoading(true);
     try{
       const mercado=nomeMercadoCurto(profileId);
-      const carteira=investimentos.length>0?`\nCarteira do usuário: ${investimentos.map(i=>`${i.ticker||i.tipo}:${currency}${i.valorAtual||i.valorInvestido||0}`).join(", ")}`:"";
+      const carteira=investimentos.length>0?`\nCarteira do usuário: ${investimentos.map(i=>`${i.ticker||i.tipo}:${currency}${valorMercado(i)}`).join(", ")}`:"";
       const watchStr=watchlist.length>0?`\nWatchlist: ${watchlist.map(w=>`${w.ticker}@${currency}${w.preco||"?"}`).join(", ")}`:"";
       const systemPrompt=`Você é um analista financeiro especialista na bolsa ${mercado}. Responda em português de forma clara, objetiva e com dados quando possível.${carteira}${watchStr}`;
       const msgs=novaMsgs.slice(-10).map(m=>({role:m.role,content:m.content}));
@@ -3611,7 +3611,7 @@ function AnaliseTab({data,setData,investimentos:investimentosTodos,profileId,mar
       // reinjetá-lo num prompt é alucinação virando entrada de outra alucinação.
       // P/L fica porque vem da brapi/Yahoo, é dado real.
       const precoCtx=watchlist.length>0?`\nAtivos em acompanhamento: ${watchlist.map(w=>`${w.ticker}@${currency}${w.preco||"?"} (P/L:${w.pl||"?"})`).join(", ")}`:"";
-      const carteiraCtx=investimentos.length>0?`\nCarteira atual: ${investimentos.map(i=>`${i.ticker||i.tipo}:${currency}${i.valorAtual||i.valorInvestido||0}`).join(", ")}`:"";
+      const carteiraCtx=investimentos.length>0?`\nCarteira atual: ${investimentos.map(i=>`${i.ticker||i.tipo}:${currency}${valorMercado(i)}`).join(", ")}`:"";
 
       const res=await fetch(WORKER,{method:"POST",headers:{"Content-Type":"application/json",...authHdr()},body:JSON.stringify({
         model:"claude-sonnet-4-6",
@@ -3719,7 +3719,7 @@ function AnaliseTab({data,setData,investimentos:investimentosTodos,profileId,mar
         return{...inv,preco_atual:real?.preco_atual||inv.preco_atual||null,variacao_dia:real?.variacao_dia||null};
       }));
 
-      const carteiraDetalhada=invComPrecos.map(i=>`${i.ticker||i.tipo}: investido ${currency}${i.valorInvestido||i.valor||0}, atual ${currency}${i.valorAtual||i.valorInvestido||0}, preço ${i.preco_atual||"?"}`).join("\n");
+      const carteiraDetalhada=invComPrecos.map(i=>`${i.ticker||i.tipo}: investido ${currency}${valorAplicado(i)}, atual ${currency}${valorMercado(i)}, preço ${i.preco_atual||"?"}`).join("\n");
 
       const res=await fetch(WORKER,{method:"POST",headers:{"Content-Type":"application/json",...authHdr()},body:JSON.stringify({
         model:"claude-sonnet-4-6",
@@ -3764,14 +3764,14 @@ function AnaliseTab({data,setData,investimentos:investimentosTodos,profileId,mar
   async function sugerirAloc(){
     if(!investimentos.length){setErro("Adicione investimentos.");return;}
     setAlocLoading(true);setErro("");
-    try{const txt=await askClaude(`Consultor financeiro. Carteira: ${investimentos.map(i=>`${i.tipo}:${i.valorInvestido||i.valor||0}`).join(",")}. JSON: {"analise":"2 frases","sugestao":[{"tipo":"str","pct_atual":0,"pct_ideal":0,"acao":"str"}]}`,800);const s=txt.indexOf("{"),e=txt.lastIndexOf("}");if(s===-1)throw new Error();setAlocRes(JSON.parse(txt.slice(s,e+1)));}
+    try{const txt=await askClaude(`Consultor financeiro. Carteira: ${investimentos.map(i=>`${i.tipo}:${valorAplicado(i)}`).join(",")}. JSON: {"analise":"2 frases","sugestao":[{"tipo":"str","pct_atual":0,"pct_ideal":0,"acao":"str"}]}`,800);const s=txt.indexOf("{"),e=txt.lastIndexOf("}");if(s===-1)throw new Error();setAlocRes(JSON.parse(txt.slice(s,e+1)));}
     catch(e){setErro("Erro: "+e.message);}setAlocLoading(false);
   }
 
   async function avaliarRisco(){
     if(!investimentos.length){setErro("Adicione investimentos.");return;}
     setRiscoLoading(true);setErro("");
-    try{const txt=await askClaude(`Analista de risco. Carteira: ${investimentos.map(i=>`${i.tipo}:${i.valorInvestido||i.valor||0}`).join(",")}. JSON: {"perfil":"Conservador|Moderado|Arrojado","nota":0,"descricao":"2 frases","riscos":["r1","r2","r3"]}`,600);const s=txt.indexOf("{"),e=txt.lastIndexOf("}");if(s===-1)throw new Error();setNotaRisco(JSON.parse(txt.slice(s,e+1)));}
+    try{const txt=await askClaude(`Analista de risco. Carteira: ${investimentos.map(i=>`${i.tipo}:${valorAplicado(i)}`).join(",")}. JSON: {"perfil":"Conservador|Moderado|Arrojado","nota":0,"descricao":"2 frases","riscos":["r1","r2","r3"]}`,600);const s=txt.indexOf("{"),e=txt.lastIndexOf("}");if(s===-1)throw new Error();setNotaRisco(JSON.parse(txt.slice(s,e+1)));}
     catch{setErro("Erro ao avaliar risco.");}setRiscoLoading(false);
   }
 
@@ -5091,7 +5091,7 @@ function AppInner(){
     const txs=Array.isArray(d.transacoes)?d.transacoes:[];
     const invs=Array.isArray(d.investimentos)?d.investimentos:[];
     const totB=bancos.reduce((a,b)=>{const t=txs.filter(x=>x.bancoId===b.id);return a+(b.saldoInicial||0)+t.filter(x=>x.tipo==="receita").reduce((s,x)=>s+x.valor,0)-t.filter(x=>x.tipo==="despesa").reduce((s,x)=>s+x.valor,0);},0);
-    const totI=invs.reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0);
+    const totI=invs.reduce((a,b)=>a+valorMercado(b),0);
     return totB+totI;
   }
 
@@ -5528,11 +5528,11 @@ function AppInner(){
 
   const txMes=data.transacoes.filter(t=>{const d=new Date(t.data);return d.getMonth()===mes&&d.getFullYear()===ANO_ATUAL;});
   const {receitas:totR,despesas:totD}=totaisTransacoes(txMes); // testado em calc.mjs (exclui categorias internas)
-  const totInv=soAtivos(data.investimentos).reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0);
+  const totInv=soAtivos(data.investimentos).reduce((a,b)=>a+valorMercado(b),0);
   function saldoBanco(b){return saldoBancoCalc(b,data.transacoes);} // testado em calc.mjs
   const totBancos=data.bancos.reduce((a,b)=>a+saldoBanco(b),0);
   const patrimonioLiq=totBancos+totInv;
-  const tiposI=TIPOS_INV.map(t=>({t,v:soAtivos(data.investimentos).filter(i=>i.tipo===t).reduce((a,b)=>a+(b.valorAtual||b.valorInvestido||b.valor||0),0)})).filter(x=>x.v>0);
+  const tiposI=TIPOS_INV.map(t=>({t,v:soAtivos(data.investimentos).filter(i=>i.tipo===t).reduce((a,b)=>a+valorMercado(b),0)})).filter(x=>x.v>0);
   const ultimos6=Array.from({length:6},(_,i)=>{const d=new Date(ANO_ATUAL,MES_ATUAL-5+i,1),m=d.getMonth(),a=d.getFullYear();const txs=data.transacoes.filter(t=>{const td=new Date(t.data);return td.getMonth()===m&&td.getFullYear()===a&&!CAT_INTERNAS.includes(t.categoria);});const tt=totaisTransacoes(txs);return{label:MESES[m],r:tt.receitas,d:tt.despesas};});
   let acc=0;const lineData=ultimos6.map(d=>{acc+=d.r-d.d;return{label:d.label,v:acc};});
   const catPieD=catD.map((c,i)=>({label:c,cat:c,v:txMes.filter(t=>t.tipo==="despesa"&&t.categoria===c).reduce((a,b)=>a+b.valor,0),color:CORES[i%CORES.length]})).filter(x=>x.v>0).sort((a,b)=>b.v-a.v);

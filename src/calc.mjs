@@ -59,7 +59,7 @@ export const TIPOS_RF=["Renda Fixa","Tesouro Direto"];
 export function isRFAtivo(inv){return !!inv&&TIPOS_RF.includes(inv.tipo);}
 export function calcRFAnual(inv){const indice=inv.indice||"CDI",taxa=parseFloat(inv.taxaRF)||0,pct=parseFloat(inv.pctIndice)||100;if(indice==="Prefixado")return taxa;const base=INDICES_RATE[indice]||10.5;return inv.rfTipo==="pct"?base*(pct/100):base+taxa;}
 // `agora` é parâmetro (default = hoje) só para permitir teste determinístico.
-export function calcValorAtualRF(inv,agora=new Date()){const anos=(agora-new Date(inv.data))/(1000*60*60*24*365);return(inv.valorInvestido||inv.valor||0)*Math.pow(1+calcRFAnual(inv)/100,Math.max(0,anos));}
+export function calcValorAtualRF(inv,agora=new Date()){const anos=(agora-new Date(inv.data))/(1000*60*60*24*365);return valorAplicado(inv)*Math.pow(1+calcRFAnual(inv)/100,Math.max(0,anos));}
 export function calcImpostoBR(r,m){if(r<=0)return 0;if(m<=6)return r*0.225;if(m<=12)return r*0.20;if(m<=24)return r*0.175;return r*0.15;}
 export function calcImpostoAU(r,m){if(r<=0)return 0;return(m>=12?r*0.5:r)*0.325;}
 
@@ -73,7 +73,7 @@ export function calcImpostoAU(r,m){if(r<=0)return 0;return(m>=12?r*0.5:r)*0.325;
 // usava a série real, e os dois divergiam na mesma tela).
 export function calcValorLiquidoRF(inv,agora=new Date(),series=null){
   const valorBruto=series?calcValorAtualRFHistorico(inv,series,agora).valor:calcValorAtualRF(inv,agora);
-  const investido=inv.valorInvestido||inv.valor||0;
+  const investido=valorAplicado(inv);
   const rendimento=valorBruto-investido;
   const dias=Math.max(0,(agora-new Date(inv.data))/86400000);
   const meses=dias/30; // aproximação em meses da tabela regressiva (180/360/720 dias)
@@ -431,7 +431,7 @@ export function vendaAcao(qtdAtual,pm,qtdVendida,preco,corretagem){
 // (saveInv preservava o valor antigo ao editar ação — bug real, 23/07/2026,
 // CXSE3 mostrando +34,8% quando os próprios números do card davam 24,6%).
 // Fallback: ativo legado SEM PM/quantidade (ex: tipo "Outros" só com valor)
-// continua usando valorInvestido||valor, como sempre foi.
+// continua usando valorAplicado(), como sempre foi.
 // ── Ativo encerrado ─────────────────────────────────────────────────────────
 // Venda total NÃO apaga mais o investimento: ele fica com quantidade 0,
 // `encerrado:true` e `dataEncerramento`, para não destruir aportes[], vendas[]
@@ -470,6 +470,18 @@ export function valorMercado(inv){
   if(Number.isFinite(inv.valorAtual))return inv.valorAtual;
   const qtd=inv.quantidade,pm=inv.precoMedio;
   if(Number.isFinite(qtd)&&Number.isFinite(pm)&&qtd>0&&pm>0)return qtd*pm;
+  if(Number.isFinite(inv.valorInvestido))return inv.valorInvestido;
+  if(Number.isFinite(inv.valor))return inv.valor;
+  return 0;
+}
+
+// Valor APLICADO (o que entrou), irmão de valorMercado. Para renda fixa o
+// campo digitado é a verdade — não existe PM nem cotação. Mesma disciplina:
+// `Number.isFinite`, não `||`, para que um aporte legitimamente zerado não
+// caia num `valor` velho.
+export function valorAplicado(inv){
+  if(!inv||typeof inv!=="object")return 0;
+  if(estaEncerrado(inv))return 0;
   if(Number.isFinite(inv.valorInvestido))return inv.valorInvestido;
   if(Number.isFinite(inv.valor))return inv.valor;
   return 0;
@@ -549,7 +561,7 @@ export function corretagemDeCompra(inv){
 }
 export function posicaoRV(inv){
   const qtd=inv?.quantidade||0,pm=inv?.precoMedio||0;
-  const custo=qtd*pm>0?qtd*pm:(inv?.valorInvestido||inv?.valor||0);
+  const custo=qtd*pm>0?qtd*pm:valorAplicado(inv);   // último || do padrão, fechado
   const atual=inv?.valorAtual!=null?inv.valorAtual:custo;
   const lucro=atual-custo;
   // ⚠️ DUAS bases, de propósito — e nunca somar uma na outra:
@@ -632,7 +644,7 @@ export function relatorioMensal({mesKey,transacoes=[],investimentos=[],snapIni=n
   const fimStr=_ymdC(fimD);
   const rf=soAtivos(investimentos).filter(i=>isRFAtivo(i)&&i.data&&i.data<=fimStr).map(i=>{
     const vFim=calcValorAtualRF(i,fimD), vIni=calcValorAtualRF(i,iniD);
-    const investido=(i.valorInvestido||i.valor||0);
+    const investido=valorAplicado(i);
     return {descricao:i.descricao||i.ticker||"Renda fixa",rendMes:vFim-vIni,acumulado:vFim-investido,valorFim:vFim};
   });
   const rfTotalMes=rf.reduce((a,x)=>a+x.rendMes,0);
@@ -646,8 +658,10 @@ export function relatorioMensal({mesKey,transacoes=[],investimentos=[],snapIni=n
       const aportesMes=(inv?.aportes||[]).filter(a=>a&&a.data&&a.data.startsWith(mesKey)).reduce((s,a)=>s+(a.quantidade||0)*(a.preco||0),0);
       const vendasMes=(inv?.vendas||[]).filter(v=>v&&v.data&&v.data.startsWith(mesKey)).reduce((s,v)=>s+(v.quantidade||0)*(v.preco||0),0);
       const nome=f.ticker||f.descricao||"ativo";
-      if(!ini){acoes.push({nome,valorFim:f.valorAtual||0,ganho:null,novo:true});continue;}
-      acoes.push({nome,valorFim:f.valorAtual||0,ganho:(f.valorAtual||0)-(ini.valorAtual||0)-aportesMes+vendasMes});
+      const vFimSnap=Number.isFinite(f.valorAtual)?f.valorAtual:0;
+      if(!ini){acoes.push({nome,valorFim:vFimSnap,ganho:null,novo:true});continue;}
+      const vIniSnap=Number.isFinite(ini.valorAtual)?ini.valorAtual:0;
+      acoes.push({nome,valorFim:vFimSnap,ganho:vFimSnap-vIniSnap-aportesMes+vendasMes});
     }
     acoes.sort((a,b)=>Math.abs(b.ganho||0)-Math.abs(a.ganho||0));
   }
@@ -726,7 +740,7 @@ export function rentabilidadeRF(investimentosRF,hoje=new Date(),series=null){
   const inicioMes=new Date(hj.getFullYear(),hj.getMonth(),1);
   const inicioAno=new Date(hj.getFullYear(),0,1);
   const {valor:vHoje,fonte}=_valorTotalRF(rf,hj,series);
-  const investidoTotal=rf.reduce((a,i)=>a+(i.valorInvestido||i.valor||0),0);
+  const investidoTotal=rf.reduce((a,i)=>a+valorAplicado(i),0);
   const calc=(base)=>{const {valor:v}=_valorTotalRF(rf,base,series);return {valor:vHoje-v,pct:v>0?(vHoje-v)/v*100:null};};
   return {
     valorTotal:Math.round(vHoje*100)/100,
@@ -758,7 +772,7 @@ export function composicaoAcoes(investimentos){
   // alocação é da carteira ATUAL: encerrado fora (o filtro de valor>0.005 abaixo
   // já excluiria, mas depender disso é depender de zeragem — ver estaEncerrado)
   const acoes=soAtivos(investimentos).filter(i=>!isRFAtivo(i));
-  const itens=acoes.map(i=>({ticker:i.ticker||i.descricao||"Ativo",valor:i.valorAtual||i.valorInvestido||i.valor||0}))
+  const itens=acoes.map(i=>({ticker:i.ticker||i.descricao||"Ativo",valor:valorMercado(i)}))
     .filter(x=>x.valor>0.005);
   const total=itens.reduce((a,x)=>a+x.valor,0);
   return itens.map(x=>({...x,pct:total>0?x.valor/total*100:0})).sort((a,b)=>b.valor-a.valor);
@@ -809,11 +823,12 @@ export function ganhoAcoesEntreSnapshots(investimentos,snapIni,iniStr,fimStr){
   for(const f of vivos){
     const ini=snapIni.find(x=>x&&x.id===f.id);
     if(!ini)continue; // ativo novo no período — sem base, não entra na conta
-    const valorFim=estaEncerrado(f)?0:(f.valorAtual||f.valorInvestido||f.valor||0); // idem: encerrado vale 0, não o resto podre
+    const valorFim=valorMercado(f);   // já devolve 0 para encerrado
     const aportesPeriodo=(f.aportes||[]).filter(a=>a&&a.data&&a.data>=iniStr&&a.data<=fimStr).reduce((s,a)=>s+(a.quantidade||0)*(a.preco||0),0);
     const vendasPeriodo=(f.vendas||[]).filter(v=>v&&v.data&&v.data>=iniStr&&v.data<=fimStr).reduce((s,v)=>s+(v.quantidade||0)*(v.preco||0),0);
-    ganho+=valorFim-(ini.valorAtual||0)-aportesPeriodo+vendasPeriodo;
-    baseTotal+=ini.valorAtual||0;
+    const base=Number.isFinite(ini.valorAtual)?ini.valorAtual:0;
+    ganho+=valorFim-base-aportesPeriodo+vendasPeriodo;
+    baseTotal+=base;
   }
   return {temBase:true,valor:Math.round(ganho*100)/100,pct:baseTotal>0?Math.round(ganho/baseTotal*100*10000)/10000:null};
 }
@@ -886,7 +901,7 @@ export function compoeFatorMensal(serieMensal,dataIniStr,dataFimStr){
 // Devolve {valor, fonte:"historico"|"formula"} — o app SEMPRE sabe e mostra
 // qual dos dois está usando, nunca mistura em silêncio.
 export function calcValorAtualRFHistorico(inv,series,agora=new Date()){
-  const investido=inv.valorInvestido||inv.valor||0;
+  const investido=valorAplicado(inv);
   const indice=inv.indice||"CDI";
   if(indice==="Prefixado")return {valor:calcValorAtualRF(inv,agora),fonte:"formula"};
   const dataIni=inv.data,dataFim=_ymdC(agora);
