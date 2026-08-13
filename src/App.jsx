@@ -9,7 +9,8 @@ import {
   calcSaldos as calcSaldosPure, calcDividas as calcDividasPure, totaisPorPessoa as totaisPorPessoaPure,
   salarioMensal, converteMoeda, taxaMensalSim, simularJuros,
   semFotos, mesclarFotos, extraiFotosBase64, projetarFluxo,
-  soAtivos, soEncerrados, encerrarInvestimento, casaProvento, proventosDoAtivo, valorMercado, addDias, marcarDuplicatas, montarAgendaPush,
+  soAtivos, soEncerrados, encerrarInvestimento, casaProvento, proventosDoAtivo, valorMercado,
+  validaInvestimento, corretagemDeCompra, addDias, marcarDuplicatas, montarAgendaPush,
   compraAcao, vendaAcao, pendentesRecorrenciaSW, relatorioMensal, compararMeses, serieGastoAcumulado, extratoComSaldo,
   totalPagoFatura, calcFaturaPagamentos, posicaoRV,
 rentabilidadeRF, serieRentabilidadeRF, composicaoAcoes,
@@ -2004,7 +2005,7 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
   // ficava preso mostrando "fórmula" até o cache vencer sozinho, 12h depois
   // (bug real, achado em 15/07/2026 comparando com o extrato do C6).
   function _dataMinRF(investimentos){
-    const rfAtivos=soAtivos(investimentos).filter(i=>i&&(i.tipo==="Renda Fixa"||i.tipo==="Tesouro Direto")&&i.indice!=="Prefixado"&&i.data);
+    const rfAtivos=soAtivos(investimentos).filter(i=>isRFAtivo(i)&&i.indice!=="Prefixado"&&i.data);
     if(!rfAtivos.length)return null;
     return rfAtivos.reduce((min,i)=>i.data<min?i.data:min,rfAtivos[0].data);
   }
@@ -2120,7 +2121,7 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
   const rentTotal=totalInvestido>0?((totalInvest-totalInvestido)/totalInvestido)*100:0;
 
   const rendaVariavel=soAtivos(data.investimentos).filter(i=>["Ações","FII","ETF","Cripto"].includes(i.tipo));
-  const rendaFixa=soAtivos(data.investimentos).filter(i=>["Renda Fixa","Tesouro Direto"].includes(i.tipo));
+  const rendaFixa=soAtivos(data.investimentos).filter(isRFAtivo);
   const outros=soAtivos(data.investimentos).filter(i=>i.tipo==="Outros");
   // Encerrados ficam visíveis numa aba própria: dado que ninguém confere é
   // dado morto, e o ponto de preservar a posição fechada é justamente poder
@@ -2153,11 +2154,14 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
   const totEstAnual=estDY.reduce((s,x)=>s+x.anual,0);
 
   async function buscarDados(inv){
-    if(inv.tipo==="Renda Fixa"||inv.tipo==="Tesouro Direto"){
+    // isRFAtivo, não a comparação literal: a condição estava duplicada aqui e
+    // em calc.mjs, e divergir significaria calcular o lucro por fórmulas
+    // diferentes conforme o preço chegasse por um caminho ou pelo outro.
+    if(isRFAtivo(inv)){
       // Série real do BCB quando disponível (mesmo caminho do card) — corrige na ORIGEM
       // o campo inv.valorAtual, em vez de cada tela que o lê ter que saber disso.
       const va=calcValorAtualRFHistorico(inv,seriesBCB,new Date()).valor;
-      setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,valorAtual:va,lucro:va-(inv.valorInvestido||inv.valor||0),preco_atual:va/(inv.quantidade||1)}:x)}));
+      setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,valorAtual:va,lucro:posicaoRV({...x,valorAtual:va}).lucro,preco_atual:va/(inv.quantidade||1)}:x)}));
       return;
     }
     if(!inv.ticker) return;
@@ -2165,7 +2169,7 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
     const real=await fetchPrecoReal(inv.ticker, profileId, true);
     if(real?.preco_atual){
       const va=real.preco_atual*(inv.quantidade||1);
-      const lucro=va-(inv.precoMedio||0)*(inv.quantidade||1);
+      const lucro=posicaoRV({...inv,valorAtual:va}).lucro;
       // Usa dados de dividendo REAIS do Yahoo quando disponíveis
       const divUpdate={};
       if(real.dy!=null) divUpdate.dy=Math.round(real.dy*100)/100;
@@ -2193,7 +2197,7 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
         const mercado=nomeMercado(profileId);
         const txt=await askClaude(`Preço de fechamento mais recente do ativo ${inv.ticker} na ${mercado}. JSON apenas: {"preco_atual":number}`,150);
         const obj=JSON.parse(txt);
-        if(obj.preco_atual>0){const va=obj.preco_atual*(inv.quantidade||1);setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,preco_atual:obj.preco_atual,valorAtual:va,lucro:va-(inv.precoMedio||0)*(inv.quantidade||1),ultimaAtualizacao:new Date().toLocaleTimeString("pt-BR")}:x)}));}
+        if(obj.preco_atual>0){const va=obj.preco_atual*(inv.quantidade||1);setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,preco_atual:obj.preco_atual,valorAtual:va,lucro:posicaoRV({...x,valorAtual:va}).lucro,ultimaAtualizacao:new Date().toLocaleTimeString("pt-BR")}:x)}));}
       }catch{}
     }
     setLoadingId(null);
@@ -2202,7 +2206,7 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
   const invRefreshRef = useRef(null);
   useEffect(()=>{
     invRefreshRef.current=setInterval(async()=>{
-      const ativos=soAtivos(data.investimentos).filter(i=>i.ticker||(i.tipo==="Renda Fixa"||i.tipo==="Tesouro Direto"));
+      const ativos=soAtivos(data.investimentos).filter(i=>i.ticker||isRFAtivo(i));
       for(const inv of ativos) await buscarDados(inv);
     },60000);
     return()=>clearInterval(invRefreshRef.current);
@@ -2210,13 +2214,20 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
 
   async function atualizarTodos(){
     setAtualizandoTodos(true);
-    const ativos=soAtivos(data.investimentos).filter(i=>i.ticker||i.tipo==="Renda Fixa"||i.tipo==="Tesouro Direto");
+    const ativos=soAtivos(data.investimentos).filter(i=>i.ticker||isRFAtivo(i));
     for(const inv of ativos){await buscarDados(inv);}
     setAtualizandoTodos(false);
   }
 
   function saveInv(){
-    const isRF=form.tipo==="Renda Fixa"||form.tipo==="Tesouro Direto";
+    // Estado impossível é BARRADO na gravação: `tipo` vem de um select e nada
+    // cruzava a escolha com os campos preenchidos, então uma ação cadastrada
+    // como "Renda Fixa" tinha o valor projetado por CDI e nunca buscava
+    // cotação — falha silenciosa. A regra é pura (calc.mjs) para não virar
+    // condição inline duplicada, que é o defeito que o isRFAtivo já teve.
+    const erro=validaInvestimento({tipo:form.tipo,ticker:form.ticker,precoMedio:form.precoMedio});
+    if(erro){alert(erro.mensagem);return;}
+    const isRF=isRFAtivo({tipo:form.tipo});
     // RF: o campo "Valor investido" do formulário é a verdade (é digitado).
     // RV (ações etc.): o custo é SEMPRE PM×quantidade — o form.valorInvestido
     // aqui é o valor VELHO herdado do {...inv} da edição (o campo nem aparece
@@ -2248,7 +2259,7 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
   function receberAg(a){const total=totalAgTotal(a);if(!window.confirm(`Marcar como recebido? Vai lançar ${fmtM(total,currency)} de ${a.ticker} nos proventos recebidos.`))return;setData(dd=>({...dd,dividendos:[...(dd.dividendos||[]),{id:uid(),ticker:a.ticker,investimentoId:(casaProvento({ticker:a.ticker,data:a.dataPagamento},dd.investimentos)||{}).id||null,valor:Math.round(total*100)/100,data:a.dataPagamento,tipo:a.tipo||"Dividendo"}],proventosAgendados:(dd.proventosAgendados||[]).filter(x=>x.id!==a.id)}));}
   function delAg(id){setData(dd=>({...dd,proventosAgendados:(dd.proventosAgendados||[]).filter(x=>x.id!==id)}));}
 
-  const isRFForm=form.tipo==="Renda Fixa"||form.tipo==="Tesouro Direto";
+  const isRFForm=isRFAtivo({tipo:form.tipo});
 
   function InvList({invs,emptyMsg}){
     return invs.length===0?<p style={{fontSize:13,color:D.text3,padding:"12px 0"}}>{emptyMsg}</p>:<div style={{display:"flex",flexDirection:"column",gap:8}}>
@@ -2257,7 +2268,8 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
         // SEMPRE ao vivo. Usa a série histórica REAL do BCB quando ela cobre o
         // período do ativo; senão cai para a fórmula de taxa fixa, sem avisos
         // falsos de precisão (calcValorAtualRFHistorico já decide isso sozinho).
-        const isRFItem=inv.tipo==="Renda Fixa"||inv.tipo==="Tesouro Direto";
+        const isRFItem=isRFAtivo(inv);
+        const erroCad=validaInvestimento(inv);
         const rfCalc=isRFItem?calcValorAtualRFHistorico(inv,seriesBCB,new Date()):null;
         // RV: custo/ganho/% SEMPRE de qtd×PM (posicaoRV, testado em calc.mjs) —
         // nunca do campo gravado valorInvestido, que podia estar podre depois de
@@ -2273,10 +2285,16 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                 {inv.ticker&&<span onClick={()=>setChartTicker(inv.ticker)} style={{fontSize:14,fontWeight:700,color:D.blue,cursor:"pointer",textDecoration:"underline"}}>{inv.ticker}</span>}
                 <span style={{fontSize:12,color:D.text2}}>{inv.descricao||inv.tipo}</span>
+                {/* Legado inválido: o saveInv barra na gravação, mas importar,
+                    restaurar backup e merge entre aparelhos NÃO passam por lá.
+                    Ativo que entrou por essas vias nunca seria validado — daí o
+                    selo. Avisa que o número não é confiável; não esconde nada. */}
+                {erroCad&&<span title={erroCad.mensagem} style={{fontSize:9,fontWeight:700,color:D.gold,border:`1px solid ${D.gold}66`,borderRadius:5,padding:"1px 5px",cursor:"help",flexShrink:0}}>⚠ cadastro</span>}
                 {inv.ultimaAtualizacao&&<span style={{fontSize:9,color:D.text3}}>🕐 {inv.ultimaAtualizacao}</span>}
               </div>
               {isRFItem?<p style={{margin:"2px 0 0",fontSize:11,color:D.text3}}>{inv.rfTipo==="pct"?`${inv.pctIndice||100}% ${inv.indice}`:`${inv.indice}+${inv.taxaRF||0}%`}{inv.vencimento&&` · Venc: ${inv.vencimento}`}</p>
               :<p style={{margin:"2px 0 0",fontSize:11,color:D.text3}}>{inv.quantidade}un · PM:{fmtM(inv.precoMedio||0,currency)}{inv.preco_atual?` · Atual:${fmtM(inv.preco_atual,currency)}`:""}</p>}
+              {erroCad&&<p style={{margin:"3px 0 0",fontSize:10,color:D.gold,lineHeight:1.4}}>{erroCad.mensagem}</p>}
             </div>
             <div style={{display:"flex",gap:4,alignItems:"center",flexShrink:0}}>
               <div style={{textAlign:"right"}}>
@@ -2412,7 +2430,10 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
         <Btn sm color={D.green} onClick={()=>setData(d=>({...d,aporteMensal:parseFloat(aporteInput)||0}))}>Salvar meta</Btn>
       </div>
       {data.aporteMensal>0&&(()=>{
-        const invMes=soAtivos(data.investimentos).filter(i=>{const dt=new Date(i.data);return dt.getMonth()===MES_ATUAL&&dt.getFullYear()===ANO_ATUAL;}).reduce((a,b)=>a+(b.valorInvestido||b.valor||0),0);
+        // CONSUMIDOR 2 migrado (11/08/2026): RV usa posicaoRV(qtd×PM); RF segue
+        // no valor digitado, que lá é a verdade. Δ zero nos dados de hoje —
+        // os 2 ativos do mês são RF, cujo caminho não mudou.
+        const invMes=soAtivos(data.investimentos).filter(i=>{const dt=new Date(i.data);return dt.getMonth()===MES_ATUAL&&dt.getFullYear()===ANO_ATUAL;}).reduce((a,b)=>a+(isRFAtivo(b)?(b.valorInvestido||b.valor||0):posicaoRV(b).custo),0);
         const pct=Math.min(100,Math.round(invMes/data.aporteMensal*100));
         const cor=pct>=100?D.green:pct>=50?D.gold:D.red;
         return <div style={{marginTop:8}}>
@@ -5122,6 +5143,24 @@ function AppInner(){
     window.addEventListener("focus",puxar);
     return()=>{cancelado=true;clearInterval(iv);document.removeEventListener("visibilitychange",aoFoco);window.removeEventListener("focus",puxar);};
   },[session?.token]);
+
+  // Auditoria de cadastro, uma vez por boot. O selo na lista só aparece se
+  // você abrir a aba certa; este log faz um caso futuro (vindo de import,
+  // restauração de backup ou merge entre aparelhos) aparecer sozinho, sem
+  // depender de eu estar olhando o lugar exato.
+  const audDone=useRef(false);
+  useEffect(()=>{
+    if(!session||audDone.current||!allData)return;
+    audDone.current=true;
+    let total=0;const porPerfil={};
+    for(const pid of Object.keys(allData)){
+      const p=allData[pid];if(!p||typeof p!=="object")continue;
+      const ruins=(p.investimentos||[]).map(i=>({i,e:validaInvestimento(i)})).filter(x=>x.e);
+      if(ruins.length){porPerfil[pid]=ruins.map(x=>`${x.i.ticker||x.i.descricao||x.i.id} (${x.i.tipo}): ${x.e.campo}`);total+=ruins.length;}
+    }
+    if(total)console.warn(`[cadastro] ${total} investimento(s) em estado impossível:`,porPerfil);
+    else console.log("[cadastro] auditoria ok — nenhum investimento em estado impossível");
+  },[session,allData]);
 
   // Fila de fotos de NF → Storage. Sobe o que estiver pendente e grava o
   // `nfPath` de volta na transação. Duas origens alimentam esta fila:

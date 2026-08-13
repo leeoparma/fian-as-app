@@ -785,8 +785,13 @@ export function rentabilidadeAcoesDesdeInicio(investimentos){
   // pula todo campo 0 (falsy) e pousa em qualquer resto podre. Achado na
   // verificação em tela de 11/08/2026: um `valor:9999` esquecido virou
   // "rentabilidade R$ 11.299,00". Mesma mecânica do CXSE3, terceira aparição.
-  const vAtual=i=>estaEncerrado(i)?0:(i.valorAtual||i.valorInvestido||i.valor||0);
-  const vCusto=i=>estaEncerrado(i)?0:(i.valorInvestido||i.valor||0);
+  // CONSUMIDOR 1 migrado (11/08/2026): o custo vem de posicaoRV (qtd×PM), não
+  // mais do campo gravado. Era a MESMA leitura podre do bug do CXSE3 de
+  // 23/07 — o card foi corrigido lá, este consumidor não. Medido nos dados
+  // reais: valorInvestido 1.780,92 contra qtd×PM 2.518,60, R$ 737,68 de custo
+  // fantasma inflando o ganho.
+  const vAtual=i=>estaEncerrado(i)?0:valorMercado(i);
+  const vCusto=i=>estaEncerrado(i)?0:posicaoRV(i).custo;
   const valorAtual=acoes.reduce((a,i)=>a+vAtual(i),0);
   const custo=acoes.reduce((a,i)=>a+vCusto(i),0);
   const realizado=acoes.reduce((a,i)=>a+(i.vendas||[]).reduce((s,v)=>s+(v.resultado||0),0),0);

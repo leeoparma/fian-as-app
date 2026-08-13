@@ -1131,6 +1131,19 @@ test("isRFAtivo e a validação usam A MESMA lista TIPOS_RF", ()=>{
   }
   assert.equal(isRFAtivo({tipo:"Ações"}),false);
 });
+
+// ── B3: migração do consumidor 1 (custo por posicaoRV) ──────────────────────
+test("rentabilidadeAcoesDesdeInicio: custo vem de qtd×PM, não do campo gravado", ()=>{
+  // Caso REAL do CXSE3 (dados de 05/08/2026): valorInvestido 1.780,92 ficou
+  // podre depois de uma edição, enquanto qtd×PM dá 2.518,60. O card foi
+  // corrigido em 23/07; este consumidor continuava lendo o campo podre e
+  // inflando o ganho em R$ 737,68.
+  const cxse={id:"c",tipo:"Ações",ticker:"CXSE3",quantidade:140,precoMedio:17.99,
+    valorInvestido:1780.92,valor:1780.92,valorAtual:2600};
+  const r=rentabilidadeAcoesDesdeInicio([cxse]);
+  assert.equal(r.valor,81.4);            // 2600 − 2518,60
+  assert.notEqual(r.valor,819.08);       // o que a leitura podre dava
+});
 test("composicaoAcoes: carteira vazia devolve lista vazia sem dividir por zero", ()=>{
   assert.deepEqual(composicaoAcoes([]),[]);
 });

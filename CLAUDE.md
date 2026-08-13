@@ -129,6 +129,14 @@ A confusão é a mesma família do antipadrão do `||` abaixo — **campo ausent
 
 Ao acrescentar QUALQUER campo novo ao snapshot: registrar a data nesta tabela, e escrever no consumidor o que acontece quando o campo não está lá.
 
+## Validação nova roda contra os dados REAIS antes de ser ligada — REGRA
+
+**Escrever a regra, rodá-la em modo seco sobre a base real, reportar a contagem, e só então ligar.** Fixture sintético não pega o que a base real contém: quem escreve o teste escreve os casos que imaginou, e o defeito mora justamente no caso que não foi imaginado.
+
+Caso real (11/08/2026): a validação de "estado impossível" no cadastro de investimento barra RF que tenha ticker ou preço médio. O formulário de renda fixa grava **`precoMedio: 0`** — se a regra tratasse "tem PM" como `Number.isFinite(pm)` em vez de `pm > 0`, os **18 CDBs** do Leo seriam barrados na primeira edição. Nenhum fixture escrito à mão teria `precoMedio: 0` num CDB, porque quem escreve o fixture pensa "CDB não tem PM" e omite o campo. O dry-run mostrou 0 de 22 reprovando; sem ele, o bloqueio teria ido para produção quebrando a edição de 82% da carteira.
+
+Vale para qualquer regra que passe a REJEITAR algo: validação de formulário, filtro, constraint, migração destrutiva. O dry-run é barato; descobrir pelo usuário travado não é.
+
 ## Antipadrão do `||` com zero — REGRA
 
 ```js
