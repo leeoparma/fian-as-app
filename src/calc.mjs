@@ -53,7 +53,10 @@ export function calcFaturaPagamentos(faturas,totalPago){
 // taxaRF:0 por padrão no formulário, então esses campos sempre existem e um
 // filtro baseado neles classifica TUDO como RF por engano (bug real, corrigido
 // em 14/07/2026 — atingia também o relatório mensal).
-export function isRFAtivo(inv){return !!inv&&(inv.tipo==="Renda Fixa"||inv.tipo==="Tesouro Direto");}
+// UMA definição de "isto é renda fixa" — consumida aqui e no App.jsx, que
+// tinha a mesma comparação literal inline no ramo de buscarDados().
+export const TIPOS_RF=["Renda Fixa","Tesouro Direto"];
+export function isRFAtivo(inv){return !!inv&&TIPOS_RF.includes(inv.tipo);}
 export function calcRFAnual(inv){const indice=inv.indice||"CDI",taxa=parseFloat(inv.taxaRF)||0,pct=parseFloat(inv.pctIndice)||100;if(indice==="Prefixado")return taxa;const base=INDICES_RATE[indice]||10.5;return inv.rfTipo==="pct"?base*(pct/100):base+taxa;}
 // `agora` é parâmetro (default = hoje) só para permitir teste determinístico.
 export function calcValorAtualRF(inv,agora=new Date()){const anos=(agora-new Date(inv.data))/(1000*60*60*24*365);return(inv.valorInvestido||inv.valor||0)*Math.pow(1+calcRFAnual(inv)/100,Math.max(0,anos));}
@@ -503,16 +506,72 @@ export function proventosDoAtivo(inv,dividendos,investimentos){
   const itens=(dividendos||[]).filter(d=>{const m=casaProvento(d,investimentos);return m&&m.id===inv.id;});
   return {itens,total:Math.round(itens.reduce((a,d)=>a+(d.valor||0),0)*100)/100};
 }
+// ── Estado impossível no cadastro de investimento ───────────────────────────
+// `tipo` é escolhido num select e NADA cruza essa escolha com os campos
+// preenchidos. Uma ação cadastrada como "Renda Fixa" tem o valor projetado por
+// CDI e nunca busca cotação; um CDB cadastrado como "Ações" tenta cotar um
+// ticker que não existe. Falha silenciosa nos dois sentidos.
+//
+// A regra é função pura de propósito: validação é exatamente o tipo de coisa
+// que vira condição inline duplicada — o problema que o isRFAtivo já teve.
+// Devolve null quando está tudo bem, ou {campo, mensagem} dizendo O QUE está
+// errado E O QUE fazer. "Inválido" sozinho não ajuda ninguém.
+export function validaInvestimento(inv){
+  if(!inv||typeof inv!=="object")return null;
+  const tipo=inv.tipo||"";
+  const ehRF=TIPOS_RF.includes(tipo);
+  const temTicker=!!String(inv.ticker||"").trim();
+  const pm=Number.parseFloat(inv.precoMedio);
+  const temPM=Number.isFinite(pm)&&pm>0;
+  if(ehRF&&(temTicker||temPM)){
+    const o=[temTicker&&"ticker",temPM&&"preço médio"].filter(Boolean).join(" e ");
+    return {campo:"tipo",
+      mensagem:`${tipo} não tem ${o}. Se isto é uma ação, FII ou ETF, mude o tipo para Ações, FII ou ETF. Se é renda fixa mesmo, apague o ${o}.`};
+  }
+  // O inverso: RV precisa de ticker OU de PM para ser cotável/calculável.
+  // "Outros" e "Cripto" ficam de fora — são justamente o cesto de ativo sem
+  // ticker negociável (ouro guardado, participação em negócio, carteira fria).
+  if(!ehRF&&tipo&&!["Outros","Cripto"].includes(tipo)&&!temTicker&&!temPM){
+    return {campo:"ticker",
+      mensagem:`${tipo} precisa de ticker ou de preço médio para o app conseguir acompanhar o valor. Preencha um dos dois, ou mude o tipo para "Outros" se for um ativo que você controla só pelo valor total.`};
+  }
+  return null;
+}
+
+// Corretagem paga para MONTAR a posição: o campo do cadastro inicial mais a de
+// cada aporte. A corretagem de VENDA fica de fora de propósito — ela não é
+// custo da posição que você ainda tem, é custo da venda, e entra no resultado
+// realizado (Bloco C). Somar as duas aqui inflaria a base de quem só comprou.
+export function corretagemDeCompra(inv){
+  const inicial=Number.isFinite(inv?.corretagemCompra)?inv.corretagemCompra:0;
+  const aportes=(inv?.aportes||[]).reduce((a,x)=>a+(Number.isFinite(x?.corretagem)?x.corretagem:0),0);
+  return Math.round((inicial+aportes)*100)/100;
+}
 export function posicaoRV(inv){
   const qtd=inv?.quantidade||0,pm=inv?.precoMedio||0;
   const custo=qtd*pm>0?qtd*pm:(inv?.valorInvestido||inv?.valor||0);
   const atual=inv?.valorAtual!=null?inv.valorAtual:custo;
   const lucro=atual-custo;
+  // ⚠️ DUAS bases, de propósito — e nunca somar uma na outra:
+  //  · `custo`          = quantidade × PM. É a base de EXIBIÇÃO, a mesma que a
+  //                       corretora mostra, porque o PM é média de execução e
+  //                       não embute corretagem.
+  //  · `custoComCustos` = custo + corretagem de compra. É a base de CÁLCULO DE
+  //                       GANHO (apuração), onde a corretagem faz parte do que
+  //                       você desembolsou para ter o ativo.
+  // O card continua usando `custo`; quem for apurar ganho usa `custoComCustos`.
+  const corretagens=corretagemDeCompra(inv);
+  const custoComCustos=custo+corretagens;
+  const lucroLiquido=atual-custoComCustos;
   return {
     custo:Math.round(custo*100)/100,
+    custoComCustos:Math.round(custoComCustos*100)/100,
+    corretagens,
     atual:Math.round(atual*100)/100,
     lucro:Math.round(lucro*100)/100,
+    lucroLiquido:Math.round(lucroLiquido*100)/100,
     pct:custo>0?lucro/custo*100:0,
+    pctLiquido:custoComCustos>0?lucroLiquido/custoComCustos*100:0,
   };
 }
 

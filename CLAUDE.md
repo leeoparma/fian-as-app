@@ -111,6 +111,24 @@ O que continua válido sem viewport (não depende de layout): texto extraído do
 
 Caso real (30/07/2026): dois gráficos do modal de FII eram esmagados de 106px para 51px por um `overflow-x:auto` dentro de um flex column, e a verificação anterior — feita com viewport 0×0 — não só não pegou como sugeria que o gráfico saudável é que estava quebrado.
 
+## `historico[]` é dado VERSIONADO — REGRA
+
+Os snapshots mensais ganharam campos ao longo do tempo. **Foto antiga NÃO tem os campos novos**, e nunca vai ter — não há como retro-preencher o que não foi gravado.
+
+| campo | existe desde |
+|---|---|
+| `mes`, `patrimonio`, `bancos`, `investimentos` | origem |
+| `ativos[]` (detalhe por ativo) | **10/07/2026** (`9b82349`) |
+| `em` (dia em que a foto foi TIRADA) | **11/08/2026** |
+
+**Todo consumidor precisa tratar a ausência como caso explícito — nunca interpretar campo faltante como zero, vazio ou dia 1.**
+
+Caso real (achado em 11/08/2026): o snapshot `au 2026-06` traz `investimentos: 995,85` e **não tem** a chave `ativos`. `rentabilidadeAcoes` escolhia a foto mais antiga do ano como base do ano e lia `h.ativos` como lista vazia — carteira vazia, portanto "sem base" — e **"No ano" morria em silêncio** em AU e US, mesmo havendo julho e agosto perfeitamente utilizáveis. O BR tinha o mesmo defeito com R$ 36 mil em `2026-06`. Não era carteira vazia: era recorte incompleto, lido como ausência de dado.
+
+A confusão é a mesma família do antipadrão do `||` abaixo — **campo ausente e valor zero sendo tratados como a mesma coisa**. Aqui a correção foi `_fotoUtil` exigir `Array.isArray(ativos) && ativos.length > 0`, e a tela declarar "sem foto utilizável" em vez de sumir.
+
+Ao acrescentar QUALQUER campo novo ao snapshot: registrar a data nesta tabela, e escrever no consumidor o que acontece quando o campo não está lá.
+
 ## Antipadrão do `||` com zero — REGRA
 
 ```js

@@ -17,6 +17,7 @@ import {
 rentabilidadeRF,serieRentabilidadeRF,composicaoAcoes,
 rentabilidadeAcoesDesdeInicio,ganhoAcoesEntreSnapshots,rentabilidadeAcoes,isRFAtivo,calcValorLiquidoRF,
 estaEncerrado,soAtivos,soEncerrados,encerrarInvestimento,casaProvento,proventosDoAtivo,valorMercado,
+validaInvestimento,corretagemDeCompra,TIPOS_RF,
 INDICES_RATE,
 compoeFatorDiario,compoeFatorMensal,calcValorAtualRFHistorico,mesclarIPCAcomPrevia,compoeFatorMensalProRata,
 posicaoRV,
@@ -1057,6 +1058,78 @@ test("rentabilidadeAcoes: `em` encurta a janela e evita a dupla subtração", ()
   const semEm=rentabilidadeAcoes(comAporte,[{mes:"2026-07",ativos:base}],HOJE);
   assert.equal(comEm.mes.valor,30);    // 150 − 120
   assert.equal(semEm.mes.valor,10);    // 150 − 120 − 20  ← subtrai o que já estava na base
+});
+
+// ── B2: posicaoRV com as DUAS bases ─────────────────────────────────────────
+test("corretagemDeCompra: soma cadastro inicial + aportes, ignora a de VENDA", ()=>{
+  const inv={corretagemCompra:6.36,
+    aportes:[{quantidade:35,preco:19.48},{quantidade:100,preco:21.04,corretagem:4.90}],
+    vendas:[{quantidade:10,preco:22,corretagem:99}]};   // venda NÃO entra na base
+  assert.equal(corretagemDeCompra(inv),11.26);
+  assert.equal(corretagemDeCompra({}),0);
+  assert.equal(corretagemDeCompra(null),0);
+  assert.equal(corretagemDeCompra({corretagemCompra:"abc",aportes:[{corretagem:NaN}]}),0);
+});
+test("posicaoRV: custo (exibição) e custoComCustos (apuração) são coisas diferentes", ()=>{
+  const inv={quantidade:100,precoMedio:20,valorAtual:2250,corretagemCompra:10,
+    aportes:[{quantidade:20,preco:21,corretagem:5}]};
+  const p=posicaoRV(inv);
+  assert.equal(p.custo,2000);            // qtd×PM — igual ao que a corretora mostra
+  assert.equal(p.corretagens,15);
+  assert.equal(p.custoComCustos,2015);   // base de cálculo de ganho
+  assert.equal(p.lucro,250);             // sobre o custo de exibição
+  assert.equal(p.lucroLiquido,235);      // descontando o que você pagou para ter
+  // as duas bases NUNCA se somam: custoComCustos já contém custo
+  assert.equal(p.custoComCustos-p.custo,p.corretagens);
+});
+test("posicaoRV: sem corretagem as duas bases coincidem (não quebra o card atual)", ()=>{
+  const p=posicaoRV({quantidade:10,precoMedio:10,valorAtual:130});
+  assert.equal(p.custo,100);
+  assert.equal(p.custoComCustos,100);
+  assert.equal(p.lucro,p.lucroLiquido);
+  assert.equal(p.pct,p.pctLiquido);
+});
+
+// ── B3: estado impossível no cadastro ───────────────────────────────────────
+test("validaInvestimento: RF com ticker ou PM é barrada, e a mensagem diz o que fazer", ()=>{
+  const r=validaInvestimento({tipo:"Renda Fixa",ticker:"PETR4",precoMedio:30});
+  assert.equal(r.campo,"tipo");
+  assert.match(r.mensagem,/ticker e preço médio/);
+  assert.match(r.mensagem,/mude o tipo para Ações/);   // diz O QUE FAZER
+  // só ticker, ou só PM, também barram
+  assert.ok(validaInvestimento({tipo:"Tesouro Direto",ticker:"XPTO3"}));
+  assert.ok(validaInvestimento({tipo:"Renda Fixa",precoMedio:12}));
+});
+test("validaInvestimento: os 18 CDBs reais do Leo passam (PM 0 e sem ticker)", ()=>{
+  // dry-run de 11/08/2026: 0 de 22 ativos reais reprovaram. `precoMedio:0` é o
+  // que o form grava para RF, e não pode ser confundido com "tem PM".
+  assert.equal(validaInvestimento({tipo:"Renda Fixa",descricao:"CDB C6",precoMedio:0,ticker:""}),null);
+  assert.equal(validaInvestimento({tipo:"Renda Fixa",descricao:"CDB",precoMedio:null}),null);
+});
+test("validaInvestimento: RV sem ticker E sem PM é barrada, com saída sugerida", ()=>{
+  const r=validaInvestimento({tipo:"Ações",descricao:"algo"});
+  assert.equal(r.campo,"ticker");
+  assert.match(r.mensagem,/mude o tipo para "Outros"/);
+  // com um dos dois já passa
+  assert.equal(validaInvestimento({tipo:"Ações",ticker:"PETR4"}),null);
+  assert.equal(validaInvestimento({tipo:"FII",precoMedio:100}),null);
+});
+test("validaInvestimento: Outros e Cripto são o cesto legítimo sem ticker", ()=>{
+  assert.equal(validaInvestimento({tipo:"Outros",descricao:"Ouro no cofre",valor:5000}),null);
+  assert.equal(validaInvestimento({tipo:"Cripto",descricao:"BTC carteira fria",valor:1000}),null);
+});
+test("validaInvestimento: lixo e ativo sem tipo não travam o formulário", ()=>{
+  for(const x of [null,undefined,{},{tipo:""}]) assert.equal(validaInvestimento(x),null);
+});
+test("isRFAtivo e a validação usam A MESMA lista TIPOS_RF", ()=>{
+  // a duplicação da condição era o defeito: App.jsx tinha a comparação literal
+  // inline e calc.mjs tinha isRFAtivo. Uma lista só, consumida pelos dois.
+  assert.deepEqual(TIPOS_RF,["Renda Fixa","Tesouro Direto"]);
+  for(const t of TIPOS_RF){
+    assert.equal(isRFAtivo({tipo:t}),true);
+    assert.ok(validaInvestimento({tipo:t,ticker:"X"}));   // a regra segue a mesma lista
+  }
+  assert.equal(isRFAtivo({tipo:"Ações"}),false);
 });
 test("composicaoAcoes: carteira vazia devolve lista vazia sem dividir por zero", ()=>{
   assert.deepEqual(composicaoAcoes([]),[]);
