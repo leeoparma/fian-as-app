@@ -755,19 +755,35 @@ export function ganhoAcoesEntreSnapshots(investimentos,snapIni,iniStr,fimStr){
 }
 // Monta o pacote completo (mês corrente + ano corrente), escolhendo a foto
 // mais próxima do início de cada período dentro do historico salvo.
+// Uma foto só serve de base se REALMENTE tiver ativos. Snapshots gravados
+// antes de 10/07/2026 não têm o campo `ativos` (ele foi acrescentado naquele
+// dia), então trazem `investimentos: 995.85` e nenhuma linha por ativo — não
+// são "carteira vazia", são recorte incompleto. Pegar a foto mais antiga do
+// ano sem checar isso fazia "No ano" morrer em silêncio em AU e US, mesmo
+// havendo julho e agosto perfeitamente utilizáveis logo depois.
+const _fotoUtil=h=>!!(h&&Array.isArray(h.ativos)&&h.ativos.length>0);
 export function rentabilidadeAcoes(investimentos,historico,hoje=new Date()){
-  const hist=(historico||[]).filter(h=>h&&Array.isArray(h.ativos));
+  const hist=(historico||[]).filter(_fotoUtil);
   const mesKeyAtual=`${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,"0")}`;
   const [ay,am]=mesKeyAtual.split("-").map(Number);
   const mesAnteriorKey=`${am===1?ay-1:ay}-${String(am===1?12:am-1).padStart(2,"0")}`;
-  const snapMes=hist.find(h=>h.mes===mesAnteriorKey)?.ativos;
-  const iniAnoStr=`${ay}-01-01`;
-  const snapAno=[...hist].filter(h=>h.mes<mesKeyAtual).sort((a,b)=>a.mes.localeCompare(b.mes))[0]?.ativos; // foto mais antiga disponível no ano
+  const doMes=hist.find(h=>h.mes===mesAnteriorKey);
+  // base do ano = foto mais antiga DO ANO CORRENTE com ativos (antes, qualquer
+  // foto anterior ao mês atual servia — inclusive de outro ano)
+  const doAno=[...hist].filter(h=>h.mes>=`${ay}-01`&&h.mes<mesKeyAtual).sort((a,b)=>a.mes.localeCompare(b.mes))[0];
   const fimStr=_ymdC(hoje);
+  // Janela de aportes: começa no dia em que a foto foi tirada quando ele é
+  // conhecido (`em`, gravado a partir de 11/08/2026). Sem o campo, cai no dia 1
+  // — o comportamento antigo, que subtrai aportes já contidos na base. Isso é
+  // declarado em `janelaExata` para a tela poder avisar, em vez de mentir um
+  // número preciso. A correção completa é o Bloco E.
+  const janela=(h,fallback)=>h?.em||fallback;
   return {
     desdeInicio:rentabilidadeAcoesDesdeInicio(investimentos),
-    mes:ganhoAcoesEntreSnapshots(investimentos,snapMes,`${mesAnteriorKey}-01`,fimStr),
-    ano:ganhoAcoesEntreSnapshots(investimentos,snapAno,iniAnoStr,fimStr),
+    mes:{...ganhoAcoesEntreSnapshots(investimentos,doMes?.ativos,janela(doMes,`${mesAnteriorKey}-01`),fimStr),
+         desde:janela(doMes,`${mesAnteriorKey}-01`),janelaExata:!!doMes?.em},
+    ano:{...ganhoAcoesEntreSnapshots(investimentos,doAno?.ativos,janela(doAno,`${ay}-01-01`),fimStr),
+         desde:janela(doAno,`${ay}-01-01`),janelaExata:!!doAno?.em},
   };
 }
 

@@ -2368,10 +2368,19 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
           {[["mes","No mês"],["ano","No ano"],["inicio","Desde o início"]].map(([k,l])=><button key={k} onClick={()=>setPerRVSel(k)} style={{padding:"5px 10px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:perRVSel===k?700:400,background:perRVSel===k?D.blue:"transparent",color:perRVSel===k?"#fff":D.text3}}>{l}</button>)}
         </div>
         {(perRVSel!=="inicio"&&!infoRV.temBase)?
-          <p style={{fontSize:12,color:D.text3}}>Ainda sem foto de {perRV==="No mês"?"o mês anterior":"início do ano"} para comparar — aparece assim que o snapshot mensal acumular.</p>
-        :<div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+          // "Sem base" é estado declarado, não tela em branco: antes, uma foto
+          // antiga sem o campo `ativos` (gravada antes de 10/07/2026) fazia o
+          // período inteiro sumir sem explicação em AU e US.
+          <p style={{fontSize:12,color:D.text3}}>Sem foto utilizável de {perRV==="No mês"?"o mês anterior":"início do ano"} para comparar — a comparação precisa de um snapshot com a carteira detalhada, e o mais antigo disponível não tem esse detalhe. Aparece no próximo fechamento de mês.</p>
+        :<div style={{display:"flex",flexDirection:"column",gap:2}}>
+          {perRVSel!=="inicio"&&infoRV.desde&&<p style={{fontSize:10,color:D.text3,margin:0}}>
+            base: foto de {String(infoRV.desde).split("-").reverse().join("/")}
+            {infoRV.janelaExata===false&&" · dia exato da foto não registrado (snapshot antigo) — aportes do mês podem estar contados duas vezes"}
+          </p>}
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
           <span style={{fontSize:12,color:D.text3}}>{perRV==="Desde o início"?"Ganho acumulado":"Variação no período"}</span>
           <span style={{fontSize:16,fontWeight:700,color:(infoRV.valor||0)>=0?D.green:D.red}}>{(infoRV.valor||0)>=0?"+":""}{fmtM(infoRV.valor||0,currency)} {infoRV.pct!=null&&<span style={{fontSize:12}}>({infoRV.pct>=0?"+":""}{infoRV.pct.toFixed(2)}%)</span>}</span>
+          </div>
         </div>}
         <p style={{fontSize:10,color:D.text3,margin:"8px 0 0"}}>Sem granularidade diária: ações dependem do preço de mercado, não de fórmula — "1 dia" chega quando houver preço de fechamento guardado dia a dia.</p>
       </Card>;})()}
@@ -5428,7 +5437,13 @@ function AppInner(){
       const hist=p.historico||[];
       const existente=hist.find(h=>h.mes===mesKey);
       if(existente&&existente.ativos&&Math.abs((existente.patrimonio||0)-pat)<0.01){snapDone.current=true;return;}
-      const novoHist=[...hist.filter(h=>h.mes!==mesKey),{mes:mesKey,patrimonio:pat,bancos:Math.round(tB*100)/100,investimentos:Math.round(tI*100)/100,ativos:soAtivos(p.investimentos).map(i=>({id:i.id,ticker:i.ticker||null,descricao:i.descricao||null,quantidade:i.quantidade||null,valorAtual:Math.round(valorMercado(i)*100)/100}))}].sort((a,b)=>a.mes.localeCompare(b.mes)).slice(-24);
+      // `em` = dia em que a foto foi TIRADA (11/08/2026). O mês não basta: o
+      // snapshot é gravado ao abrir o app, tipicamente no meio ou fim do mês, e
+      // sem essa data ganhoAcoesEntreSnapshots desconta aportes desde o dia 1 e
+      // subtrai duas vezes o que já está dentro da base. Quem ler DEVE tratar a
+      // ausência do campo como caso explícito — nunca assumir dia 1.
+      const emStr=`${hojeD.getFullYear()}-${String(hojeD.getMonth()+1).padStart(2,"0")}-${String(hojeD.getDate()).padStart(2,"0")}`;
+      const novoHist=[...hist.filter(h=>h.mes!==mesKey),{mes:mesKey,em:emStr,patrimonio:pat,bancos:Math.round(tB*100)/100,investimentos:Math.round(tI*100)/100,ativos:soAtivos(p.investimentos).map(i=>({id:i.id,ticker:i.ticker||null,descricao:i.descricao||null,quantidade:i.quantidade||null,valorAtual:Math.round(valorMercado(i)*100)/100}))}].sort((a,b)=>a.mes.localeCompare(b.mes)).slice(-24);
       setData(d=>({...d,historico:novoHist}));
       snapDone.current=true;
     },3000);

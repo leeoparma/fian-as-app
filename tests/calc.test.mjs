@@ -999,6 +999,65 @@ test("valorMercado: lixo não derruba o snapshot", ()=>{
   assert.equal(valorMercado({valorAtual:NaN,valorInvestido:100}),100);
   assert.equal(valorMercado({valorAtual:Infinity,valorInvestido:100}),100);
 });
+
+// ── B1: foto vazia/legada não serve de base (11/08/2026) ────────────────────
+const HOJE=new Date("2026-08-11T12:00:00Z");
+const CART=[{id:"a1",tipo:"Ações",ticker:"AAA",quantidade:10,precoMedio:10,valorInvestido:100,valor:100,valorAtual:150}];
+test("rentabilidadeAcoes: foto SEM o campo ativos não vira base do ano", ()=>{
+  // Caso real de AU/US: o snapshot de 2026-06 foi gravado antes de 10/07/2026,
+  // quando `ativos` passou a existir. Ele traz investimentos=995,85 e NENHUMA
+  // linha por ativo — não é carteira vazia, é recorte incompleto. Antes, ser a
+  // foto mais antiga do ano bastava para virar base, e "No ano" morria calado.
+  const hist=[
+    {mes:"2026-06",patrimonio:22218,investimentos:995.85},        // sem `ativos`
+    {mes:"2026-07",patrimonio:26000,investimentos:1000,ativos:[{id:"a1",valorAtual:120}]},
+  ];
+  const r=rentabilidadeAcoes(CART,hist,HOJE);
+  assert.equal(r.ano.temBase,true);                 // usou julho, não junho
+  assert.equal(r.ano.valor,30);                     // 150 − 120
+  assert.equal(r.mes.temBase,true);
+});
+test("rentabilidadeAcoes: ativos:[] também não serve de base", ()=>{
+  const hist=[
+    {mes:"2026-06",ativos:[]},
+    {mes:"2026-07",ativos:[{id:"a1",valorAtual:120}]},
+  ];
+  assert.equal(rentabilidadeAcoes(CART,hist,HOJE).ano.valor,30);
+});
+test("rentabilidadeAcoes: sem NENHUMA foto útil declara ausência, não zero", ()=>{
+  const r=rentabilidadeAcoes(CART,[{mes:"2026-06",ativos:[]}],HOJE);
+  assert.equal(r.ano.temBase,false);   // a tela mostra o texto de "sem base"
+  assert.equal(r.mes.temBase,false);
+  assert.equal(r.desdeInicio.valor,50); // "desde o início" não depende de foto
+});
+test("rentabilidadeAcoes: base do ano fica DENTRO do ano corrente", ()=>{
+  // foto de dezembro do ano passado não pode virar "no ano" de 2026
+  const hist=[
+    {mes:"2025-12",ativos:[{id:"a1",valorAtual:50}]},
+    {mes:"2026-07",ativos:[{id:"a1",valorAtual:120}]},
+  ];
+  assert.equal(rentabilidadeAcoes(CART,hist,HOJE).ano.valor,30);  // usa julho/26
+});
+test("rentabilidadeAcoes: `em` define a janela; sem ele, declara imprecisão", ()=>{
+  const comEm=[{mes:"2026-07",em:"2026-07-28",ativos:[{id:"a1",valorAtual:120}]}];
+  const r1=rentabilidadeAcoes(CART,comEm,HOJE);
+  assert.equal(r1.mes.desde,"2026-07-28");
+  assert.equal(r1.mes.janelaExata,true);
+  const semEm=[{mes:"2026-07",ativos:[{id:"a1",valorAtual:120}]}];
+  const r2=rentabilidadeAcoes(CART,semEm,HOJE);
+  assert.equal(r2.mes.desde,"2026-07-01");   // fallback = comportamento antigo
+  assert.equal(r2.mes.janelaExata,false);    // e a tela avisa que é impreciso
+});
+test("rentabilidadeAcoes: `em` encurta a janela e evita a dupla subtração", ()=>{
+  // aporte de 14/07 já está DENTRO da foto de 28/07 — com `em` ele não é
+  // descontado de novo. É a prova do mecanismo que o Bloco E vai completar.
+  const comAporte=[{...CART[0],aportes:[{data:"2026-07-14",quantidade:2,preco:10}]}];
+  const base=[{id:"a1",valorAtual:120}];
+  const comEm=rentabilidadeAcoes(comAporte,[{mes:"2026-07",em:"2026-07-28",ativos:base}],HOJE);
+  const semEm=rentabilidadeAcoes(comAporte,[{mes:"2026-07",ativos:base}],HOJE);
+  assert.equal(comEm.mes.valor,30);    // 150 − 120
+  assert.equal(semEm.mes.valor,10);    // 150 − 120 − 20  ← subtrai o que já estava na base
+});
 test("composicaoAcoes: carteira vazia devolve lista vazia sem dividir por zero", ()=>{
   assert.deepEqual(composicaoAcoes([]),[]);
 });
