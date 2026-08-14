@@ -111,6 +111,32 @@ O que continua válido sem viewport (não depende de layout): texto extraído do
 
 Caso real (30/07/2026): dois gráficos do modal de FII eram esmagados de 106px para 51px por um `overflow-x:auto` dentro de um flex column, e a verificação anterior — feita com viewport 0×0 — não só não pegou como sugeria que o gráfico saudável é que estava quebrado.
 
+## Linha de base das métricas de RV — 13/08/2026, commit `c0f5078` (pós-Bloco D)
+
+Registrado ANTES dos Blocos C e E, que vão mexer nestes números de propósito. Sem esta linha, daqui a duas semanas um valor diferente não se distingue de regressão. Fonte: export `financas_2026-08-10.json`, cálculo com o código de `c0f5078`.
+
+| perfil | métrica | **pós-D (base)** | pós-C | pós-E |
+|---|---|---|---|---|
+| **BR** | desdeInicio | **149,14** (0,88%) | | |
+| | No mês | **−4.732,87** (−26,79%) ⚠️ | | |
+| | No ano | **−4.732,87** (−26,79%) ⚠️ | | |
+| | custo total | **17.034,03** | | |
+| | composição | BBAS3 44,8 · CPLE3 25,6 · CXSE3 15,6 · ITUB4 13,6 · CSNA3 0,4 | | |
+| **AU** | desdeInicio | **39,71** (2,06%) | | |
+| | No mês | **−882,11** (−44,11%) ⚠️ | | |
+| | No ano | **−882,11** (−44,11%) ⚠️ | | |
+| | custo total | **1.924,90** | | |
+| | composição | NAB 67,1 · QBE 32,9 | | |
+| **US** | desdeInicio | **−418,06** (−25,06%) | | |
+| | No mês | **127,70** (11,37%) ⚠️ | | |
+| | No ano | **−1.249,78** (−111,31%) ⚠️ | | |
+| | custo total | **1.668,56** | | |
+| | composição | SPCX 90,1 · NVDA 9,9 | | |
+
+⚠️ **"No mês" e "No ano" já estão errados nesta base** — são os números que o Bloco E vai corrigir, não uma referência de correção. Todos saem com `janelaExata: false` (nenhum snapshot tem `em` ainda) e sofrem a dupla subtração de aportes. O **−111,31%** do US é a prova aritmética: posição comprada não perde mais que 100%. Ao comparar pós-E, esperar mudança GRANDE nessas quatro linhas — o que precisa ser investigado é `desdeInicio`, `custo total` e `composição` mudarem, não elas.
+
+O que o Bloco C deve mexer: `desdeInicio` e `custo total` (corretagem entrando na base de apuração), e o resultado realizado quando houver venda. O que o Bloco C **não** pode mexer: composição, e o `custo` de exibição do card.
+
 ## `historico[]` é dado VERSIONADO — REGRA
 
 Os snapshots mensais ganharam campos ao longo do tempo. **Foto antiga NÃO tem os campos novos**, e nunca vai ter — não há como retro-preencher o que não foi gravado.
