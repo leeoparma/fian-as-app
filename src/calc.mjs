@@ -668,6 +668,17 @@ export function relatorioMensal({mesKey,transacoes=[],investimentos=[],snapIni=n
       const ini=snapIni.find(x=>x&&x.id===f.id);
       const inv=(investimentos||[]).find(x=>x&&x.id===f.id);
       const aportesMes=(inv?.aportes||[]).filter(a=>a&&a.data&&a.data.startsWith(mesKey)).reduce((s,a)=>s+(a.quantidade||0)*(a.preco||0),0);
+      // ⚠️ BRUTO de propósito (quantidade × preço), NÃO `v.resultado`.
+      // Este termo fecha a identidade do VALOR DE MERCADO da posição:
+      //     valorFim − base − aportes + vendas
+      // Ele mede o CAIXA que saiu da posição, não o lucro. Quando você vende,
+      // o valor de mercado some da carteira e reaparece como dinheiro — é o
+      // valor cheio que sai, independentemente de ter dado lucro ou prejuízo.
+      // `v.resultado` é lucro (já descontou custo de aquisição e, desde
+      // 13/08/2026, a corretagem) e NÃO fecha esta conta.
+      // Trocar por líquido aqui quebra a identidade em silêncio: o total do
+      // período passa a não bater com a variação real da carteira, e o erro é
+      // exatamente o custo de aquisição do que foi vendido.
       const vendasMes=(inv?.vendas||[]).filter(v=>v&&v.data&&v.data.startsWith(mesKey)).reduce((s,v)=>s+(v.quantidade||0)*(v.preco||0),0);
       const nome=f.ticker||f.descricao||"ativo";
       const vFimSnap=Number.isFinite(f.valorAtual)?f.valorAtual:0;
@@ -836,7 +847,23 @@ export function ganhoAcoesEntreSnapshots(investimentos,snapIni,iniStr,fimStr){
     const ini=snapIni.find(x=>x&&x.id===f.id);
     if(!ini)continue; // ativo novo no período — sem base, não entra na conta
     const valorFim=valorMercado(f);   // já devolve 0 para encerrado
+    // ⚠️ DEFEITO CONHECIDO E ABERTO (diagnóstico completo em 13/08/2026).
+    // Esta linha assume que a foto-base foi tirada em `iniStr`. Ela NÃO foi:
+    // a base é o snapshot de um MÊS, gravado num dia arbitrário desse mês, e
+    // em "No ano" pode ser meses DEPOIS de iniStr. Todo aporte entre iniStr e
+    // a data real da foto é subtraído de uma base que já o contém.
+    // Caso real (US, export 10/08): aporte de SPCX em 20/06 de 1.377,48
+    // descontado de uma base de julho que valia 1.011,26 — subtrair mais do
+    // que a base inteira é o que produz o impossível −111,31% no ano.
+    // O conserto é usar a data REAL da foto (`h.em`, gravado desde 11/08) como
+    // início da janela — Bloco E.
     const aportesPeriodo=(f.aportes||[]).filter(a=>a&&a.data&&a.data>=iniStr&&a.data<=fimStr).reduce((s,a)=>s+(a.quantidade||0)*(a.preco||0),0);
+    // ⚠️ BRUTO de propósito — mesma razão do relatorioMensal: este termo
+    // fecha `valorFim − base − aportes + vendas` do VALOR DE MERCADO, medindo
+    // caixa que saiu da posição, não lucro. `v.resultado` (líquido, com custo
+    // de aquisição e corretagem descontados) não fecha esta identidade.
+    // Se um dia isto for para líquido, tem de ser junto com uma mudança na
+    // definição do que a função devolve — não como "correção" isolada.
     const vendasPeriodo=(f.vendas||[]).filter(v=>v&&v.data&&v.data>=iniStr&&v.data<=fimStr).reduce((s,v)=>s+(v.quantidade||0)*(v.preco||0),0);
     const base=Number.isFinite(ini.valorAtual)?ini.valorAtual:0;
     ganho+=valorFim-base-aportesPeriodo+vendasPeriodo;

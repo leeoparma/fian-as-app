@@ -133,6 +133,21 @@ Registrado ANTES dos Blocos C e E, que vão mexer nestes números de propósito.
 | | custo total | **1.668,56** | 1.668,56 (sem corretagem) | |
 | | composição | SPCX 90,1 · NVDA 9,9 | | |
 
+**DIAGNÓSTICO DA CAUSA (13/08/2026, feito ANTES do Bloco E de propósito — para não confundir "corrigiu" com "mascarou"):** o −111,31% do US não vem da dupla subtração dos aportes do mês. Vem de algo mais amplo: `ganhoAcoesEntreSnapshots` assume que a foto-base foi tirada em `iniStr`, e ela não foi. A base é o snapshot de um MÊS, gravado num dia arbitrário, e em "No ano" pode ser **meses depois** de `iniStr`. Reconstrução termo a termo do US:
+
+```
+foto-base escolhida: 2026-07   (janela de aportes: 2026-01-01 → hoje)
+SPCX:  valorFim 1.126,09 − base 1.011,26 − aportes 1.377,48 + vendas 0,00 = −1.262,65
+NVDA:  valorFim   124,41 − base   111,54 − aportes     0,00 + vendas 0,00 =    +12,87
+       ganho −1.249,78 ÷ baseTotal 1.122,80 = −111,31%
+```
+
+O aporte de SPCX é de **20/06** — anterior à foto de julho, portanto **já dentro** dos 1.011,26 da base. Subtraí-lo desconta 1.377,48 de uma base que vale 1.011,26: subtrair mais que a base inteira é o que torna o percentual impossível. Não é arredondamento nem sinal trocado.
+
+**Previsão verificável para o Bloco E:** removendo apenas esse termo, `−1.249,78 + 1.377,48 = +127,70` — exatamente o valor que "No mês" do US já mostra hoje, porque lá a janela começa em 01/07 e o aporte de junho fica de fora. Se o pós-E der +127,70 no ano do US, corrigiu; se der outro número, mascarou.
+
+Consequência de escopo: com `em`, a base do ano passa a ser "desde a foto mais antiga do ano", não "desde 1º de janeiro". O rótulo na tela já diz `base: foto de DD/MM/AAAA` (Bloco B1), então isso fica honesto — mas é uma mudança de significado, não só de valor.
+
 ⚠️ **"No mês" e "No ano" já estão errados nesta base** — são os números que o Bloco E vai corrigir, não uma referência de correção. Todos saem com `janelaExata: false` (nenhum snapshot tem `em` ainda) e sofrem a dupla subtração de aportes. O **−111,31%** do US é a prova aritmética: posição comprada não perde mais que 100%. Ao comparar pós-E, esperar mudança GRANDE nessas quatro linhas — o que precisa ser investigado é `desdeInicio`, `custo total` e `composição` mudarem, não elas.
 
 **Pós-C medido em 13/08/2026, commit `46274fa`:** `desdeInicio` NÃO mudou em nenhum perfil, porque ele lê `vendas[].resultado` e `vendas[]` está vazio nos três — a correção da corretagem de venda só aparece na primeira venda real. O que mudou foi a base de apuração: `custoComCustos` supera `custo` em R$ 12,51 (BR) e R$ 12,00 (AU); o US não tem corretagem registrada. Composição e custo de exibição inalterados, como previsto.
@@ -156,6 +171,14 @@ Caso real (achado em 11/08/2026): o snapshot `au 2026-06` traz `investimentos: 9
 A confusão é a mesma família do antipadrão do `||` abaixo — **campo ausente e valor zero sendo tratados como a mesma coisa**. Aqui a correção foi `_fotoUtil` exigir `Array.isArray(ativos) && ativos.length > 0`, e a tela declarar "sem foto utilizável" em vez de sumir.
 
 Ao acrescentar QUALQUER campo novo ao snapshot: registrar a data nesta tabela, e escrever no consumidor o que acontece quando o campo não está lá.
+
+## Auditoria de dados usa SEMPRE o export mais recente — REGRA
+
+Os exports em `~/Downloads/financas_*.json` são a única janela para os dados reais do Leo (o Supabase exige login, que o Claude não faz). **Pegar sempre o mais novo — `ls -t ~/Downloads/financas_*.json | head -1` — e citar o arquivo usado junto com a conclusão.**
+
+Conclusão sobre "quantos casos existem" tem prazo de validade, porque o app está em uso diário. Caso real (13/08/2026): a corretagem de compra aparecia em **1 de 22 ativos** no export de 05/08 e em **5 de 22** no de 10/08 — cinco dias de uso normal quintuplicaram a amostra. A frase "o caminho nunca foi exercido com dado real", escrita com base no arquivo velho, já era falsa quando foi escrita.
+
+Vale também para a decisão de fazer ou não um dry-run: "não há caso na base" medido num export de uma semana atrás não é evidência de que não há caso hoje.
 
 ## Validação nova roda contra os dados REAIS antes de ser ligada — REGRA
 

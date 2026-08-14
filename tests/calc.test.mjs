@@ -1208,6 +1208,32 @@ test("Bloco D: Δ ZERO — nenhum dos 22 ativos reais muda de valor", ()=>{
     assert.equal(valorAplicado(i),i.valorInvestido||i.valor||0);
   }
 });
+
+// ── Defeito ABERTO, fixado de propósito (diagnóstico 13/08/2026) ────────────
+test("ganhoAcoesEntreSnapshots: aporte ANTERIOR à foto é descontado — defeito conhecido", ()=>{
+  // Este teste fixa o comportamento ERRADO de hoje, com os números reais do
+  // US, para que o Bloco E não possa mudá-lo em silêncio. A função assume que
+  // a foto-base foi tirada em iniStr; ela foi tirada em JULHO, e o aporte é de
+  // 20/06 — já dentro da base. Descontá-lo tira 1.377,48 de uma base de
+  // 1.011,26, e é isso que produz o impossível −111,31%.
+  //
+  // QUANDO O BLOCO E ENTRAR: este teste DEVE falhar, e o valor esperado passa
+  // a ser +127,70 (= −1.249,78 + 1.377,48). Se o E fizer o −111% sumir sem que
+  // este número dê exatamente 127,70, mascarou em vez de corrigir.
+  const inv=[
+    {id:"spcx",tipo:"Ações",ticker:"SPCX",quantidade:8.985,precoMedio:172.02,valorAtual:1126.09,
+     aportes:[{data:"2026-06-20",quantidade:7.99,preco:172.40}]},
+    {id:"nvda",tipo:"Ações",ticker:"NVDA",quantidade:0.587,precoMedio:209.48,valorAtual:124.41},
+  ];
+  const fotoJulho=[{id:"spcx",valorAtual:1011.26},{id:"nvda",valorAtual:111.54}];
+  const r=ganhoAcoesEntreSnapshots(inv,fotoJulho,"2026-01-01","2026-08-13");
+  assert.equal(Math.round(r.valor*100)/100,-1249.78);
+  assert.ok(r.pct<-100,"o percentual impossível é o sintoma, não a causa");
+  // a mesma carteira com a janela começando na data REAL da foto dá o certo:
+  const certo=ganhoAcoesEntreSnapshots(inv,fotoJulho,"2026-07-28","2026-08-13");
+  assert.equal(Math.round(certo.valor*100)/100,127.70);
+  assert.equal(Math.round((r.valor+1377.48)*100)/100,127.70);  // a conta fecha
+});
 test("composicaoAcoes: carteira vazia devolve lista vazia sem dividir por zero", ()=>{
   assert.deepEqual(composicaoAcoes([]),[]);
 });
