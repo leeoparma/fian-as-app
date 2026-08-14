@@ -2239,7 +2239,15 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
     const i={id:form.editId||uid(),tipo:form.tipo||"Ações",descricao:form.descricao||"",ticker:(form.ticker||"").toUpperCase(),quantidade:parseFloat(form.quantidade)||1,precoMedio:parseFloat(form.precoMedio)||0,valorInvestido:vi,valor:vi,data:form.data||hoje.toISOString().slice(0,10),bancoId:form.bancoId||null,indice:form.indice||"CDI",taxaRF:parseFloat(form.taxaRF)||0,pctIndice:parseFloat(form.pctIndice)||100,rfTipo:form.rfTipo||"pct",vencimento:form.vencimento||""};
     if(isRF){i.valorAtual=calcValorAtualRFHistorico(i,seriesBCB,new Date()).valor;i.lucro=i.valorAtual-vi;}
     const corretagem=parseFloat(form.corretagem)||0;
-    if(corretagem>0)i.corretagemCompra=corretagem; // guardado p/ base de custo fiscal futura
+    // corretagemCompra é a do CADASTRO. O acumulado vem de corretagemDeCompra(),
+    // que soma esta com a de cada aporte — não existe um campo somado gravado,
+    // de propósito: campo derivado que se grava é campo que envelhece podre
+    // (foi assim que valorInvestido virou o bug do CXSE3). Na EDIÇÃO o valor
+    // antigo é preservado quando o form não traz corretagem, senão editar
+    // qualquer campo apagaria a corretagem original.
+    const corretagemAnterior=form.editId?(data.investimentos.find(x=>x.id===form.editId)||{}).corretagemCompra:0;
+    const corrCad=corretagem>0?corretagem:(corretagemAnterior||0);
+    if(corrCad>0)i.corretagemCompra=corrCad;
     const debita=!form.editId&&form.bancoId&&form.debitarBanco!==false&&vi>0;
     const novasTx=[];
     if(debita){
@@ -2295,6 +2303,11 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
               {isRFItem?<p style={{margin:"2px 0 0",fontSize:11,color:D.text3}}>{inv.rfTipo==="pct"?`${inv.pctIndice||100}% ${inv.indice}`:`${inv.indice}+${inv.taxaRF||0}%`}{inv.vencimento&&` · Venc: ${inv.vencimento}`}</p>
               :<p style={{margin:"2px 0 0",fontSize:11,color:D.text3}}>{inv.quantidade}un · PM:{fmtM(inv.precoMedio||0,currency)}{inv.preco_atual?` · Atual:${fmtM(inv.preco_atual,currency)}`:""}</p>}
               {erroCad&&<p style={{margin:"3px 0 0",fontSize:10,color:D.gold,lineHeight:1.4}}>{erroCad.mensagem}</p>}
+              {/* Primeira vez que custoComCustos ≠ custo aparece na tela. Só é
+                  mostrado quando há corretagem — quem não paga não vê ruído. */}
+              {!isRFItem&&rvCalc.corretagens>0&&<p style={{margin:"3px 0 0",fontSize:10,color:D.text3}}>
+                custo {fmtM(rvCalc.custo,currency)} + corretagem {fmtM(rvCalc.corretagens,currency)} = <b style={{color:D.text2}}>{fmtM(rvCalc.custoComCustos,currency)}</b> na apuração
+              </p>}
             </div>
             <div style={{display:"flex",gap:4,alignItems:"center",flexShrink:0}}>
               <div style={{textAlign:"right"}}>

@@ -512,12 +512,32 @@ test("venda real (BRE): bruto $388,55 vira Resgate; líquido $385,55 entra na co
   aprox(r.recebidoBruto,388.55);
   aprox(r.recebidoLiquido,385.55);
   assert.equal(r.vendeuTudo,true);
-  aprox(r.resultado,388.55-95*4.30); // resultado de execução vs PM
+  // ANTES de 13/08/2026 este teste esperava -19,95 (lucro BRUTO, sem a
+  // corretagem de $3). `resultado` agora desconta a corretagem, porque é ele
+  // que é gravado em vendas[] e vira ganho realizado — o bruto superestimava.
+  aprox(r.resultado,388.55-95*4.30-3);   // -22,95
+  aprox(r.corretagem,3);
+  // caixa e lucro continuam diferentes, e devem: a diferença é o custo de
+  // aquisição, não mais a corretagem.
+  aprox(r.recebidoLiquido-r.resultado,r.custoVendido);
 });
 test("venda parcial: PM inalterado, quantidade cai, resultado certo", ()=>{
   const r=vendaAcao(20,10,5,12,1);
-  aprox(r.qtdRestante,15);aprox(r.recebidoBruto,60);aprox(r.recebidoLiquido,59);aprox(r.resultado,10);
+  aprox(r.qtdRestante,15);aprox(r.recebidoBruto,60);aprox(r.recebidoLiquido,59);
+  aprox(r.resultado,9);            // 60 − 50 − 1 (era 10, sem a corretagem)
   assert.equal(r.vendeuTudo,false);
+});
+test("vendaAcao: sem corretagem, resultado e o cálculo antigo coincidem", ()=>{
+  // garante que a mudança de 13/08 só afeta quem paga corretagem
+  const r=vendaAcao(20,10,5,12,0);
+  aprox(r.resultado,10);
+  aprox(r.recebidoLiquido,r.recebidoBruto);
+});
+test("vendaAcao: corretagem inválida não vira NaN no resultado", ()=>{
+  for(const c of [undefined,null,NaN,"abc"]){
+    const r=vendaAcao(20,10,5,12,c);
+    aprox(r.resultado,10);aprox(r.corretagem,0);
+  }
 });
 test("compra sem corretagem = preço médio clássico (compatível com aporteMedio)", ()=>{
   const a=compraAcao(10,10,10,20,0),b=aporteMedio(10,10,10,20);

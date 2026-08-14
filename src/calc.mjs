@@ -420,10 +420,22 @@ export function compraAcao(qtdAntiga,pmAntigo,qtdNova,preco,corretagem){
 }
 export function vendaAcao(qtdAtual,pm,qtdVendida,preco,corretagem){
   const q=Math.min(qtdVendida||0,qtdAtual||0);
-  const recebidoBruto=q*preco;                         // vira o "Resgate"
-  const recebidoLiquido=recebidoBruto-(corretagem||0); // o que entra de fato
+  const c=Number.isFinite(corretagem)?corretagem:0;
+  const recebidoBruto=q*preco;                         // vira o "Resgate" no banco
+  const recebidoLiquido=recebidoBruto-c;               // o dinheiro que entra de fato
   const custoVendido=(pm||0)*q;
-  return {qtdRestante:(qtdAtual||0)-q,recebidoBruto,recebidoLiquido,custoVendido,resultado:recebidoBruto-custoVendido,vendeuTudo:((qtdAtual||0)-q)<=1e-9};
+  // ⚠️ `resultado` DESCONTA a corretagem desde 13/08/2026. Antes, os dois
+  // valores existiam lado a lado e só `recebidoLiquido` descontava — e
+  // `recebidoLiquido` é usado apenas na prévia do modal, nunca é gravado.
+  // O que ia para `vendas[].resultado` (e daí para o ganho realizado em
+  // rentabilidadeAcoesDesdeInicio) era o lucro BRUTO, superestimado pelo total
+  // de corretagens de venda.
+  //
+  // Os dois continuam diferentes, e devem: `recebidoLiquido` é CAIXA (quanto
+  // entrou), `resultado` é LUCRO (quanto sobrou depois do custo de aquisição).
+  // A diferença entre eles é exatamente `custoVendido` — não mais a corretagem.
+  const resultado=recebidoBruto-custoVendido-c;
+  return {qtdRestante:(qtdAtual||0)-q,recebidoBruto,recebidoLiquido,custoVendido,corretagem:c,resultado,vendeuTudo:((qtdAtual||0)-q)<=1e-9};
 }
 // Posição de renda variável — a fonte da verdade do card. O custo é SEMPRE
 // quantidade × PM ponderado; o campo gravado valorInvestido é IGNORADO
