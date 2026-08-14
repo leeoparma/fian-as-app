@@ -117,23 +117,25 @@ Registrado ANTES dos Blocos C e E, que vão mexer nestes números de propósito.
 
 | perfil | métrica | **pós-D (base)** | pós-C | pós-E |
 |---|---|---|---|---|
-| **BR** | desdeInicio | **149,14** (0,88%) | | |
+| **BR** | desdeInicio | **149,14** (0,88%) | 149,14 (sem venda) | |
 | | No mês | **−4.732,87** (−26,79%) ⚠️ | | |
 | | No ano | **−4.732,87** (−26,79%) ⚠️ | | |
-| | custo total | **17.034,03** | | |
+| | custo total | **17.034,03** | 17.034,03 · c/ custos **17.046,54** | |
 | | composição | BBAS3 44,8 · CPLE3 25,6 · CXSE3 15,6 · ITUB4 13,6 · CSNA3 0,4 | | |
-| **AU** | desdeInicio | **39,71** (2,06%) | | |
+| **AU** | desdeInicio | **39,71** (2,06%) | 39,71 (sem venda) | |
 | | No mês | **−882,11** (−44,11%) ⚠️ | | |
 | | No ano | **−882,11** (−44,11%) ⚠️ | | |
-| | custo total | **1.924,90** | | |
+| | custo total | **1.924,90** | 1.924,90 · c/ custos **1.936,90** | |
 | | composição | NAB 67,1 · QBE 32,9 | | |
-| **US** | desdeInicio | **−418,06** (−25,06%) | | |
+| **US** | desdeInicio | **−418,06** (−25,06%) | −418,06 (sem venda) | |
 | | No mês | **127,70** (11,37%) ⚠️ | | |
 | | No ano | **−1.249,78** (−111,31%) ⚠️ | | |
-| | custo total | **1.668,56** | | |
+| | custo total | **1.668,56** | 1.668,56 (sem corretagem) | |
 | | composição | SPCX 90,1 · NVDA 9,9 | | |
 
 ⚠️ **"No mês" e "No ano" já estão errados nesta base** — são os números que o Bloco E vai corrigir, não uma referência de correção. Todos saem com `janelaExata: false` (nenhum snapshot tem `em` ainda) e sofrem a dupla subtração de aportes. O **−111,31%** do US é a prova aritmética: posição comprada não perde mais que 100%. Ao comparar pós-E, esperar mudança GRANDE nessas quatro linhas — o que precisa ser investigado é `desdeInicio`, `custo total` e `composição` mudarem, não elas.
+
+**Pós-C medido em 13/08/2026, commit `46274fa`:** `desdeInicio` NÃO mudou em nenhum perfil, porque ele lê `vendas[].resultado` e `vendas[]` está vazio nos três — a correção da corretagem de venda só aparece na primeira venda real. O que mudou foi a base de apuração: `custoComCustos` supera `custo` em R$ 12,51 (BR) e R$ 12,00 (AU); o US não tem corretagem registrada. Composição e custo de exibição inalterados, como previsto.
 
 O que o Bloco C deve mexer: `desdeInicio` e `custo total` (corretagem entrando na base de apuração), e o resultado realizado quando houver venda. O que o Bloco C **não** pode mexer: composição, e o `custo` de exibição do card.
 
