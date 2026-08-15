@@ -1066,8 +1066,12 @@ test("rentabilidadeAcoes: `em` define a janela; sem ele, declara imprecisão", (
   assert.equal(r1.mes.janelaExata,true);
   const semEm=[{mes:"2026-07",ativos:[{id:"a1",valorAtual:120}]}];
   const r2=rentabilidadeAcoes(CART,semEm,HOJE);
-  assert.equal(r2.mes.desde,"2026-07-01");   // fallback = comportamento antigo
-  assert.equal(r2.mes.janelaExata,false);    // e a tela avisa que é impreciso
+  // ATUALIZADO no Bloco E (15/08/2026): sem `em`, o fallback deixou de ser o
+  // dia 1 e passou a ser o FIM DO MÊS da foto. O dia 1 subtraía todos os
+  // aportes da janela de uma base que já os continha — era o que produzia o
+  // −111,31% do US. Continua marcado como estimativa.
+  assert.equal(r2.mes.desde,"2026-07-31");
+  assert.equal(r2.mes.janelaExata,false);
 });
 test("rentabilidadeAcoes: `em` encurta a janela e evita a dupla subtração", ()=>{
   // aporte de 14/07 já está DENTRO da foto de 28/07 — com `em` ele não é
@@ -1076,8 +1080,13 @@ test("rentabilidadeAcoes: `em` encurta a janela e evita a dupla subtração", ()
   const base=[{id:"a1",valorAtual:120}];
   const comEm=rentabilidadeAcoes(comAporte,[{mes:"2026-07",em:"2026-07-28",ativos:base}],HOJE);
   const semEm=rentabilidadeAcoes(comAporte,[{mes:"2026-07",ativos:base}],HOJE);
-  assert.equal(comEm.mes.valor,30);    // 150 − 120
-  assert.equal(semEm.mes.valor,10);    // 150 − 120 − 20  ← subtrai o que já estava na base
+  assert.equal(comEm.mes.valor,30);    // 150 − 120, com a data real da foto
+  // ATUALIZADO no Bloco E: era 10 (o aporte de 14/07 sendo subtraído duas
+  // vezes pelo fallback de dia 1). Com o fallback de fim de mês, 14/07 < 31/07
+  // e o aporte fica fora da janela — mesmo resultado da data real, por
+  // estimativa. É o ganho do E: o caso comum passa a acertar mesmo sem `em`.
+  assert.equal(semEm.mes.valor,30);
+  assert.equal(semEm.mes.janelaExata,false);   // acerta, mas não promete exatidão
 });
 
 // ── B2: posicaoRV com as DUAS bases ─────────────────────────────────────────
@@ -1210,16 +1219,40 @@ test("Bloco D: Δ ZERO — nenhum dos 22 ativos reais muda de valor", ()=>{
 });
 
 // ── Defeito ABERTO, fixado de propósito (diagnóstico 13/08/2026) ────────────
-test("ganhoAcoesEntreSnapshots: aporte ANTERIOR à foto é descontado — defeito conhecido", ()=>{
+test("Bloco E: o −111,31% do US vira +127,70 — o valor PREVISTO antes do fix", ()=>{
+  // Previsão registrada no CLAUDE.md em 13/08/2026, ANTES de escrever o fix:
+  //   −1.249,78 + 1.377,48 (o aporte indevidamente descontado) = +127,70
+  // Se este teste passasse com qualquer outro número, o fix teria mascarado o
+  // sintoma em vez de corrigir a causa.
+  const inv=[
+    {id:"spcx",tipo:"Ações",ticker:"SPCX",quantidade:8.985,precoMedio:172.02,valorAtual:1126.09,
+     aportes:[{data:"2026-06-20",quantidade:7.99,preco:172.40}]},
+    {id:"nvda",tipo:"Ações",ticker:"NVDA",quantidade:0.587,precoMedio:209.48,valorAtual:124.41},
+  ];
+  const hist=[{mes:"2026-06",ativos:[]},
+              {mes:"2026-07",ativos:[{id:"spcx",valorAtual:1011.26},{id:"nvda",valorAtual:111.54}]}];
+  const r=rentabilidadeAcoes(inv,hist,new Date("2026-08-13T12:00:00Z"));
+  assert.equal(Math.round(r.ano.valor*100)/100,127.70);
+  assert.equal(r.ano.desde,"2026-07-31");     // fim do mês da foto, não dia 1
+  assert.equal(r.ano.janelaExata,false);      // e a tela avisa que é estimativa
+  assert.ok(r.ano.pct>0&&r.ano.pct<100,"percentual volta ao domínio do possível");
+  // com `em` de verdade o resultado é o mesmo, sem estimativa
+  const comEm=[{mes:"2026-07",em:"2026-07-28",ativos:[{id:"spcx",valorAtual:1011.26},{id:"nvda",valorAtual:111.54}]}];
+  const r2=rentabilidadeAcoes(inv,comEm,new Date("2026-08-13T12:00:00Z"));
+  assert.equal(Math.round(r2.ano.valor*100)/100,127.70);
+  assert.equal(r2.ano.janelaExata,true);
+});
+test("ganhoAcoesEntreSnapshots: com janela EXPLÍCITA de dia 1, o defeito histórico se reproduz", ()=>{
   // Este teste fixa o comportamento ERRADO de hoje, com os números reais do
   // US, para que o Bloco E não possa mudá-lo em silêncio. A função assume que
   // a foto-base foi tirada em iniStr; ela foi tirada em JULHO, e o aporte é de
   // 20/06 — já dentro da base. Descontá-lo tira 1.377,48 de uma base de
   // 1.011,26, e é isso que produz o impossível −111,31%.
   //
-  // QUANDO O BLOCO E ENTRAR: este teste DEVE falhar, e o valor esperado passa
-  // a ser +127,70 (= −1.249,78 + 1.377,48). Se o E fizer o −111% sumir sem que
-  // este número dê exatamente 127,70, mascarou em vez de corrigir.
+  // A função CRUA continua devolvendo −1.249,78 para esta entrada, e está
+  // certa: quem passou "2026-01-01" pediu essa janela. O defeito nunca esteve
+  // aqui — estava em rentabilidadeAcoes, que escolhia a janela errada. Mantido
+  // como documentação do mecanismo; o teste acima é o que fixa o resultado.
   const inv=[
     {id:"spcx",tipo:"Ações",ticker:"SPCX",quantidade:8.985,precoMedio:172.02,valorAtual:1126.09,
      aportes:[{data:"2026-06-20",quantidade:7.99,preco:172.40}]},

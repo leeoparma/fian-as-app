@@ -2404,9 +2404,12 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
           // período inteiro sumir sem explicação em AU e US.
           <p style={{fontSize:12,color:D.text3}}>Sem foto utilizável de {perRV==="No mês"?"o mês anterior":"início do ano"} para comparar — a comparação precisa de um snapshot com a carteira detalhada, e o mais antigo disponível não tem esse detalhe. Aparece no próximo fechamento de mês.</p>
         :<div style={{display:"flex",flexDirection:"column",gap:2}}>
+          {/* Data ESTIMADA não pode ser exibida como conhecida. Com `em`, mostra
+              o dia; sem ele, mostra só o mês e diz que o dia foi estimado. */}
           {perRVSel!=="inicio"&&infoRV.desde&&<p style={{fontSize:10,color:D.text3,margin:0}}>
-            base: foto de {String(infoRV.desde).split("-").reverse().join("/")}
-            {infoRV.janelaExata===false&&" · dia exato da foto não registrado (snapshot antigo) — aportes do mês podem estar contados duas vezes"}
+            {infoRV.janelaExata
+              ?`base: foto de ${String(infoRV.desde).split("-").reverse().join("/")}`
+              :`base: foto de ${new Date(String(infoRV.desde)+"T12:00:00").toLocaleDateString("pt-BR",{month:"long",year:"numeric"})} · dia exato não registrado (snapshot anterior a 11/08/2026), estimado como fim do mês`}
           </p>}
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
           <span style={{fontSize:12,color:D.text3}}>{perRV==="Desde o início"?"Ganho acumulado":"Variação no período"}</span>

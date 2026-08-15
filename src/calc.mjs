@@ -925,12 +925,24 @@ export function rentabilidadeAcoes(investimentos,historico,hoje=new Date()){
   // foto anterior ao mês atual servia — inclusive de outro ano)
   const doAno=[...hist].filter(h=>h.mes>=`${ay}-01`&&h.mes<mesKeyAtual).sort((a,b)=>a.mes.localeCompare(b.mes))[0];
   const fimStr=_ymdC(hoje);
-  // Janela de aportes: começa no dia em que a foto foi tirada quando ele é
-  // conhecido (`em`, gravado a partir de 11/08/2026). Sem o campo, cai no dia 1
-  // — o comportamento antigo, que subtrai aportes já contidos na base. Isso é
-  // declarado em `janelaExata` para a tela poder avisar, em vez de mentir um
-  // número preciso. A correção completa é o Bloco E.
-  const janela=(h,fallback)=>h?.em||fallback;
+  // Janela de aportes — Bloco E (15/08/2026).
+  //
+  // Com `em` (foto gravada a partir de 11/08/2026): usa a data REAL da foto.
+  // Sem `em`: estima o FIM DO MÊS da foto, não o dia 1. Motivo: o snapshot de
+  // um mês é regravado a cada abertura do app durante aquele mês, então o que
+  // ficou guardado é a última abertura — tipicamente perto do fim. O dia 1 era
+  // a pior escolha possível: subtraía TODOS os aportes da janela de uma base
+  // que já os continha, e em "No ano" isso podia ser meio ano de aportes. Foi
+  // o que produziu o impossível −111,31% do US (aporte de 20/06 descontado de
+  // uma base de julho que valia menos que ele).
+  //
+  // O erro residual troca de sinal e de tamanho: o dia 1 SUBESTIMA o ganho sem
+  // limite; o fim do mês pode SUPERESTIMAR, só pelos aportes feitos entre a
+  // última abertura e o fim do mês — normalmente nenhum. `janelaExata` continua
+  // false para a tela avisar que é estimativa, e a data estimada NÃO é exibida
+  // como se fosse conhecida.
+  const fimDoMes=mes=>{const [y,m]=String(mes).split("-").map(Number);return _ymdC(new Date(y,m,0));};
+  const janela=(h,fallback)=>h?.em||(h?.mes?fimDoMes(h.mes):fallback);
   return {
     desdeInicio:rentabilidadeAcoesDesdeInicio(investimentos),
     mes:{...ganhoAcoesEntreSnapshots(investimentos,doMes?.ativos,janela(doMes,`${mesAnteriorKey}-01`),fimStr),

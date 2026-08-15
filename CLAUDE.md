@@ -41,6 +41,7 @@ App de controle financeiro pessoal usado por Leo e sua parceira Carol. Suporta p
 
 - Token brapi: o hardcode foi resolvido (código atual do Worker lê de `env.BRAPI_TOKEN`, secret no Cloudflare — confirmado ao versionar `worker/worker.js` em 25/07/2026). **Falta confirmar se o token antigo exposto foi ROTACIONADO** (gerar um novo no brapi e trocar o secret) — mover pra env não invalida o token que já vazou em versões antigas. Fora do alcance do Claude: painel do brapi + painel da Cloudflare.
 - **Bug latente no Worker (`/push-send`)**: achado ao versionar o código em 25/07/2026 — o endpoint usa `user.email` mas nunca define `user` (falta o `const user=await ur.json()` que o `/push-test` tem). Todo push de Splitwise via `/push-send` deve estar retornando 500 ("user is not defined") silenciosamente. Corrigir exige editar `worker/worker.js` E fazer o deploy manual no painel da Cloudflare.
+- **📅 SETEMBRO/2026 — conferir a janela exata do Bloco E.** Quando `2026-08` (que tem `em`: BR e AU gravaram `em=2026-08-15`) virar o mês anterior, o cálculo de "No mês" passa a usar a data REAL da foto em vez do fallback. **Conferir se o número muda para o valor ESPERADO, não apenas se muda** — a diferença entre corrigir e mascarar é justamente essa. O esperado se calcula assim: pegar os aportes do perfil entre o dia 1 do mês da foto e o `em` dela; o "No mês" deve subir exatamente pela soma desses aportes (`quantidade × preço`), porque eles deixam de ser descontados de uma base que já os contém. Os snapshots de julho dos três perfis NÃO têm `em` e nunca vão ter — julho continuará no fallback para sempre.
 - **⚠️ ABERTO E DISTORCENDO NÚMERO HOJE — dupla subtração de aportes em `ganhoAcoesEntreSnapshots`** (achado em 11/08/2026 ao montar o teste do ativo encerrado; NÃO corrigido, escopo de outra fase). A função desconta `aportesPeriodo` a partir de `${mesAnterior}-01`, mas o snapshot daquele mês é gravado **ao abrir o app**, ou seja, tipicamente no FIM do mês — então os aportes feitos durante o mês já estão dentro da base `ini.valorAtual` e são descontados de novo. Prova nos dados reais do Leo: o snapshot `2026-07` do BBAS3 já registra 385 unidades, e os dois aportes de julho (09/07 e 23/07, R$ 2.785,80 juntos) caem dentro da janela `2026-07-01 → hoje`. Afeta "No mês" e "No ano" da aba de rentabilidade de RV, sempre subestimando o ganho de quem aportou no período. Correção provável: a janela de aportes deve começar na data em que o snapshot foi tirado, não no dia 1 — o que exige gravar essa data no snapshot (`historico[]` hoje só guarda `mes`).
 
 ## Estado das features
@@ -117,21 +118,27 @@ Registrado ANTES dos Blocos C e E, que vão mexer nestes números de propósito.
 
 | perfil | métrica | **pós-D (base)** | pós-C | pós-E |
 |---|---|---|---|---|
-| **BR** | desdeInicio | **149,14** (0,88%) | 149,14 (sem venda) | |
-| | No mês | **−4.732,87** (−26,79%) ⚠️ | | |
-| | No ano | **−4.732,87** (−26,79%) ⚠️ | | |
-| | custo total | **17.034,03** | 17.034,03 · c/ custos **17.046,54** | |
+| **BR** | desdeInicio | **149,14** (0,88%) | 149,14 (sem venda) | **−1.081,09** (−5,24%) ¹ |
+| | No mês | **−4.732,87** (−26,79%) ⚠️ | — | **−1.715,57** (−9,71%) est. |
+| | No ano | **−4.732,87** (−26,79%) ⚠️ | — | **−1.715,57** (−9,71%) est. |
+| | custo total | **17.034,03** | 17.034,03 · c/ custos **17.046,54** | 20.637,06 · c/ custos 20.689,07 ¹ |
 | | composição | BBAS3 44,8 · CPLE3 25,6 · CXSE3 15,6 · ITUB4 13,6 · CSNA3 0,4 | | |
-| **AU** | desdeInicio | **39,71** (2,06%) | 39,71 (sem venda) | |
-| | No mês | **−882,11** (−44,11%) ⚠️ | | |
-| | No ano | **−882,11** (−44,11%) ⚠️ | | |
-| | custo total | **1.924,90** | 1.924,90 · c/ custos **1.936,90** | |
+| **AU** | desdeInicio | **39,71** (2,06%) | 39,71 (sem venda) | **11,95** (0,41%) ¹ |
+| | No mês | **−882,11** (−44,11%) ⚠️ | — | **−63,45** (−3,17%) est. |
+| | No ano | **−882,11** (−44,11%) ⚠️ | — | **−63,45** (−3,17%) est. |
+| | custo total | **1.924,90** | 1.924,90 · c/ custos **1.936,90** | 2.911,84 · c/ custos 2.929,84 ¹ |
 | | composição | NAB 67,1 · QBE 32,9 | | |
-| **US** | desdeInicio | **−418,06** (−25,06%) | −418,06 (sem venda) | |
-| | No mês | **127,70** (11,37%) ⚠️ | | |
-| | No ano | **−1.249,78** (−111,31%) ⚠️ | | |
-| | custo total | **1.668,56** | 1.668,56 (sem corretagem) | |
+| **US** | desdeInicio | **−418,06** (−25,06%) | −418,06 (sem venda) | **−418,06** (−25,06%) |
+| | No mês | **127,70** (11,37%) ⚠️ | — | **127,70** (11,37%) est. |
+| | No ano | **−1.249,78** (−111,31%) ⚠️ | — | **127,70** (11,37%) est. ✅ |
+| | custo total | **1.668,56** | 1.668,56 (sem corretagem) | 1.668,56 |
 | | composição | SPCX 90,1 · NVDA 9,9 | | |
+
+**Pós-E medido em 15/08/2026, commit do Bloco E, export `financas_2026-08-15-2.json`:** o **−111,31% do US virou +127,70**, exatamente o valor previsto no diagnóstico abaixo antes de o fix existir — corrigiu, não mascarou. "No mês" e "No ano" coincidem nos três perfis porque a única foto-base disponível é a de julho nos dois casos; a tela mostra ambos, com o rótulo da base em cada um.
+
+¹ BR e AU mudaram também em `desdeInicio` e `custo` por motivo alheio ao E: houve aportes reais entre 13 e 15/08 (ITUB4 no BR, NAB/QBE no AU). Não comparar essas linhas com a base como se fosse efeito do Bloco E.
+
+Os três perfis aparecem como **estimada** porque nenhum snapshot de julho tem `em` — e nunca terá. A janela exata só entra em setembro; ver a pendência de setembro/2026.
 
 **DIAGNÓSTICO DA CAUSA (13/08/2026, feito ANTES do Bloco E de propósito — para não confundir "corrigiu" com "mascarou"):** o −111,31% do US não vem da dupla subtração dos aportes do mês. Vem de algo mais amplo: `ganhoAcoesEntreSnapshots` assume que a foto-base foi tirada em `iniStr`, e ela não foi. A base é o snapshot de um MÊS, gravado num dia arbitrário, e em "No ano" pode ser **meses depois** de `iniStr`. Reconstrução termo a termo do US:
 
@@ -171,6 +178,22 @@ Caso real (achado em 11/08/2026): o snapshot `au 2026-06` traz `investimentos: 9
 A confusão é a mesma família do antipadrão do `||` abaixo — **campo ausente e valor zero sendo tratados como a mesma coisa**. Aqui a correção foi `_fotoUtil` exigir `Array.isArray(ativos) && ativos.length > 0`, e a tela declarar "sem foto utilizável" em vez de sumir.
 
 Ao acrescentar QUALQUER campo novo ao snapshot: registrar a data nesta tabela, e escrever no consumidor o que acontece quando o campo não está lá.
+
+## Diff de JSON: comparar com chaves ORDENADAS — REGRA
+
+**`JSON.stringify` ingênuo produz falso positivo em diff de dados.** A ordem das chaves de um objeto muda em qualquer round-trip `parse`/`stringify` — que é exatamente o que o save na nuvem, a restauração e o export fazem. Dois objetos com os mesmos valores viram strings diferentes.
+
+Comparar sempre com chaves ordenadas em **todas** as profundidades:
+
+```js
+const canon=o=>JSON.stringify(o,(k,v)=>
+  (v&&typeof v==="object"&&!Array.isArray(v))
+    ? Object.fromEntries(Object.keys(v).sort().map(x=>[x,v[x]]))
+    : v);
+canon(a)===canon(b)   // ← isto compara DADO
+```
+
+Caso real (15/08/2026, verificação do F2): o diff ingênuo acusou **6 campos alterados** — `br.transacoes`, `au.transacoes`, `au.recorrencias` e o `aportes` do ITUB4 entre eles. Comparação canônica: **zero mudanças reais**. O `aportes` tinha virado `{data,preco,corretagem,quantidade}` em vez de `{data,quantidade,preco,corretagem}`, mesmos valores. Reportar aquilo como corrupção teria disparado uma investigação inteira sobre nada.
 
 ## Auditoria de dados usa SEMPRE o export mais recente — REGRA
 
