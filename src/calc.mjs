@@ -499,6 +499,41 @@ export function valorAplicado(inv){
   return 0;
 }
 
+// ── Snapshot mensal: mesclar, nunca substituir ──────────────────────────────
+// PERDA DE DADO REAL (achada em 15/08/2026): o BR perdeu o snapshot de 2026-06
+// entre 16 e 20/07, e o de 2026-07 entre 10 e 14/08. AU e US nunca perderam.
+// Causa: o efeito de snapshot montava o array novo a partir do `allData`
+// capturado no closure (deps `[profileId,session]`, sem `allData`) e gravava
+// 3s depois POR CIMA do estado atual. Se a nuvem respondesse nesse intervalo
+// trazendo um histórico mais completo, ele era sobrescrito pela versão velha.
+// Só o BR porque é o perfil ativo no boot — o efeito dele corre junto com o
+// `supa.load()`; AU e US só disparam quando você troca de perfil, com o dado
+// já carregado.
+//
+// Esta função faz UNIÃO por mês: recebe várias listas e a foto nova, e nenhuma
+// foto existente em qualquer uma delas pode desaparecer. Entre candidatas do
+// mesmo mês, ganha a mais informativa — a que tem `ativos`, depois a que tem
+// `em`. A foto nova sempre vence no mês dela.
+export function mesclarSnapshot(listas,foto,{max=24}={}){
+  const porMes=new Map();
+  const melhor=(a,b)=>{
+    if(!a)return b;
+    if(!b)return a;
+    const na=(a.ativos||[]).length,nb=(b.ativos||[]).length;
+    if(na!==nb)return na>nb?a:b;              // mais detalhe ganha
+    if(!!a.em!==!!b.em)return a.em?a:b;       // com data da foto ganha
+    return a;
+  };
+  for(const lista of (listas||[])){
+    for(const h of (lista||[])){
+      if(!h||!h.mes)continue;
+      porMes.set(h.mes,melhor(porMes.get(h.mes),h));
+    }
+  }
+  if(foto&&foto.mes)porMes.set(foto.mes,foto); // a foto nova manda no mês dela
+  return [...porMes.values()].sort((a,b)=>a.mes.localeCompare(b.mes)).slice(-max);
+}
+
 // ── Vínculo provento ↔ ativo ────────────────────────────────────────────────
 // `dividendos[]` sempre casou por `ticker` string. Isso quebra em dois casos
 // reais: ticker reaproveitado (mudança de nome/incorporação) e duas posições

@@ -16,7 +16,7 @@ import {
   ocorrenciasSWAte,pendentesRecorrenciaSW,relatorioMensal,compararMeses,serieGastoAcumulado,extratoComSaldo,
 rentabilidadeRF,serieRentabilidadeRF,composicaoAcoes,
 rentabilidadeAcoesDesdeInicio,ganhoAcoesEntreSnapshots,rentabilidadeAcoes,isRFAtivo,calcValorLiquidoRF,
-estaEncerrado,soAtivos,soEncerrados,encerrarInvestimento,casaProvento,proventosDoAtivo,valorMercado,
+estaEncerrado,soAtivos,soEncerrados,encerrarInvestimento,casaProvento,proventosDoAtivo,valorMercado,mesclarSnapshot,
 validaInvestimento,corretagemDeCompra,TIPOS_RF,valorAplicado,
 INDICES_RATE,
 compoeFatorDiario,compoeFatorMensal,calcValorAtualRFHistorico,mesclarIPCAcomPrevia,compoeFatorMensalProRata,
@@ -1233,6 +1233,55 @@ test("ganhoAcoesEntreSnapshots: aporte ANTERIOR à foto é descontado — defeit
   const certo=ganhoAcoesEntreSnapshots(inv,fotoJulho,"2026-07-28","2026-08-13");
   assert.equal(Math.round(certo.valor*100)/100,127.70);
   assert.equal(Math.round((r.valor+1377.48)*100)/100,127.70);  // a conta fecha
+});
+
+// ── F1: a corrida que apagava snapshot (perda real, 15/08/2026) ─────────────
+const FOTO_AGO={mes:"2026-08",em:"2026-08-14",patrimonio:50000,ativos:[{id:"a",valorAtual:100}]};
+test("mesclarSnapshot: reproduz a corrida — dado VELHO no closure não apaga o novo", ()=>{
+  // Cenário exato da perda: o efeito capturou o histórico ANTES da nuvem
+  // responder (só tinha agosto) e ia gravar 3s depois por cima do estado atual,
+  // que já tinha julho. O comportamento antigo era
+  //   [...histVelho.filter(h=>h.mes!==mes), foto]
+  // e julho sumia. A união preserva.
+  const atual=[{mes:"2026-07",patrimonio:48000,ativos:[{id:"a",valorAtual:90}]},
+               {mes:"2026-08",patrimonio:49000,ativos:[{id:"a",valorAtual:95}]}];
+  const velhoDoClosure=[{mes:"2026-08",patrimonio:49000,ativos:[{id:"a",valorAtual:95}]}];
+  const r=mesclarSnapshot([atual,velhoDoClosure],FOTO_AGO);
+  assert.deepEqual(r.map(h=>h.mes),["2026-07","2026-08"]);   // julho SOBREVIVE
+  assert.equal(r.find(h=>h.mes==="2026-07").patrimonio,48000);
+  assert.equal(r.find(h=>h.mes==="2026-08").em,"2026-08-14"); // a foto nova venceu
+  // e o comportamento ANTIGO, para deixar o defeito explícito no teste:
+  const antigo=[...velhoDoClosure.filter(h=>h.mes!=="2026-08"),FOTO_AGO];
+  assert.equal(antigo.length,1);
+  assert.equal(antigo.find(h=>h.mes==="2026-07"),undefined);  // era assim que julho morria
+});
+test("mesclarSnapshot: mês só existente na lista VELHA também sobrevive", ()=>{
+  // o inverso: se a nuvem trouxe um histórico PODADO e o closure tem o mês,
+  // a união recupera em vez de aceitar a poda
+  const r=mesclarSnapshot([[{mes:"2026-08",ativos:[]}],[{mes:"2026-06",patrimonio:1,ativos:[{id:"x"}]}]],FOTO_AGO);
+  assert.deepEqual(r.map(h=>h.mes),["2026-06","2026-08"]);
+});
+test("mesclarSnapshot: entre duplicatas do mesmo mês, ganha a mais informativa", ()=>{
+  const semAtivos={mes:"2026-07",patrimonio:1,ativos:[]};
+  const comAtivos={mes:"2026-07",patrimonio:2,ativos:[{id:"a"},{id:"b"}]};
+  assert.equal(mesclarSnapshot([[semAtivos],[comAtivos]],null)[0].patrimonio,2);
+  assert.equal(mesclarSnapshot([[comAtivos],[semAtivos]],null)[0].patrimonio,2); // ordem não importa
+  // empate em ativos: ganha quem tem `em`
+  const semEm={mes:"2026-07",patrimonio:1,ativos:[{id:"a"}]};
+  const comEm={mes:"2026-07",patrimonio:2,em:"2026-07-28",ativos:[{id:"a"}]};
+  assert.equal(mesclarSnapshot([[semEm],[comEm]],null)[0].em,"2026-07-28");
+});
+test("mesclarSnapshot: teto de 24 corta o MAIS ANTIGO, e a foto nova nunca cai", ()=>{
+  const muitos=[];for(let i=0;i<30;i++){const m=`${2024+Math.floor(i/12)}-${String(i%12+1).padStart(2,"0")}`;muitos.push({mes:m,ativos:[{id:"a"}]});}
+  const r=mesclarSnapshot([muitos],FOTO_AGO);
+  assert.equal(r.length,24);
+  assert.equal(r[r.length-1].mes,"2026-08");
+  assert.ok(r[0].mes>muitos[0].mes);
+});
+test("mesclarSnapshot: lixo não derruba nem inventa mês", ()=>{
+  assert.deepEqual(mesclarSnapshot(null,null),[]);
+  assert.deepEqual(mesclarSnapshot([null,[null,{semMes:1}]],null),[]);
+  assert.equal(mesclarSnapshot([[{mes:"2026-07",ativos:[]}]],{semMes:1}).length,1);
 });
 test("composicaoAcoes: carteira vazia devolve lista vazia sem dividir por zero", ()=>{
   assert.deepEqual(composicaoAcoes([]),[]);

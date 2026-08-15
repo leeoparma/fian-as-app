@@ -9,7 +9,7 @@ import {
   calcSaldos as calcSaldosPure, calcDividas as calcDividasPure, totaisPorPessoa as totaisPorPessoaPure,
   salarioMensal, converteMoeda, taxaMensalSim, simularJuros,
   semFotos, mesclarFotos, extraiFotosBase64, projetarFluxo,
-  soAtivos, soEncerrados, encerrarInvestimento, casaProvento, proventosDoAtivo, valorMercado,
+  soAtivos, soEncerrados, encerrarInvestimento, casaProvento, proventosDoAtivo, valorMercado, mesclarSnapshot,
   validaInvestimento, corretagemDeCompra, valorAplicado, addDias, marcarDuplicatas, montarAgendaPush,
   compraAcao, vendaAcao, pendentesRecorrenciaSW, relatorioMensal, compararMeses, serieGastoAcumulado, extratoComSaldo,
   totalPagoFatura, calcFaturaPagamentos, posicaoRV,
@@ -5495,8 +5495,22 @@ function AppInner(){
       // subtrai duas vezes o que já está dentro da base. Quem ler DEVE tratar a
       // ausência do campo como caso explícito — nunca assumir dia 1.
       const emStr=`${hojeD.getFullYear()}-${String(hojeD.getMonth()+1).padStart(2,"0")}-${String(hojeD.getDate()).padStart(2,"0")}`;
-      const novoHist=[...hist.filter(h=>h.mes!==mesKey),{mes:mesKey,em:emStr,patrimonio:pat,bancos:Math.round(tB*100)/100,investimentos:Math.round(tI*100)/100,ativos:soAtivos(p.investimentos).map(i=>({id:i.id,ticker:i.ticker||null,descricao:i.descricao||null,quantidade:i.quantidade||null,valorAtual:Math.round(valorMercado(i)*100)/100}))}].sort((a,b)=>a.mes.localeCompare(b.mes)).slice(-24);
-      setData(d=>({...d,historico:novoHist}));
+      // ⚠️ TUDO recalculado DE DENTRO do updater, a partir de `d` (o estado
+      // ATUAL do perfil), não do `p` que veio do closure. Era essa a origem da
+      // perda: o array era montado com o histórico capturado 3s antes e
+      // gravado por cima do atual, apagando fotos que a nuvem tinha trazido
+      // nesse intervalo. O `p` do closure ainda entra na união como segunda
+      // lista — se ele tiver um mês que o atual não tem, o mês sobrevive.
+      setData(d=>{
+        const bancos=d.bancos||[],txs0=d.transacoes||[];
+        const tBd=bancos.reduce((acc,b)=>{const txs=txs0.filter(t=>t.bancoId===b.id);return acc+(b.saldoInicial||0)+txs.filter(t=>t.tipo==="receita").reduce((a,x)=>a+x.valor,0)-txs.filter(t=>t.tipo==="despesa").reduce((a,x)=>a+x.valor,0);},0);
+        const vivos=soAtivos(d.investimentos);
+        const tId=vivos.reduce((a,b)=>a+valorMercado(b),0);
+        const foto={mes:mesKey,em:emStr,patrimonio:Math.round((tBd+tId)*100)/100,
+          bancos:Math.round(tBd*100)/100,investimentos:Math.round(tId*100)/100,
+          ativos:vivos.map(i=>({id:i.id,ticker:i.ticker||null,descricao:i.descricao||null,quantidade:i.quantidade||null,valorAtual:Math.round(valorMercado(i)*100)/100}))};
+        return {...d,historico:mesclarSnapshot([d.historico,hist],foto)};
+      });
       snapDone.current=true;
     },3000);
     return()=>clearTimeout(t);
