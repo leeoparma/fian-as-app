@@ -136,7 +136,37 @@ Registrado ANTES dos Blocos C e E, que vão mexer nestes números de propósito.
 
 **Pós-E medido em 15/08/2026, commit do Bloco E, export `financas_2026-08-15-2.json`:** o **−111,31% do US virou +127,70**, exatamente o valor previsto no diagnóstico abaixo antes de o fix existir — corrigiu, não mascarou. "No mês" e "No ano" coincidem nos três perfis porque a única foto-base disponível é a de julho nos dois casos; a tela mostra ambos, com o rótulo da base em cada um.
 
-¹ BR e AU mudaram também em `desdeInicio` e `custo` por motivo alheio ao E: houve aportes reais entre 13 e 15/08 (ITUB4 no BR, NAB/QBE no AU). Não comparar essas linhas com a base como se fosse efeito do Bloco E.
+¹ **Decomposição aritmética do movimento de BR e AU (15/08/2026)** — atribuir a "aportes reais" por plausibilidade não bastava; segue a conta fechada, comparando `financas_2026-08-10.json` (pós-D) com `financas_2026-08-15-2.json` (pós-E).
+
+Identidade usada: `desdeInicio = valorAtual − custo + realizado`, e `realizado = 0` (não há vendas). Logo `ΔdesdeInicio = Δvalor − Δcusto`.
+
+**BR — ΔdesdeInicio = −1.230,23** (149,14 → −1.081,09)
+
+| ativo | un novas | Σ(q×p) dos aportes | Δcusto | novas×preço | antigas×Δpreço | Δvalor |
+|---|---|---|---|---|---|---|
+| BBAS3 | +49 | 946,08 | 945,28 | 900,62 | −623,70 | 276,92 |
+| ITUB4 | +44 | 1.695,72 | 1.695,35 | 1.716,00 | −108,87 | 1.607,13 |
+| CPLE3 | +70 | 962,50 | 962,40 | 958,30 | −291,00 | 667,30 |
+| CXSE3 | 0 | — | 0,00 | 0,00 | −177,80 | −177,80 |
+| CSNA3 | 0 | — | 0,00 | 0,00 | −0,75 | −0,75 |
+| **total** | | **3.604,30** | **3.603,03** | **3.574,92** | **−1.202,12** | **2.372,80** |
+
+`novas×preço + antigas×Δpreço = 2.372,80`, idêntico ao Δvalor — a decomposição fecha com resíduo **zero**.
+
+**A causa NÃO são os aportes.** Separando:
+- **compras:** −28,11 (comprou por 3.603,03 o que hoje vale 3.574,92 — o preço caiu depois da compra)
+- **preço nas ações que já tinha:** −1.202,12
+- soma: −1.230,23 ✅
+
+**98% da queda é variação de mercado na posição antiga.** Os aportes contribuíram com −28,11, ou 2%.
+
+Três correções ao que se supunha: o aporte de ITUB4 não foi de 14 unidades e sim de **44** (30 em 14/08 + 14 em 15/08); **BBAS3 e CPLE3 também receberam aporte**, não só o ITUB4; e o custo subiu quase exatamente o que o valor subiu pelas ações novas (3.603,03 contra 3.574,92) — a hipótese de "custo subiu sem o valor acompanhar" **não se confirma**.
+
+**AU — ΔdesdeInicio = −27,76** (39,71 → 11,95): QBE +19 un e NAB +13 un, Δcusto 986,94, novas×preço 976,52, antigas×Δpreço −17,34. Mesmo padrão, escala menor.
+
+Dois detalhes de método:
+- O resíduo de **−1,27** entre `Σ(q×p)` e `Δcusto` no BR **não é corretagem** — é arredondamento do `precoMedio` a 2 casas, ~0,3 por ativo. A corretagem não entra em `posicaoRV.custo`; ela vive em `custoComCustos`, que subiu 12,51 → 52,01 (Δ 39,50) no BR e 12,00 → 18,00 no AU.
+- O **US é o controle limpo**: sem movimento no período, `desdeInicio` e `custo` ficaram idênticos (−418,06 e 1.668,56). Só "No ano" mudou. É o que isola o efeito do Bloco E de tudo o mais.
 
 Os três perfis aparecem como **estimada** porque nenhum snapshot de julho tem `em` — e nunca terá. A janela exata só entra em setembro; ver a pendência de setembro/2026.
 
@@ -178,6 +208,19 @@ Caso real (achado em 11/08/2026): o snapshot `au 2026-06` traz `investimentos: 9
 A confusão é a mesma família do antipadrão do `||` abaixo — **campo ausente e valor zero sendo tratados como a mesma coisa**. Aqui a correção foi `_fotoUtil` exigir `Array.isArray(ativos) && ativos.length > 0`, e a tela declarar "sem foto utilizável" em vez de sumir.
 
 Ao acrescentar QUALQUER campo novo ao snapshot: registrar a data nesta tabela, e escrever no consumidor o que acontece quando o campo não está lá.
+
+## Correção de número: PREVISÃO ESCRITA ANTES DO FIX — REGRA
+
+**Ao corrigir um número errado, escrever antes o valor esperado depois da correção, com a aritmética que o produz.** Sem isso não há como distinguir *corrigir* de *mascarar*: o sintoma some nos dois casos, e "o número absurdo desapareceu" é evidência fraca — qualquer mudança que zere um termo faz o absurdo sumir.
+
+O procedimento:
+1. Reconstruir o cálculo **termo a termo** até achar qual parcela produz o valor impossível.
+2. Escrever a previsão como conta: *"removendo esse termo, X + Y = Z"*, e registrar Z **no CLAUDE.md ou no teste**, com data, antes de tocar no código.
+3. Depois do fix, conferir contra Z. **Bateu exatamente → corrigiu. Deu outro número → parar e reportar**, mesmo que o novo número pareça razoável.
+
+Caso real (Bloco E, 13–15/08/2026): "No ano" do US marcava **−111,31%**, impossível para posição comprada. A reconstrução mostrou o termo culpado — um aporte de 20/06 de R$ 1.377,48 sendo descontado de uma foto-base de julho que valia R$ 1.011,26, ou seja, subtraindo mais que a base inteira. Previsão registrada antes do fix: `−1.249,78 + 1.377,48 = +127,70`, e a observação de que esse valor coincidiria com o "No mês" já exibido. Depois do fix: **+127,70**, na tela e no teste. O teste que fixava o valor errado foi convertido em teste do valor previsto, mantendo o antigo como documentação do mecanismo.
+
+Vale para qualquer correção de valor exibido — não para refactor sem efeito numérico, onde o critério é o oposto (Δ zero verificado antes de aplicar, como no Bloco D).
 
 ## Diff de JSON: comparar com chaves ORDENADAS — REGRA
 
