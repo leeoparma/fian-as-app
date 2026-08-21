@@ -18,6 +18,7 @@ rentabilidadeRF,serieRentabilidadeRF,composicaoAcoes,
 rentabilidadeAcoesDesdeInicio,ganhoAcoesEntreSnapshots,rentabilidadeAcoes,isRFAtivo,calcValorLiquidoRF,
 estaEncerrado,soAtivos,soEncerrados,encerrarInvestimento,casaProvento,proventosDoAtivo,valorMercado,mesclarSnapshot,
 validaInvestimento,corretagemDeCompra,TIPOS_RF,valorAplicado,
+serieProventos,resumoProventos,yieldOnCost,yieldCarteira,validaProvento,mesesEmCarteira,
 INDICES_RATE,
 compoeFatorDiario,compoeFatorMensal,calcValorAtualRFHistorico,mesclarIPCAcomPrevia,compoeFatorMensalProRata,
 posicaoRV,
@@ -1315,6 +1316,146 @@ test("mesclarSnapshot: lixo não derruba nem inventa mês", ()=>{
   assert.deepEqual(mesclarSnapshot(null,null),[]);
   assert.deepEqual(mesclarSnapshot([null,[null,{semMes:1}]],null),[]);
   assert.equal(mesclarSnapshot([[{mes:"2026-07",ativos:[]}]],{semMes:1}).length,1);
+});
+
+// ── G1: painel de proventos (21/08/2026) ────────────────────────────────────
+const HJ=new Date("2026-08-21T12:00:00");
+const DIVS=[
+  {id:"d1",ticker:"ITUB4",investimentoId:"itub",valor:0.85,data:"2026-08-03",tipo:"Dividendo"},
+  {id:"d2",ticker:"BBAS3",investimentoId:"bbas",valor:120,data:"2026-07-10",tipo:"Dividendo"},
+  {id:"d3",ticker:"BBAS3",investimentoId:"bbas",valor:80,data:"2026-07-25",tipo:"JCP",irRetido:14.12},
+  {id:"d4",ticker:"BBAS3",investimentoId:"bbas",valor:100,data:"2026-06-10",tipo:"Dividendo"},
+];
+const CART_P=[
+  {id:"bbas",tipo:"Ações",ticker:"BBAS3",quantidade:385,precoMedio:20,data:"2026-03-01",valorAtual:8000},
+  {id:"itub",tipo:"Ações",ticker:"ITUB4",quantidade:57,precoMedio:40,data:"2026-05-27",valorAtual:2300},
+  {id:"cdb", tipo:"Renda Fixa",descricao:"CDB",valorInvestido:5000,data:"2026-01-01"},
+];
+
+test("serieProventos: só meses FECHADOS — agosto (corrente) fica de fora", ()=>{
+  // Em 21/08 o mês tem 2/3. Incluí-lo no divisor puxaria a média por motivo de
+  // calendário, não de comportamento dos proventos.
+  const s=serieProventos(DIVS,{hoje:HJ});
+  assert.deepEqual(s.map(x=>x.mes),["2026-06","2026-07"]);
+  assert.equal(s.find(x=>x.mes==="2026-07").total,200);
+  assert.equal(s.find(x=>x.mes==="2026-07").n,2);
+  assert.deepEqual(s.find(x=>x.mes==="2026-07").porTipo,{Dividendo:120,JCP:80});
+});
+test("serieProventos: janela para no primeiro provento, não inventa meses vazios antes", ()=>{
+  const s=serieProventos(DIVS,{hoje:HJ});
+  assert.equal(s.length,2);                       // não 12
+  assert.equal(s[0].mes,"2026-06");               // o primeiro provento é de junho
+  assert.deepEqual(serieProventos([],{hoje:HJ}),[]);
+  assert.deepEqual(serieProventos(null,{hoje:HJ}),[]);
+});
+test("serieProventos: mês SEM provento dentro da janela entra com zero", ()=>{
+  const comBuraco=[{id:"a",ticker:"X",valor:10,data:"2026-05-10"},{id:"b",ticker:"X",valor:10,data:"2026-07-10"}];
+  const s=serieProventos(comBuraco,{hoje:HJ});
+  assert.deepEqual(s.map(x=>x.mes),["2026-05","2026-06","2026-07"]);
+  assert.equal(s.find(x=>x.mes==="2026-06").total,0);   // buraco é buraco, não some
+});
+test("resumoProventos: média divide por meses FECHADOS, não por 12", ()=>{
+  const r=resumoProventos(DIVS,CART_P,{hoje:HJ});
+  assert.equal(r.mesesFechados,2);
+  assert.equal(r.totalJanela,300);                // 100 (jun) + 200 (jul)
+  assert.equal(r.media,150);                      // 300 ÷ 2, NÃO 300 ÷ 12 = 25
+  assert.equal(r.tendenciaConfiavel,false);       // 2 meses não é tendência
+  assert.equal(resumoProventos([...DIVS,{id:"z",ticker:"X",valor:1,data:"2026-05-01"}],CART_P,{hoje:HJ}).tendenciaConfiavel,true);
+});
+test("resumoProventos: mês corrente à parte e marcado como incompleto", ()=>{
+  const r=resumoProventos(DIVS,CART_P,{hoje:HJ});
+  assert.equal(r.mesCorrente.mes,"2026-08");
+  assert.equal(r.mesCorrente.total,0.85);
+  assert.equal(r.mesCorrente.incompleto,true);
+  assert.deepEqual(r.mesCorrente.porAtivo,[{ticker:"ITUB4",total:0.85,n:1}]);
+  assert.ok(!r.serie.some(x=>x.mes==="2026-08"),"agosto não pode estar na série");
+  assert.equal(r.totalGeral,300.85);              // total inclui o mês corrente
+  assert.equal(r.irRetidoTotal,14.12);            // só o JCP retém
+});
+
+test("mesesEmCarteira: conta ciclos inteiros, não frações", ()=>{
+  assert.equal(mesesEmCarteira({data:"2026-03-01"},HJ),5);   // 01/03 → 21/08
+  assert.equal(mesesEmCarteira({data:"2026-08-22"},HJ),0);   // dia ainda não fechou
+  assert.equal(mesesEmCarteira({data:"2025-08-21"},HJ),12);  // exatamente 12
+  assert.equal(mesesEmCarteira({data:"2025-08-22"},HJ),11);  // um dia a menos
+  assert.equal(mesesEmCarteira({},HJ),null);
+});
+test("yieldOnCost: abaixo de 12 meses NÃO anualiza e declara a janela", ()=>{
+  const y=yieldOnCost(CART_P[0],DIVS,CART_P,{hoje:HJ});
+  assert.equal(y.acumulado,300);                  // 100+120+80
+  assert.equal(y.custo,7700);                     // qtd×PM, não campo bruto
+  assert.equal(y.pct,3.9);                        // 300/7700 — acumulado, não taxa anual
+  assert.equal(y.anualizado,false);
+  assert.equal(y.janela,"5 meses");
+  assert.equal(y.desde,"2026-03-01");
+  // anualizar daria 3,9 × 12/5 = 9,36% — número inventado, que este teste barra
+  assert.notEqual(y.pct,9.36);
+});
+test("yieldOnCost: com 12+ meses usa a janela móvel de 12 meses", ()=>{
+  const velho={id:"v",tipo:"Ações",ticker:"V",quantidade:100,precoMedio:10,data:"2024-01-01",valorAtual:1200};
+  const divs=[{id:"a",ticker:"V",investimentoId:"v",valor:50,data:"2026-03-01"},
+              {id:"b",ticker:"V",investimentoId:"v",valor:70,data:"2025-01-01"}];  // fora dos 12m
+  const y=yieldOnCost(velho,divs,[velho],{hoje:HJ});
+  assert.equal(y.anualizado,true);
+  assert.equal(y.janela,"12 meses");
+  assert.equal(y.acumulado,50);                   // o de 2025 fica fora
+  assert.equal(y.pct,5);
+});
+test("yieldOnCost: ativo sem provento é marcado, não escondido", ()=>{
+  const y=yieldOnCost(CART_P[1],[],CART_P,{hoje:HJ});
+  assert.equal(y.acumulado,0);
+  assert.equal(y.pct,0);
+  assert.equal(y.semProvento,true);
+});
+
+test("yieldCarteira: denominador só de posições VIVAS de renda variável", ()=>{
+  const y=yieldCarteira(CART_P,DIVS,{hoje:HJ});
+  assert.equal(y.custo,9980);                     // 7700 + 2280 — o CDB fica fora
+  assert.equal(y.ativosTotal,2);
+  assert.equal(y.acumulado,300.85);
+  assert.equal(y.linhas[0].ticker,"BBAS3");       // ordenado por acumulado desc
+});
+test("yieldCarteira: SUBESTIMADO enquanto houver ativo novo — e diz quantos", ()=>{
+  // O ponto que a tela precisa declarar: ativo comprado em julho já está no
+  // denominador com o custo cheio, mas ainda não teve ciclo de pagamento. Ler
+  // "0,1%" como "a carteira rende mal" seria erro de leitura induzido pelo app.
+  const y=yieldCarteira(CART_P,DIVS,{hoje:HJ});
+  assert.equal(y.subestimado,true);
+  assert.equal(y.ativosNovos,2);                  // ambos com <12 meses
+  assert.equal(y.primeiraEntrada,"2026-03-01");
+  assert.equal(y.ultimaEntrada,"2026-05-27");
+  // com todos maduros, deixa de avisar
+  const maduros=CART_P.map(i=>({...i,data:"2020-01-01"}));
+  assert.equal(yieldCarteira(maduros,DIVS,{hoje:HJ}).subestimado,false);
+});
+test("yieldCarteira: encerrado ENTRA na série e FICA FORA do yield", ()=>{
+  const comEnc=[...CART_P,{id:"morta",tipo:"Ações",ticker:"MORTA3",encerrado:true,dataEncerramento:"2026-07-31",
+    quantidade:0,valorInvestido:0,valor:0,valorAtual:0,precoMedio:20}];
+  const divs=[...DIVS,{id:"dm",ticker:"MORTA3",investimentoId:"morta",valor:45,data:"2026-06-15",tipo:"Dividendo"}];
+  const y=yieldCarteira(comEnc,divs,{hoje:HJ});
+  assert.equal(y.ativosTotal,2);                  // a encerrada não vira linha
+  assert.equal(y.acumulado,300.85);               // nem entra no numerador
+  assert.equal(y.custo,9980);                     // nem no denominador
+  const r=resumoProventos(divs,comEnc,{hoje:HJ});
+  assert.equal(r.serie.find(x=>x.mes==="2026-06").total,145);  // 100 + 45 — ENTRA na série
+  assert.equal(r.deEncerrados,45);                // e aparece à parte, não some
+  assert.equal(r.totalGeral,345.85);
+});
+
+test("validaProvento: data futura é agendamento, e a mensagem diz onde lançar", ()=>{
+  const r=validaProvento({data:"2026-09-01",valor:10},{hoje:HJ});
+  assert.equal(r.campo,"data");
+  assert.match(r.mensagem,/agendamento/);
+  assert.match(r.mensagem,/\+ Agendar/);
+  assert.equal(validaProvento({data:"2026-08-21",valor:10},{hoje:HJ}),null);  // hoje passa
+  assert.equal(validaProvento({data:"2026-08-20",valor:10},{hoje:HJ}),null);
+});
+test("validaProvento: data inválida e valor não-positivo são barrados", ()=>{
+  assert.equal(validaProvento({data:"",valor:10},{hoje:HJ}).campo,"data");
+  assert.equal(validaProvento({data:"03/08/2026",valor:10},{hoje:HJ}).campo,"data");
+  assert.equal(validaProvento({data:"2026-08-01",valor:0},{hoje:HJ}).campo,"valor");
+  assert.equal(validaProvento({data:"2026-08-01",valor:-5},{hoje:HJ}).campo,"valor");
+  assert.match(validaProvento({data:"2026-08-01",valor:0},{hoje:HJ}).mensagem,/líquido de IR/);
 });
 test("composicaoAcoes: carteira vazia devolve lista vazia sem dividir por zero", ()=>{
   assert.deepEqual(composicaoAcoes([]),[]);

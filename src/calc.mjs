@@ -565,6 +565,146 @@ export function proventosDoAtivo(inv,dividendos,investimentos){
   const itens=(dividendos||[]).filter(d=>{const m=casaProvento(d,investimentos);return m&&m.id===inv.id;});
   return {itens,total:Math.round(itens.reduce((a,d)=>a+(d.valor||0),0)*100)/100};
 }
+// ── Proventos: série mensal, média e yield on cost ──────────────────────────
+// DECISÃO DE DESENHO (21/08/2026): provento NÃO vira lançamento de receita em
+// transacoes[]. O dinheiro fica na corretora e não sai do patrimônio de
+// investimentos — lançar como receita contaria o mesmo dinheiro duas vezes e
+// inflaria a Sobra/Poupança do mês. Proventos vivem só em dividendos[].
+//
+// `valor` é SEMPRE o LÍQUIDO recebido (após IR). `irRetido` é opcional e serve
+// para reconstruir o bruto — no JCP é o único jeito, porque a retenção de 15%
+// acontece na fonte. Totais e yield usam o líquido, nunca o bruto.
+const _mesDe=d=>String(d||"").slice(0,7);
+export const _mesKey=dt=>`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}`;
+const _mesAnterior=m=>{const[y,mm]=m.split("-").map(Number);return mm===1?`${y-1}-12`:`${y}-${String(mm-1).padStart(2,"0")}`;};
+
+// Provento com data futura é AGENDAMENTO, não recebimento. Sem esta guarda ele
+// entra na série do mês errado e contamina a média.
+export function validaProvento(div,{hoje=new Date()}={}){
+  const d=String(div?.data||"");
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(d))return {campo:"data",mensagem:"Data de pagamento inválida. Use o seletor de data."};
+  if(d>_ymdC(hoje))return {campo:"data",
+    mensagem:`Provento com data futura (${d.split("-").reverse().join("/")}) é agendamento, não recebimento. Use "+ Agendar" em "A receber" — quando cair na conta, marque "✓ Recebi".`};
+  if(!Number.isFinite(Number.parseFloat(div?.valor))||Number.parseFloat(div.valor)<=0)
+    return {campo:"valor",mensagem:"Informe o valor recebido, líquido de IR."};
+  return null;
+}
+
+// Série mensal de proventos, SOMENTE meses FECHADOS.
+// O mês corrente fica de fora de propósito: em 21/08 ele tem 2/3 do mês, e
+// incluí-lo no divisor da média puxaria a média para baixo por um motivo que
+// não é o comportamento dos proventos, é o calendário. Ele é reportado à parte.
+export function serieProventos(dividendos,{hoje=new Date(),meses=12}={}){
+  const validos=(dividendos||[]).filter(d=>d&&/^\d{4}-\d{2}-\d{2}$/.test(String(d.data)));
+  if(!validos.length)return [];
+  const ultimoFechado=_mesAnterior(_mesKey(hoje));
+  const primeiro=validos.map(d=>_mesDe(d.data)).sort()[0];
+  const out=[];
+  let m=ultimoFechado;
+  while(out.length<meses&&m>=primeiro){out.push(m);m=_mesAnterior(m);}
+  return out.reverse().map(mes=>{
+    const doMes=validos.filter(d=>_mesDe(d.data)===mes);
+    const porTipo={};
+    for(const d of doMes)porTipo[d.tipo||"Dividendo"]=Math.round(((porTipo[d.tipo||"Dividendo"]||0)+(d.valor||0))*100)/100;
+    return {mes,total:Math.round(doMes.reduce((a,d)=>a+(d.valor||0),0)*100)/100,n:doMes.length,porTipo};
+  });
+}
+
+export function resumoProventos(dividendos,investimentos,{hoje=new Date(),meses=12}={}){
+  const validos=(dividendos||[]).filter(d=>d&&/^\d{4}-\d{2}-\d{2}$/.test(String(d.data)));
+  const serie=serieProventos(validos,{hoje,meses});
+  const mesAtual=_mesKey(hoje);
+  const doMes=validos.filter(d=>_mesDe(d.data)===mesAtual);
+  const porAtivo={};
+  for(const d of doMes){
+    const k=String(d.ticker||"—").toUpperCase();
+    porAtivo[k]=porAtivo[k]||{ticker:k,total:0,n:0};
+    porAtivo[k].total=Math.round((porAtivo[k].total+(d.valor||0))*100)/100;
+    porAtivo[k].n++;
+  }
+  const somaSerie=serie.reduce((a,x)=>a+x.total,0);
+  // ⚠️ divisor = meses FECHADOS na janela, nunca 12 fixo. Com 1 provento em
+  // agosto e 1 mês fechado, a média é 0,85 — não 0,07.
+  const media=serie.length?Math.round(somaSerie/serie.length*100)/100:null;
+  // Ativo encerrado ENTRA aqui: você recebeu o dinheiro, e a série é registro
+  // de caixa histórico. Ele só fica de fora do yield (ver yieldCarteira).
+  const idsEncerrados=new Set((investimentos||[]).filter(i=>i&&i.encerrado).map(i=>i.id));
+  const deEncerrados=Math.round(validos.filter(d=>{const m=casaProvento(d,investimentos);return m&&idsEncerrados.has(m.id);})
+    .reduce((a,d)=>a+(d.valor||0),0)*100)/100;
+  return {
+    serie,
+    mesCorrente:{mes:mesAtual,total:Math.round(doMes.reduce((a,d)=>a+(d.valor||0),0)*100)/100,
+                 n:doMes.length,porAtivo:Object.values(porAtivo).sort((a,b)=>b.total-a.total),incompleto:true},
+    media,mesesFechados:serie.length,
+    // com 1-2 meses fechados a média não indica tendência — a tela DEVE dizer
+    tendenciaConfiavel:serie.length>=3,
+    totalJanela:Math.round(somaSerie*100)/100,
+    totalGeral:Math.round(validos.reduce((a,d)=>a+(d.valor||0),0)*100)/100,
+    deEncerrados,
+    irRetidoTotal:Math.round(validos.reduce((a,d)=>a+(Number.isFinite(d.irRetido)?d.irRetido:0),0)*100)/100,
+  };
+}
+
+// Meses inteiros entre a entrada do ativo e hoje. Usa aritmética de calendário,
+// não divisão por 30,44 — "2 meses e meio" não é o que interessa, e sim se já
+// houve 12 ciclos.
+export function mesesEmCarteira(inv,hoje=new Date()){
+  const d=String(inv?.data||"");
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(d))return null;
+  const [y,m,dd]=d.split("-").map(Number);
+  let n=(hoje.getFullYear()-y)*12+(hoje.getMonth()+1-m);
+  if(hoje.getDate()<dd)n--;
+  return Math.max(0,n);
+}
+
+// Yield on cost de UM ativo. NUNCA anualiza abaixo de 12 meses: multiplicar 2
+// meses por 6 multiplica o ruído junto, e um único pagamento trimestral dentro
+// da janela projetaria como se fosse mensal. Abaixo de 12 meses mostra o
+// acumulado REAL com a janela declarada no próprio rótulo.
+export function yieldOnCost(inv,dividendos,investimentos,{hoje=new Date()}={}){
+  const custo=posicaoRV(inv).custo;
+  const meses=mesesEmCarteira(inv,hoje);
+  const doze=meses!=null&&meses>=12;
+  const todos=proventosDoAtivo(inv,dividendos,investimentos).itens;
+  const itens=doze
+    ?todos.filter(d=>{const lim=new Date(hoje);lim.setFullYear(lim.getFullYear()-1);return String(d.data)>=_ymdC(lim);})
+    :todos;
+  const acumulado=Math.round(itens.reduce((a,d)=>a+(d.valor||0),0)*100)/100;
+  return {
+    acumulado,custo,meses,
+    pct:custo>0?Math.round(acumulado/custo*100*100)/100:null,
+    janela:doze?"12 meses":(meses==null?"janela desconhecida":`${meses} ${meses===1?"mês":"meses"}`),
+    desde:doze?null:(inv?.data||null),
+    anualizado:doze,          // false = o número é acumulado, não taxa anual
+    semProvento:acumulado===0,
+  };
+}
+
+// Yield da carteira. Denominador = só posições VIVAS de renda variável: yield
+// on cost é propriedade de algo que você TEM. O que veio de posição encerrada
+// aparece à parte, para o dinheiro não sumir do relatório.
+export function yieldCarteira(investimentos,dividendos,{hoje=new Date()}={}){
+  const vivos=soAtivos(investimentos).filter(i=>!isRFAtivo(i));
+  const custo=Math.round(vivos.reduce((a,i)=>a+posicaoRV(i).custo,0)*100)/100;
+  const linhas=vivos.map(i=>({inv:i,ticker:i.ticker||i.descricao||i.tipo,...yieldOnCost(i,dividendos,investimentos,{hoje})}))
+    .sort((a,b)=>b.acumulado-a.acumulado);
+  const acumulado=Math.round(linhas.reduce((a,l)=>a+l.acumulado,0)*100)/100;
+  const datas=vivos.map(i=>i.data).filter(d=>/^\d{4}-\d{2}-\d{2}$/.test(String(d))).sort();
+  const novos=linhas.filter(l=>l.meses!=null&&l.meses<12);
+  return {
+    custo,acumulado,linhas,
+    pct:custo>0?Math.round(acumulado/custo*100*100)/100:null,
+    primeiraEntrada:datas[0]||null,ultimaEntrada:datas[datas.length-1]||null,
+    // ⚠️ SUBESTIMADO enquanto houver ativo com menos de 12 meses: ele já está
+    // no denominador com o custo cheio, mas ainda não teve ciclo de pagamento
+    // completo no numerador. Ler "0,1%" como "rende mal" seria erro de leitura,
+    // e a tela precisa dizer isso — não é rodapé opcional.
+    subestimado:novos.length>0,
+    ativosNovos:novos.length,ativosTotal:linhas.length,
+    ativosSemProvento:linhas.filter(l=>l.semProvento).length,
+  };
+}
+
 // ── Estado impossível no cadastro de investimento ───────────────────────────
 // `tipo` é escolhido num select e NADA cruza essa escolha com os campos
 // preenchidos. Uma ação cadastrada como "Renda Fixa" tem o valor projetado por
