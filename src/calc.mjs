@@ -645,6 +645,23 @@ export function resumoProventos(dividendos,investimentos,{hoje=new Date(),meses=
   };
 }
 
+// Backfill do vínculo provento→ativo. Registros anteriores ao Bloco 4 não têm
+// `investimentoId` e casam só por ticker, o que quebra com ticker reaproveitado
+// ou duas posições do mesmo papel. Puro e idempotente: rodar duas vezes não
+// muda nada, e se nada mudar devolve o MESMO array (identidade preservada),
+// para o chamador poder pular a gravação.
+export function backfillVinculoProvento(dividendos,investimentos){
+  const orig=dividendos||[];
+  let n=0;
+  const out=orig.map(d=>{
+    if(!d||d.investimentoId)return d;
+    const m=casaProvento(d,investimentos);
+    if(!m)return d;
+    n++;return {...d,investimentoId:m.id};
+  });
+  return {dividendos:n?out:orig,n};
+}
+
 // Meses inteiros entre a entrada do ativo e hoje. Usa aritmética de calendário,
 // não divisão por 30,44 — "2 meses e meio" não é o que interessa, e sim se já
 // houve 12 ciclos.

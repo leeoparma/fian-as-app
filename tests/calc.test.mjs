@@ -18,7 +18,7 @@ rentabilidadeRF,serieRentabilidadeRF,composicaoAcoes,
 rentabilidadeAcoesDesdeInicio,ganhoAcoesEntreSnapshots,rentabilidadeAcoes,isRFAtivo,calcValorLiquidoRF,
 estaEncerrado,soAtivos,soEncerrados,encerrarInvestimento,casaProvento,proventosDoAtivo,valorMercado,mesclarSnapshot,
 validaInvestimento,corretagemDeCompra,TIPOS_RF,valorAplicado,
-serieProventos,resumoProventos,yieldOnCost,yieldCarteira,validaProvento,mesesEmCarteira,
+serieProventos,resumoProventos,yieldOnCost,yieldCarteira,validaProvento,mesesEmCarteira,backfillVinculoProvento,
 INDICES_RATE,
 compoeFatorDiario,compoeFatorMensal,calcValorAtualRFHistorico,mesclarIPCAcomPrevia,compoeFatorMensalProRata,
 posicaoRV,
@@ -1456,6 +1456,31 @@ test("validaProvento: data inválida e valor não-positivo são barrados", ()=>{
   assert.equal(validaProvento({data:"2026-08-01",valor:0},{hoje:HJ}).campo,"valor");
   assert.equal(validaProvento({data:"2026-08-01",valor:-5},{hoje:HJ}).campo,"valor");
   assert.match(validaProvento({data:"2026-08-01",valor:0},{hoje:HJ}).mensagem,/líquido de IR/);
+});
+
+test("backfillVinculoProvento: preenche o que casa e é idempotente", ()=>{
+  const inv=[{id:"itub",ticker:"ITUB4",quantidade:57},{id:"bbas",ticker:"BBAS3",quantidade:10}];
+  const divs=[
+    {id:"a",ticker:"ITUB4",valor:1,data:"2026-08-03"},                    // sem vínculo → casa
+    {id:"b",ticker:"BBAS3",investimentoId:"bbas",valor:2,data:"2026-07-01"}, // já tem
+    {id:"c",ticker:"XXXX9",valor:3,data:"2026-07-01"},                    // não casa
+  ];
+  const r=backfillVinculoProvento(divs,inv);
+  assert.equal(r.n,1);
+  assert.equal(r.dividendos[0].investimentoId,"itub");
+  assert.equal(r.dividendos[1].investimentoId,"bbas");
+  assert.equal(r.dividendos[2].investimentoId,undefined);   // não inventa vínculo
+  assert.equal(divs[0].investimentoId,undefined);           // não muta o original
+  // idempotente: a 2ª passada não muda nada E devolve o MESMO array, para o
+  // chamador poder pular a gravação na nuvem
+  const r2=backfillVinculoProvento(r.dividendos,inv);
+  assert.equal(r2.n,0);
+  assert.equal(r2.dividendos,r.dividendos);
+});
+test("backfillVinculoProvento: lixo não derruba nem grava", ()=>{
+  assert.equal(backfillVinculoProvento(null,null).n,0);
+  assert.deepEqual(backfillVinculoProvento(null,null).dividendos,[]);
+  assert.equal(backfillVinculoProvento([null,{semTicker:1}],[{id:"x",ticker:"A"}]).n,0);
 });
 test("composicaoAcoes: carteira vazia devolve lista vazia sem dividir por zero", ()=>{
   assert.deepEqual(composicaoAcoes([]),[]);

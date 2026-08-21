@@ -209,6 +209,18 @@ A confusão é a mesma família do antipadrão do `||` abaixo — **campo ausent
 
 Ao acrescentar QUALQUER campo novo ao snapshot: registrar a data nesta tabela, e escrever no consumidor o que acontece quando o campo não está lá.
 
+## Número conferido de cabeça é a origem mais comum de falso alarme — REGRA
+
+**Quando teste e código divergem, refazer a aritmética ANTES de assumir que o código está errado.** Nesta série aconteceu **3 vezes**, e **nas três o código estava certo** — o erro era meu, num número que eu "sabia" de cabeça e não conferi:
+
+1. **Ganho realizado do BBAS3** — previsão mental de Δ que não batia com a soma real das vendas.
+2. **`ganhoAcoesEntreSnapshots`** — atribuí o resultado à dupla subtração do mês antes de reconstruir termo a termo; a causa era outra e maior.
+3. **`yieldCarteira`, custo total** (21/08/2026) — escrevi `10000` esperando `7700 + 2280`, calculando 57 × 40 como 2.300 porque confundi com o `valorAtual` do próprio fixture. O correto é **2.280**, e dois testes "falharam" por isso.
+
+O padrão é sempre o mesmo: um número plausível, próximo do certo, tirado de outro campo que estava na mesma tela. Multiplicação e soma de duas parcelas são onde mais escorrega.
+
+Procedimento: rodar a conta isolada (`node -e`) com os valores exatos do fixture, comparar, e só então decidir quem está errado. Custa 20 segundos e evita "corrigir" código correto — que é a forma mais cara de errar, porque introduz um bug real onde não havia nenhum.
+
 ## Correção de número: PREVISÃO ESCRITA ANTES DO FIX — REGRA
 
 **Ao corrigir um número errado, escrever antes o valor esperado depois da correção, com a aritmética que o produz.** Sem isso não há como distinguir *corrigir* de *mascarar*: o sintoma some nos dois casos, e "o número absurdo desapareceu" é evidência fraca — qualquer mudança que zere um termo faz o absurdo sumir.

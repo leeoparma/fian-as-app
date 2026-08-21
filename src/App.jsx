@@ -10,7 +10,7 @@ import {
   salarioMensal, converteMoeda, taxaMensalSim, simularJuros,
   semFotos, mesclarFotos, extraiFotosBase64, projetarFluxo,
   soAtivos, soEncerrados, encerrarInvestimento, casaProvento, proventosDoAtivo, valorMercado, mesclarSnapshot,
-  validaInvestimento, corretagemDeCompra, valorAplicado, addDias, marcarDuplicatas, montarAgendaPush,
+  validaInvestimento, corretagemDeCompra, valorAplicado, validaProvento, backfillVinculoProvento, addDias, marcarDuplicatas, montarAgendaPush,
   compraAcao, vendaAcao, pendentesRecorrenciaSW, relatorioMensal, compararMeses, serieGastoAcumulado, extratoComSaldo,
   totalPagoFatura, calcFaturaPagamentos, posicaoRV,
 rentabilidadeRF, serieRentabilidadeRF, composicaoAcoes,
@@ -2134,7 +2134,14 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
   const totalRF=rendaFixa.reduce((a,b)=>a+calcValorAtualRFHistorico(b,seriesBCB,new Date()).valor,0);
   const totalOu=outros.reduce((a,b)=>a+valorMercado(b),0);
 
-  const divMes=(data.dividendos||[]).filter(d=>{const dt=new Date(d.data);return dt.getMonth()===MES_ATUAL&&dt.getFullYear()===ANO_ATUAL;});
+  // ⚠️ Comparação por STRING, não por new Date(). `new Date("2026-08-01")` é
+  // meia-noite UTC; em fuso negativo (São Paulo −3, Nova York −4) isso vira
+  // 31/07 local e o provento do dia 1º caía no mês ANTERIOR — some do "Recebido
+  // este mês" e do total. Verificado em 21/08/2026 rodando o mesmo filtro em 4
+  // fusos: SP e NY divergem, Sydney e UTC não. String ISO ordena e recorta sem
+  // nunca tocar em fuso. É o mesmo motivo de _ymdC existir no calc.mjs.
+  const mesAtualKey=`${ANO_ATUAL}-${String(MES_ATUAL+1).padStart(2,"0")}`;
+  const divMes=(data.dividendos||[]).filter(d=>String(d?.data||"").slice(0,7)===mesAtualKey);
   const totDiv=divMes.reduce((a,b)=>a+b.valor,0);
   const hojeStr=hoje.toISOString().slice(0,10);
   // Próximos dividendos: só os com data futura (ou no máximo 7 dias atrás), evita datas velhas
@@ -2262,7 +2269,14 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
   // Provento guarda `investimentoId` além do ticker. O ticker continua gravado
   // (é o que você lê na lista, e é o fallback dos lançamentos antigos), mas o
   // id é quem resolve ticker reaproveitado e duas posições do mesmo papel.
-  function saveDiv(){const d={id:divForm.editId||uid(),ticker:divForm.ticker||"",investimentoId:divForm.investimentoId||null,valor:parseFloat(divForm.valor)||0,data:divForm.data||hoje.toISOString().slice(0,10),tipo:divForm.tipo||"Dividendo"};setData(dd=>({...dd,dividendos:divForm.editId?(dd.dividendos||[]).map(x=>x.id===divForm.editId?d:x):[...(dd.dividendos||[]),d]}));setModalDiv(false);setDivForm({});}
+  function saveDiv(){
+    // Provento com data futura entra na série do mês errado e contamina média e
+    // yield. Regra pura (calc.mjs) para não virar condição inline duplicada.
+    const dt=divForm.data||hoje.toISOString().slice(0,10);
+    const erro=validaProvento({data:dt,valor:divForm.valor},{hoje});
+    if(erro){alert(erro.mensagem);return;}
+    const ir=parseFloat(divForm.irRetido);
+    const d={id:divForm.editId||uid(),ticker:divForm.ticker||"",investimentoId:divForm.investimentoId||null,valor:parseFloat(divForm.valor)||0,data:dt,tipo:divForm.tipo||"Dividendo",...(Number.isFinite(ir)&&ir>0?{irRetido:ir}:{})};setData(dd=>({...dd,dividendos:divForm.editId?(dd.dividendos||[]).map(x=>x.id===divForm.editId?d:x):[...(dd.dividendos||[]),d]}));setModalDiv(false);setDivForm({});}
   function saveAg(){const q=parseFloat(agForm.quantidade)||0,va=parseFloat(agForm.valorAcao)||0;const a={id:agForm.editId||uid(),ticker:(agForm.ticker||"").toUpperCase(),valorAcao:va,quantidade:q,dataPagamento:agForm.dataPagamento||hojeStr,dataCom:agForm.dataCom||"",tipo:agForm.tipo||"Dividendo"};setData(dd=>({...dd,proventosAgendados:agForm.editId?(dd.proventosAgendados||[]).map(x=>x.id===agForm.editId?a:x):[...(dd.proventosAgendados||[]),a]}));setModalAg(false);setAgForm({});}
   function receberAg(a){const total=totalAgTotal(a);if(!window.confirm(`Marcar como recebido? Vai lançar ${fmtM(total,currency)} de ${a.ticker} nos proventos recebidos.`))return;setData(dd=>({...dd,dividendos:[...(dd.dividendos||[]),{id:uid(),ticker:a.ticker,investimentoId:(casaProvento({ticker:a.ticker,data:a.dataPagamento},dd.investimentos)||{}).id||null,valor:Math.round(total*100)/100,data:a.dataPagamento,tipo:a.tipo||"Dividendo"}],proventosAgendados:(dd.proventosAgendados||[]).filter(x=>x.id!==a.id)}));}
   function delAg(id){setData(dd=>({...dd,proventosAgendados:(dd.proventosAgendados||[]).filter(x=>x.id!==id)}));}
@@ -2570,17 +2584,23 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
       </Card>
       <p style={{fontSize:13,fontWeight:700,color:D.text}}>Recebidos</p>
       {divMes.length===0&&<p style={{fontSize:13,color:D.text3}}>Nenhum provento registrado este mês. Clique em "💰 Dividendo" para registrar.</p>}
-      {divMes.map(d=><Card key={d.id} style={{border:`1px solid ${D.gold}33`}}>
+      {divMes.map(d=>{const erroP=validaProvento(d,{hoje});return <Card key={d.id} style={{border:`1px solid ${erroP?D.gold:D.gold+"33"}`}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div>
-            <p style={{margin:0,fontSize:15,fontWeight:700,color:D.text}}>{d.ticker}</p>
+            <p style={{margin:0,fontSize:15,fontWeight:700,color:D.text}}>{d.ticker}
+              {/* Selo do provento inválido: entrou por import/restauração/merge,
+                  que não passam pelo saveDiv. Não é cosmético — está somando na
+                  série, na média e no yield. */}
+              {erroP&&<span title={erroP.mensagem} style={{fontSize:9,fontWeight:700,color:D.gold,border:`1px solid ${D.gold}66`,borderRadius:5,padding:"1px 5px",marginLeft:6,cursor:"help"}}>⚠ inválido</span>}
+            </p>
+            {erroP&&<p style={{margin:"3px 0 0",fontSize:10,color:D.gold,lineHeight:1.4}}>{erroP.mensagem}</p>}
             <p style={{margin:"4px 0",fontSize:12,color:D.text3}}>Posição <span style={{color:D.gold,fontWeight:600}}>{fmtM(d.valor,currency)}</span></p>
             <p style={{margin:0,fontSize:12,color:D.text3}}>Ativo <span style={{color:D.text,fontWeight:600,textTransform:"uppercase"}}>{d.tipo}</span></p>
             <p style={{margin:"4px 0 0",fontSize:12,color:D.text3}}>Data de pagamento <span style={{color:D.text}}>{d.data}</span></p>
           </div>
           <button onClick={()=>setData(dd=>({...dd,dividendos:(dd.dividendos||[]).filter(x=>x.id!==d.id)}))} style={{border:"none",background:"none",cursor:"pointer",color:D.red,fontSize:13}}>🗑</button>
         </div>
-      </Card>)}
+      </Card>;})}
       {proxDiv.length>0&&<><p style={{fontSize:13,fontWeight:700,color:D.text,marginTop:8}}>📅 Próximos dividendos</p>{proxDiv.map(inv=><Card key={inv.id} style={{border:`1px solid ${D.green}33`}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div>
@@ -2678,8 +2698,12 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
     {modalDiv&&<Modal title="Registrar provento" onClose={()=>setModalDiv(false)}>
       {soAtivos(data.investimentos).filter(i=>i.ticker).length>0&&<label style={{fontSize:12,color:D.text3}}>Ativo da carteira<select value={divForm.investimentoId||""} onChange={e=>{const inv=data.investimentos.find(i=>i.id===e.target.value);setDivForm(f=>({...f,investimentoId:e.target.value||null,...(inv?{ticker:(inv.ticker||"").toUpperCase()}:{})}));}} style={{marginTop:4}}><option value="">— avulso (só ticker) —</option>{soAtivos(data.investimentos).filter(i=>i.ticker).map(i=><option key={i.id} value={i.id}>{i.ticker}</option>)}</select></label>}
       <label style={{fontSize:12,color:D.text3}}>Ticker<input value={divForm.ticker||""} onChange={e=>setDivForm(f=>({...f,ticker:e.target.value.toUpperCase(),investimentoId:null}))} style={{marginTop:4}}/></label>
-      <label style={{fontSize:12,color:D.text3}}>Valor recebido ({currency})<input type="number" value={divForm.valor||""} onChange={e=>setDivForm(f=>({...f,valor:e.target.value}))} style={{marginTop:4}}/></label>
-      <label style={{fontSize:12,color:D.text3}}>Tipo<select value={divForm.tipo||"Dividendo"} onChange={e=>setDivForm(f=>({...f,tipo:e.target.value}))} style={{marginTop:4}}><option>Dividendo</option><option>JCP</option><option>JUROS SOBRE CAPITAL PROPRIO</option><option>Rendimento FII</option><option>Rendimento ETF</option></select></label>
+      <label style={{fontSize:12,color:D.text3}}>Valor recebido, líquido de IR ({currency})<input type="number" value={divForm.valor||""} onChange={e=>setDivForm(f=>({...f,valor:e.target.value}))} style={{marginTop:4}}/></label>
+      {/* Opcional: no JCP a retenção de 15% acontece na fonte, então guardar o IR
+          é o único jeito de reconstruir o bruto depois — e serve para a declaração.
+          Totais, série e yield usam SEMPRE o líquido. */}
+      <label style={{fontSize:12,color:D.text3}}>IR retido na fonte ({currency}) <span style={{fontWeight:400}}>— opcional, típico em JCP</span><input type="number" value={divForm.irRetido||""} onChange={e=>setDivForm(f=>({...f,irRetido:e.target.value}))} placeholder="deixe vazio se isento" style={{marginTop:4}}/></label>
+      <label style={{fontSize:12,color:D.text3}}>Tipo<select value={divForm.tipo||"Dividendo"} onChange={e=>setDivForm(f=>({...f,tipo:e.target.value}))} style={{marginTop:4}}><option>Dividendo</option><option>JCP</option><option>Rendimento FII</option><option>Rendimento ETF</option></select></label>
       <label style={{fontSize:12,color:D.text3}}>Data de pagamento<input type="date" value={divForm.data||hoje.toISOString().slice(0,10)} onChange={e=>setDivForm(f=>({...f,data:e.target.value}))} style={{marginTop:4}}/></label>
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn outline color={D.text3} onClick={()=>setModalDiv(false)}>Cancelar</Btn><Btn color={D.gold} onClick={saveDiv}>Salvar</Btn></div>
     </Modal>}
@@ -5176,7 +5200,36 @@ function AppInner(){
     }
     if(total)console.warn(`[cadastro] ${total} investimento(s) em estado impossível:`,porPerfil);
     else console.log("[cadastro] auditoria ok — nenhum investimento em estado impossível");
+
+    // Proventos: mesma lógica do B3. Provento inválido NÃO é cosmético — ele
+    // soma na série, na média e no yield. E o saveDiv só protege quem digita:
+    // import, restauração de backup e merge entre aparelhos não passam por lá.
+    let ruins=0;const porPerfilP={};
+    for(const pid of Object.keys(allData)){
+      const p=allData[pid];if(!p||typeof p!=="object")continue;
+      const maus=(p.dividendos||[]).map(d=>({d,e:validaProvento(d,{hoje:new Date()})})).filter(x=>x.e);
+      if(maus.length){porPerfilP[pid]=maus.map(x=>`${x.d.ticker||x.d.id}: ${x.e.campo}`);ruins+=maus.length;}
+    }
+    if(ruins)console.warn(`[proventos] ${ruins} provento(s) inválido(s):`,porPerfilP);
+    else console.log("[proventos] auditoria ok — nenhum provento inválido");
   },[session,allData]);
+
+  // Backfill do vínculo provento→ativo (uma vez, idempotente). Registros
+  // anteriores ao Bloco 4 não têm `investimentoId` e casam só por ticker, o que
+  // quebra com ticker reaproveitado ou duas posições do mesmo papel.
+  const bfDone=useRef(false);
+  useEffect(()=>{
+    if(!session||bfDone.current||!allData||!loadOk.current)return;
+    const pid=profileId,p=allData[pid];
+    if(!p||!(p.dividendos||[]).some(d=>d&&!d.investimentoId))return;
+    bfDone.current=true;
+    setData(d=>{
+      const {dividendos,n}=backfillVinculoProvento(d.dividendos,d.investimentos);
+      if(!n)return d;
+      console.log(`[proventos] backfill: ${n} vínculo(s) preenchido(s) em ${pid}`);
+      return {...d,dividendos};
+    });
+  },[session,allData,profileId]);
 
   // Fila de fotos de NF → Storage. Sobe o que estiver pendente e grava o
   // `nfPath` de volta na transação. Duas origens alimentam esta fila:
