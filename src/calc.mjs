@@ -574,8 +574,15 @@ export function proventosDoAtivo(inv,dividendos,investimentos){
 // `valor` é SEMPRE o LÍQUIDO recebido (após IR). `irRetido` é opcional e serve
 // para reconstruir o bruto — no JCP é o único jeito, porque a retenção de 15%
 // acontece na fonte. Totais e yield usam o líquido, nunca o bruto.
-const _mesDe=d=>String(d||"").slice(0,7);
-export const _mesKey=dt=>`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}`;
+// ⚠️ Mês de uma data se extrai por STRING, NUNCA por new Date(dataStr).
+// `new Date("2026-08-01")` é meia-noite UTC: em São Paulo (−3) e Nova York (−4)
+// vira 31/07 local, e o lançamento do dia 1º cai no mês ANTERIOR. Em Sydney
+// (+10) não aparece — por isso sobreviveu tanto tempo nesta base.
+// Estas duas são a ÚNICA forma; `_ymdC` faz o equivalente para data completa.
+export const mesDe=d=>String(d||"").slice(0,7);                       // "2026-08-01" → "2026-08"
+export const mesKeyDe=(ano,mesIdx)=>`${ano}-${String(mesIdx+1).padStart(2,"0")}`;  // (2026,7) → "2026-08"
+export const _mesKey=dt=>mesKeyDe(dt.getFullYear(),dt.getMonth());
+const _mesDe=mesDe;
 const _mesAnterior=m=>{const[y,mm]=m.split("-").map(Number);return mm===1?`${y-1}-12`:`${y}-${String(mm-1).padStart(2,"0")}`;};
 
 // Provento com data futura é AGENDAMENTO, não recebimento. Sem esta guarda ele

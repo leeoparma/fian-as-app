@@ -18,7 +18,7 @@ rentabilidadeRF,serieRentabilidadeRF,composicaoAcoes,
 rentabilidadeAcoesDesdeInicio,ganhoAcoesEntreSnapshots,rentabilidadeAcoes,isRFAtivo,calcValorLiquidoRF,
 estaEncerrado,soAtivos,soEncerrados,encerrarInvestimento,casaProvento,proventosDoAtivo,valorMercado,mesclarSnapshot,
 validaInvestimento,corretagemDeCompra,TIPOS_RF,valorAplicado,
-serieProventos,resumoProventos,yieldOnCost,yieldCarteira,validaProvento,mesesEmCarteira,backfillVinculoProvento,
+serieProventos,resumoProventos,yieldOnCost,yieldCarteira,validaProvento,mesesEmCarteira,backfillVinculoProvento,mesDe,mesKeyDe,
 INDICES_RATE,
 compoeFatorDiario,compoeFatorMensal,calcValorAtualRFHistorico,mesclarIPCAcomPrevia,compoeFatorMensalProRata,
 posicaoRV,
@@ -1481,6 +1481,35 @@ test("backfillVinculoProvento: lixo não derruba nem grava", ()=>{
   assert.equal(backfillVinculoProvento(null,null).n,0);
   assert.deepEqual(backfillVinculoProvento(null,null).dividendos,[]);
   assert.equal(backfillVinculoProvento([null,{semTicker:1}],[{id:"x",ticker:"A"}]).n,0);
+});
+
+// ── H: mês por string, imune a fuso (21/08/2026) ────────────────────────────
+test("mesDe: extrai o mês SEM passar por new Date — imune ao fuso do navegador", ()=>{
+  // O defeito real: new Date("2026-08-01") é meia-noite UTC; em São Paulo (−3)
+  // e Nova York (−4) vira 31/07 local e getMonth() devolve JULHO. Medido com os
+  // dados do Leo: 5 lançamentos do AU sumiam de agosto (R$ 85,00 de receita e
+  // R$ 331,52 de despesa). Em Sydney (+10) não reproduz — por isso durou tanto.
+  assert.equal(mesDe("2026-08-01"),"2026-08");   // o caso que quebrava
+  assert.equal(mesDe("2026-08-31"),"2026-08");
+  assert.equal(mesDe("2026-01-01"),"2026-01");   // virada de ano
+  assert.equal(mesDe("2026-12-31"),"2026-12");
+  // este teste roda em QUALQUER fuso e dá o mesmo resultado — é o ponto
+  const viaDate=new Date("2026-08-01");
+  const mesLocal=`2026-${String(viaDate.getMonth()+1).padStart(2,"0")}`;
+  if(new Date().getTimezoneOffset()>0)          // fuso negativo (SP, NY)
+    assert.notEqual(mesLocal,"2026-08","em fuso negativo new Date DEVE divergir — é o bug");
+});
+test("mesDe: lixo não vira mês inventado", ()=>{
+  for(const x of [null,undefined,"",123,{}]) assert.equal(mesDe(x).length<=7,true);
+  assert.equal(mesDe(null),"");
+  assert.notEqual(mesDe("03/08/2026"),"2026-08");  // formato BR não é aceito por acidente
+});
+test("mesKeyDe: índice de mês base-0 vira chave base-1", ()=>{
+  assert.equal(mesKeyDe(2026,0),"2026-01");
+  assert.equal(mesKeyDe(2026,7),"2026-08");
+  assert.equal(mesKeyDe(2026,11),"2026-12");
+  // casa com mesDe, que é o par que faz a comparação funcionar
+  assert.equal(mesDe("2026-08-01"),mesKeyDe(2026,7));
 });
 test("composicaoAcoes: carteira vazia devolve lista vazia sem dividir por zero", ()=>{
   assert.deepEqual(composicaoAcoes([]),[]);

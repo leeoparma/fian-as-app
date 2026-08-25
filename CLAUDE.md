@@ -209,6 +209,32 @@ A confusão é a mesma família do antipadrão do `||` abaixo — **campo ausent
 
 Ao acrescentar QUALQUER campo novo ao snapshot: registrar a data nesta tabela, e escrever no consumidor o que acontece quando o campo não está lá.
 
+## Data em um fuso só não é verificação — REGRA
+
+**`new Date("YYYY-MM-DD")` é meia-noite UTC, não meia-noite local.** Em fuso negativo isso vira o dia ANTERIOR, e `getMonth()` devolve o mês errado para todo lançamento do dia 1º.
+
+```js
+new Date("2026-08-01").getMonth()
+  America/Sao_Paulo → 6 (julho)   ❌
+  America/New_York  → 6 (julho)   ❌
+  Australia/Sydney  → 7 (agosto)  ✅
+  UTC               → 7 (agosto)  ✅
+```
+
+**O navegador de teste e o Leo estão em Sydney (UTC+10), onde o defeito NÃO reproduz.** Verificação em tela sozinha nunca ia pegar. **Testar sempre com `TZ` explícito — no mínimo `America/Sao_Paulo` e `America/New_York`**, já que o app tem perfis BR, AU e US e as datas são digitadas em três países:
+
+```bash
+for tz in America/Sao_Paulo America/New_York Australia/Sydney; do TZ=$tz npm test; done
+```
+
+**Use `mesDe(dataStr)` e `mesKeyDe(ano,mesIdx)` do `calc.mjs`** — comparação por string, imune a fuso. `_ymdC` faz o equivalente para data completa. Nunca `new Date()` sobre data sem hora.
+
+Caso real (21/08/2026, Bloco H): o defeito estava em **6 filtros de mês + 1 intervalo de ano fiscal**, atingindo Dashboard, extrato, orçamento, gráfico de evolução, "investido no mês" e o PDF de notas fiscais. Medido nos dados reais: **5 lançamentos do AU sumiam de agosto — R$ 85,00 de receita, R$ 331,52 de despesa, R$ 246,52 de saldo distorcido** quando visto de São Paulo ou Nova York. Em Sydney o Δ era **zero**, o que serviu de controle: se a correção mudasse algo lá, teria quebrado outra coisa.
+
+**A lição que dói:** `_ymdC` já existia no `calc.mjs` com comentário explicando exatamente este problema, e `faturaDeCompra` já usava `+"T00:00:00"` pelo mesmo motivo. **A defesa estava escrita, documentada e em uso — e mesmo assim não foi aplicada nos outros 7 lugares.** Documentar não propaga; varrer, sim. Ao achar um defeito de classe, varrer o repo inteiro pela CLASSE antes de dar por corrigido — foi assim que 1 virou 7 aqui, e 4 viraram 24 no Bloco D.
+
+**Conhecidos e ACEITOS (não corrigir):** `calcValorAtualRF` (calc.mjs:62 e :78) e `serieRentabilidadeRF` (:1155) usam `new Date(inv.data)` para calcular DIFERENÇA em dias/anos. Classe diferente: o erro é de horas num divisor de anos, muda o rendimento na terceira casa, e mexer ali alteraria valores de RF sem necessidade. O `Math.min` do seletor de período de RF (App.jsx:2390) compara datas processadas do mesmo jeito nos dois lados, então é internamente consistente.
+
 ## Número conferido de cabeça é a origem mais comum de falso alarme — REGRA
 
 **Quando teste e código divergem, refazer a aritmética ANTES de assumir que o código está errado.** Nesta série aconteceu **3 vezes**, e **nas três o código estava certo** — o erro era meu, num número que eu "sabia" de cabeça e não conferi:

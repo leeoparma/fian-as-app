@@ -10,7 +10,7 @@ import {
   salarioMensal, converteMoeda, taxaMensalSim, simularJuros,
   semFotos, mesclarFotos, extraiFotosBase64, projetarFluxo,
   soAtivos, soEncerrados, encerrarInvestimento, casaProvento, proventosDoAtivo, valorMercado, mesclarSnapshot,
-  validaInvestimento, corretagemDeCompra, valorAplicado, validaProvento, backfillVinculoProvento, addDias, marcarDuplicatas, montarAgendaPush,
+  validaInvestimento, corretagemDeCompra, valorAplicado, validaProvento, backfillVinculoProvento, mesDe, mesKeyDe, addDias, marcarDuplicatas, montarAgendaPush,
   compraAcao, vendaAcao, pendentesRecorrenciaSW, relatorioMensal, compararMeses, serieGastoAcumulado, extratoComSaldo,
   totalPagoFatura, calcFaturaPagamentos, posicaoRV,
 rentabilidadeRF, serieRentabilidadeRF, composicaoAcoes,
@@ -322,6 +322,16 @@ const IND_COMP=[
 ];
 
 const hoje=new Date(),MES_ATUAL=hoje.getMonth(),ANO_ATUAL=hoje.getFullYear();
+// ⚠️ Mês de um lançamento se compara por STRING, NUNCA por new Date(data).
+// `new Date("2026-08-01")` é meia-noite UTC: em São Paulo (−3) e Nova York (−4)
+// vira 31/07 local e o lançamento do dia 1º cai no mês ANTERIOR. Medido em
+// 21/08/2026 com dados reais: 5 lançamentos do AU sumiam de agosto — R$ 85,00
+// de receita e R$ 331,52 de despesa, R$ 246,52 de saldo. Em Sydney (+10) o
+// defeito não aparece, e foi por isso que sobreviveu tanto tempo.
+// `mesKeyDe` é a única forma daqui pra frente; _ymdC (calc.mjs) faz o
+// equivalente para data completa. A defesa já existia nos dois e mesmo assim
+// não tinha sido aplicada aqui — ver a regra no CLAUDE.md.
+const mesKeyAtual=mesKeyDe(ANO_ATUAL,MES_ATUAL);
 const EMPTY={transacoes:[],faturas:[],investimentos:[],metas:[],bancos:[],orcamentos:[],recorrencias:[],dividendos:[],proventosAgendados:[],watchlist:[],alertas:[],historico:[],aporteMensal:0,salario:null,catD:[...CAT_D_DEF],catR:[...CAT_R_DEF]};
 const EMPTY_ALL={br:{...EMPTY},au:{...EMPTY}};
 const lsGet=k=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch{return null;}};
@@ -1326,7 +1336,7 @@ function ProventosRadar({data,currency}){
 }
 
 function ScoreCard({data}){
-  const txMes=data.transacoes.filter(t=>{const d=new Date(t.data);return d.getMonth()===MES_ATUAL&&d.getFullYear()===ANO_ATUAL;});
+  const txMes=data.transacoes.filter(t=>mesDe(t.data)===mesKeyAtual);
   const r=txMes.filter(t=>t.tipo==="receita").reduce((a,b)=>a+b.valor,0);
   const d=txMes.filter(t=>t.tipo==="despesa").reduce((a,b)=>a+b.valor,0);
   const inv=soAtivos(data.investimentos).reduce((a,b)=>a+valorMercado(b),0);
@@ -1592,9 +1602,12 @@ function LancamentosTab({data,setData,currency,mes,profileId}){
   function addCat(tipo,nome){if(!nome.trim())return;setData(d=>({...d,[tipo==="D"?"catD":"catR"]:[...(tipo==="D"?d.catD||CAT_D_DEF:d.catR||CAT_R_DEF),nome.trim()]}));}
 
   async function exportarNFsPDF(){
-    const ini=isAU?new Date(fyPdf,6,1,0,0,0):new Date(fyPdf,0,1,0,0,0);
-    const fim=isAU?new Date(fyPdf+1,5,30,23,59,59):new Date(fyPdf,11,31,23,59,59);
-    const itens=nfsComNF.filter(t=>{const d=new Date(t.data);return d>=ini&&d<=fim;}).sort((a,b)=>a.data.localeCompare(b.data));
+    // Fronteira do ano fiscal por STRING. Com new Date(t.data) a nota do
+    // primeiro dia do período (1º jul no AU, 1º jan no BR) caía fora em fuso
+    // negativo — justamente a borda que o relatório existe para respeitar.
+    const ini=isAU?`${fyPdf}-07-01`:`${fyPdf}-01-01`;
+    const fim=isAU?`${fyPdf+1}-06-30`:`${fyPdf}-12-31`;
+    const itens=nfsComNF.filter(t=>{const d=String(t.data||"");return d>=ini&&d<=fim;}).sort((a,b)=>a.data.localeCompare(b.data));
     if(!itens.length){alert(isAU?`Nenhuma nota fiscal entre 1 jul ${fyPdf} e 30 jun ${fyPdf+1}.`:`Nenhuma nota fiscal no ano ${fyPdf}.`);return;}
     const total=itens.reduce((a,t)=>a+(t.valor||0),0);
     const fyLabel=isAU?`${fyPdf}–${String(fyPdf+1).slice(2)}`:`${fyPdf}`;
@@ -1630,7 +1643,7 @@ ${paginas}
     if(!w){alert("Permita pop-ups neste site para gerar o PDF.");return;}
     w.document.write(html);w.document.close();
   }
-  const txMes=data.transacoes.filter(t=>{const d=new Date(t.data);return d.getMonth()===mes&&d.getFullYear()===ANO_ATUAL;});
+  const txMes=data.transacoes.filter(t=>mesDe(t.data)===mesKeyDe(ANO_ATUAL,mes));
 
   function saveQuick(){
     const v=parseFloat(quickValor);if(!v)return;
@@ -2140,8 +2153,7 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
   // este mês" e do total. Verificado em 21/08/2026 rodando o mesmo filtro em 4
   // fusos: SP e NY divergem, Sydney e UTC não. String ISO ordena e recorta sem
   // nunca tocar em fuso. É o mesmo motivo de _ymdC existir no calc.mjs.
-  const mesAtualKey=`${ANO_ATUAL}-${String(MES_ATUAL+1).padStart(2,"0")}`;
-  const divMes=(data.dividendos||[]).filter(d=>String(d?.data||"").slice(0,7)===mesAtualKey);
+  const divMes=(data.dividendos||[]).filter(d=>mesDe(d?.data)===mesKeyAtual);
   const totDiv=divMes.reduce((a,b)=>a+b.valor,0);
   const hojeStr=hoje.toISOString().slice(0,10);
   // Próximos dividendos: só os com data futura (ou no máximo 7 dias atrás), evita datas velhas
@@ -2463,7 +2475,7 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
         // CONSUMIDOR 2 migrado (11/08/2026): RV usa posicaoRV(qtd×PM); RF segue
         // no valor digitado, que lá é a verdade. Δ zero nos dados de hoje —
         // os 2 ativos do mês são RF, cujo caminho não mudou.
-        const invMes=soAtivos(data.investimentos).filter(i=>{const dt=new Date(i.data);return dt.getMonth()===MES_ATUAL&&dt.getFullYear()===ANO_ATUAL;}).reduce((a,b)=>a+(isRFAtivo(b)?valorAplicado(b):posicaoRV(b).custo),0);
+        const invMes=soAtivos(data.investimentos).filter(i=>mesDe(i.data)===mesKeyAtual).reduce((a,b)=>a+(isRFAtivo(b)?valorAplicado(b):posicaoRV(b).custo),0);
         const pct=Math.min(100,Math.round(invMes/data.aporteMensal*100));
         const cor=pct>=100?D.green:pct>=50?D.gold:D.red;
         return <div style={{marginTop:8}}>
@@ -4462,7 +4474,7 @@ function CartaoTab({data,setData,currency,mes}){
     const saldo=sBanco(b), limite=b.limite||0, usado=Math.max(0,-saldo);
     const disp=limite>0?limite-usado:null, pct=limite>0?Math.min(100,usado/limite*100):0;
     const txs=data.transacoes.filter(t=>t.bancoId===b.id);
-    const gastoMes=txs.filter(t=>{if(t.tipo!=="despesa")return false;const d=new Date(t.data);return d.getMonth()===mes&&d.getFullYear()===ANO_ATUAL;}).reduce((a,x)=>a+x.valor,0);
+    const gastoMes=txs.filter(t=>t.tipo==="despesa"&&mesDe(t.data)===mesKeyDe(ANO_ATUAL,mes)).reduce((a,x)=>a+x.valor,0);
     const futuras=txs.filter(t=>t.tipo==="despesa"&&t.parceladoId&&t.data>hojeStr).reduce((a,x)=>a+x.valor,0);
     const diaFecha=b.diaFecha||null, diaVence=b.diaVence||null;
     let faturas=null, creditoDisponivel=0;
@@ -4655,9 +4667,10 @@ function RelatoriosTab({data,currency}){
   const nomeBanco=id=>data.bancos.find(b=>b.id===id)?.nome||"—";
 
   const txs=(data.transacoes||[]).filter(t=>{
-    const d=new Date(t.data);
-    if(periodo.startsWith("mes:")){const m=+periodo.split(":")[1];if(d.getMonth()!==m||d.getFullYear()!==ANO_ATUAL)return false;}
-    else if(periodo==="ano"){if(d.getFullYear()!==ANO_ATUAL)return false;}
+    // string em todos os ramos: o de "intervalo" já era assim, e os outros dois
+    // passavam por new Date — mesma comparação, formas diferentes, no mesmo if.
+    if(periodo.startsWith("mes:")){if(mesDe(t.data)!==mesKeyDe(ANO_ATUAL,+periodo.split(":")[1]))return false;}
+    else if(periodo==="ano"){if(String(t.data||"").slice(0,4)!==String(ANO_ATUAL))return false;}
     else if(periodo==="intervalo"){if(dDe&&t.data<dDe)return false;if(dAte&&t.data>dAte)return false;}
     if(bancoFiltro&&t.bancoId!==bancoFiltro)return false;
     if(tipoFiltro&&t.tipo!==tipoFiltro)return false;
@@ -5609,14 +5622,14 @@ function AppInner(){
   })();
   const catD=data.catD.length?data.catD:CAT_D_DEF,catR=data.catR.length?data.catR:CAT_R_DEF;
 
-  const txMes=data.transacoes.filter(t=>{const d=new Date(t.data);return d.getMonth()===mes&&d.getFullYear()===ANO_ATUAL;});
+  const txMes=data.transacoes.filter(t=>mesDe(t.data)===mesKeyDe(ANO_ATUAL,mes));
   const {receitas:totR,despesas:totD}=totaisTransacoes(txMes); // testado em calc.mjs (exclui categorias internas)
   const totInv=soAtivos(data.investimentos).reduce((a,b)=>a+valorMercado(b),0);
   function saldoBanco(b){return saldoBancoCalc(b,data.transacoes);} // testado em calc.mjs
   const totBancos=data.bancos.reduce((a,b)=>a+saldoBanco(b),0);
   const patrimonioLiq=totBancos+totInv;
   const tiposI=TIPOS_INV.map(t=>({t,v:soAtivos(data.investimentos).filter(i=>i.tipo===t).reduce((a,b)=>a+valorMercado(b),0)})).filter(x=>x.v>0);
-  const ultimos6=Array.from({length:6},(_,i)=>{const d=new Date(ANO_ATUAL,MES_ATUAL-5+i,1),m=d.getMonth(),a=d.getFullYear();const txs=data.transacoes.filter(t=>{const td=new Date(t.data);return td.getMonth()===m&&td.getFullYear()===a&&!CAT_INTERNAS.includes(t.categoria);});const tt=totaisTransacoes(txs);return{label:MESES[m],r:tt.receitas,d:tt.despesas};});
+  const ultimos6=Array.from({length:6},(_,i)=>{const d=new Date(ANO_ATUAL,MES_ATUAL-5+i,1),m=d.getMonth(),a=d.getFullYear();const txs=data.transacoes.filter(t=>mesDe(t.data)===mesKeyDe(a,m)&&!CAT_INTERNAS.includes(t.categoria));const tt=totaisTransacoes(txs);return{label:MESES[m],r:tt.receitas,d:tt.despesas};});
   let acc=0;const lineData=ultimos6.map(d=>{acc+=d.r-d.d;return{label:d.label,v:acc};});
   const catPieD=catD.map((c,i)=>({label:c,cat:c,v:txMes.filter(t=>t.tipo==="despesa"&&t.categoria===c).reduce((a,b)=>a+b.valor,0),color:CORES[i%CORES.length]})).filter(x=>x.v>0).sort((a,b)=>b.v-a.v);
   const catPieR=catR.map((c,i)=>({label:c,cat:c,v:txMes.filter(t=>t.tipo==="receita"&&t.categoria===c).reduce((a,b)=>a+b.valor,0),color:CORES[i%CORES.length]})).filter(x=>x.v>0).sort((a,b)=>b.v-a.v);
