@@ -10,7 +10,8 @@ import {
   salarioMensal, converteMoeda, taxaMensalSim, simularJuros,
   semFotos, mesclarFotos, extraiFotosBase64, projetarFluxo,
   soAtivos, soEncerrados, encerrarInvestimento, casaProvento, proventosDoAtivo, valorMercado, mesclarSnapshot,
-  validaInvestimento, corretagemDeCompra, valorAplicado, validaProvento, backfillVinculoProvento, mesDe, mesKeyDe, addDias, marcarDuplicatas, montarAgendaPush,
+  validaInvestimento, corretagemDeCompra, valorAplicado, validaProvento, backfillVinculoProvento, mesDe, mesKeyDe,
+  resumoProventos, yieldCarteira, addDias, marcarDuplicatas, montarAgendaPush,
   compraAcao, vendaAcao, pendentesRecorrenciaSW, relatorioMensal, compararMeses, serieGastoAcumulado, extratoComSaldo,
   totalPagoFatura, calcFaturaPagamentos, posicaoRV,
 rentabilidadeRF, serieRentabilidadeRF, composicaoAcoes,
@@ -2589,30 +2590,112 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
         </div>
       </Card>}
 
-      <Card style={{background:`linear-gradient(135deg,${D.bg3},${D.card2})`,border:`1px solid ${D.gold}33`}}>
-        <p style={{fontSize:10,color:D.text3,textTransform:"uppercase",letterSpacing:"1px",marginBottom:4}}>Recebido este mês · {hoje.toLocaleDateString("pt-BR")}</p>
-        <p style={{fontSize:28,fontWeight:800,color:D.gold}}>{fmtM(totDiv,currency)}</p>
-        <p style={{fontSize:11,color:D.text3,marginTop:2}}>{divMes.length} provento{divMes.length!==1?"s":""} recebido{divMes.length!==1?"s":""}</p>
-      </Card>
-      <p style={{fontSize:13,fontWeight:700,color:D.text}}>Recebidos</p>
-      {divMes.length===0&&<p style={{fontSize:13,color:D.text3}}>Nenhum provento registrado este mês. Clique em "💰 Dividendo" para registrar.</p>}
-      {divMes.map(d=>{const erroP=validaProvento(d,{hoje});return <Card key={d.id} style={{border:`1px solid ${erroP?D.gold:D.gold+"33"}`}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-          <div>
-            <p style={{margin:0,fontSize:15,fontWeight:700,color:D.text}}>{d.ticker}
-              {/* Selo do provento inválido: entrou por import/restauração/merge,
-                  que não passam pelo saveDiv. Não é cosmético — está somando na
-                  série, na média e no yield. */}
-              {erroP&&<span title={erroP.mensagem} style={{fontSize:9,fontWeight:700,color:D.gold,border:`1px solid ${D.gold}66`,borderRadius:5,padding:"1px 5px",marginLeft:6,cursor:"help"}}>⚠ inválido</span>}
-            </p>
-            {erroP&&<p style={{margin:"3px 0 0",fontSize:10,color:D.gold,lineHeight:1.4}}>{erroP.mensagem}</p>}
-            <p style={{margin:"4px 0",fontSize:12,color:D.text3}}>Posição <span style={{color:D.gold,fontWeight:600}}>{fmtM(d.valor,currency)}</span></p>
-            <p style={{margin:0,fontSize:12,color:D.text3}}>Ativo <span style={{color:D.text,fontWeight:600,textTransform:"uppercase"}}>{d.tipo}</span></p>
-            <p style={{margin:"4px 0 0",fontSize:12,color:D.text3}}>Data de pagamento <span style={{color:D.text}}>{d.data}</span></p>
+      {/* ── Painel de proventos (G3) ────────────────────────────────────────
+          Substitui o "Recebido este mês" + cards soltos. Blocos sem dado
+          APARECEM com explicação, nunca somem: o painel nasce vazio porque
+          faltam lançar os proventos do extrato, não porque a carteira não
+          rende — e se o bloco sumir, não há como descobrir isso olhando.
+          (Mesmo precedente do B1, onde ausência silenciosa matou "No ano".) */}
+      {(()=>{
+        const R=resumoProventos(data.dividendos,data.investimentos,{hoje});
+        const Y=yieldCarteira(data.investimentos,data.dividendos,{hoje});
+        const maxSerie=Math.max(1,...R.serie.map(x=>x.total));
+        const mesLabel=k=>{const[a,m]=String(k).split("-");return `${MESES[+m-1]}/${a.slice(2)}`;};
+        return <>
+        {/* 1 · mês corrente + quebra por ativo */}
+        <Card style={{background:`linear-gradient(135deg,${D.bg3},${D.card2})`,border:`1px solid ${D.gold}33`}}>
+          <p style={{fontSize:10,color:D.text3,textTransform:"uppercase",letterSpacing:"1px",marginBottom:4}}>Recebido em {mesLabel(R.mesCorrente.mes)} · mês em curso</p>
+          <p style={{fontSize:28,fontWeight:800,color:D.gold}}>{fmtM(R.mesCorrente.total,currency)}</p>
+          <p style={{fontSize:11,color:D.text3,marginTop:2}}>{R.mesCorrente.n} provento{R.mesCorrente.n!==1?"s":""} · o mês ainda não fechou</p>
+          {R.mesCorrente.porAtivo.length>0&&<div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${D.border}`}}>
+            {R.mesCorrente.porAtivo.map(a=><div key={a.ticker} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0"}}>
+              <span style={{color:D.text2}}>{a.ticker}{a.n>1?<span style={{color:D.text3,fontSize:10}}> · {a.n}×</span>:null}</span>
+              <span style={{color:D.text,fontWeight:600}}>{fmtM(a.total,currency)}</span>
+            </div>)}
+          </div>}
+          {R.mesCorrente.n===0&&<p style={{fontSize:11,color:D.text3,marginTop:8,lineHeight:1.5,paddingTop:8,borderTop:`1px solid ${D.border}`}}>Nada lançado ainda neste mês. Se sua corretora já pagou, registre em "💰 Dividendo" — o painel só conhece o que você lança.</p>}
+        </Card>
+
+        {/* 2 · série + média (só meses FECHADOS) */}
+        <Card>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",flexWrap:"wrap",gap:6}}>
+            <p style={{margin:0,fontSize:13,fontWeight:700,color:D.text}}>📊 Últimos meses fechados</p>
+            {R.media!=null&&<p style={{margin:0,fontSize:12,color:D.text3}}>média <b style={{color:D.gold}}>{fmtM(R.media,currency)}</b>/mês</p>}
           </div>
-          <button onClick={()=>setData(dd=>({...dd,dividendos:(dd.dividendos||[]).filter(x=>x.id!==d.id)}))} style={{border:"none",background:"none",cursor:"pointer",color:D.red,fontSize:13}}>🗑</button>
-        </div>
-      </Card>;})}
+          {R.serie.length===0
+            ?<p style={{fontSize:12,color:D.text3,margin:"8px 0 0",lineHeight:1.5}}>Nenhum mês fechado com provento ainda. A série começa no primeiro mês inteiro depois do seu primeiro lançamento — o mês em curso fica de fora de propósito, porque ele ainda não terminou e puxaria a média para baixo.</p>
+            :<>
+              {/* barras em div, não SVG: altura explícita, sem depender de flex
+                  (o colapso de 106px→51px do modal de FII foi exatamente isso) */}
+              <div style={{display:"flex",alignItems:"flex-end",gap:6,height:90,marginTop:12,flexShrink:0}}>
+                {R.serie.map(x=><div key={x.mes} style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"flex-end",alignItems:"center",gap:4}}>
+                  <span style={{fontSize:9,color:D.text3,whiteSpace:"nowrap"}}>{x.total>0?fmtM(x.total,currency).replace(/^[^\d-]+/,""):""}</span>
+                  <div title={`${mesLabel(x.mes)}: ${fmtM(x.total,currency)}`} style={{width:"100%",height:Math.max(2,Math.round(x.total/maxSerie*56)),background:x.total>0?D.gold:D.border2,borderRadius:"3px 3px 0 0"}}/>
+                  <span style={{fontSize:9,color:D.text3}}>{mesLabel(x.mes)}</span>
+                </div>)}
+              </div>
+              <p style={{fontSize:10,color:D.text3,margin:"10px 0 0",lineHeight:1.5}}>
+                média sobre <b>{R.mesesFechados}</b> {R.mesesFechados===1?"mês fechado":"meses fechados"} (soma {fmtM(R.totalJanela,currency)} ÷ {R.mesesFechados}).
+                {!R.tendenciaConfiavel&&<span style={{color:D.gold}}> Com {R.mesesFechados===1?"um mês":"dois meses"} de dados isto não indica tendência — é só o que houve.</span>}
+              </p>
+            </>}
+        </Card>
+
+        {/* 3 · yield on cost */}
+        <Card style={{border:`1px solid ${D.blue}22`}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",flexWrap:"wrap",gap:6}}>
+            <p style={{margin:0,fontSize:13,fontWeight:700,color:D.text}}>🎯 Yield on cost</p>
+            <p style={{margin:0,fontSize:14,fontWeight:700,color:D.blue}}>{Y.pct==null?"—":`${Y.pct.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}%`}</p>
+          </div>
+          <p style={{margin:"2px 0 0",fontSize:11,color:D.text3}}>{fmtM(Y.acumulado,currency)} recebidos ÷ {fmtM(Y.custo,currency)} de custo{Y.primeiraEntrada?` · carteira montada entre ${Y.primeiraEntrada.split("-").reverse().join("/")} e ${(Y.ultimaEntrada||"").split("-").reverse().join("/")}`:""}</p>
+          {/* ⚠️ o aviso é obrigatório, não rodapé: ativo comprado há 1 mês já
+              está no denominador com o custo cheio e ainda não teve ciclo de
+              pagamento. Sem isto, 0,1% se lê como "a carteira rende mal". */}
+          {Y.subestimado&&<p style={{margin:"8px 0 0",fontSize:11,color:D.gold,lineHeight:1.5,background:D.gold+"10",border:`1px solid ${D.gold}33`,borderRadius:8,padding:"7px 9px"}}>
+            ⚠️ Este número está <b>subestimado</b>. {Y.ativosNovos} de {Y.ativosTotal} ativo{Y.ativosTotal!==1?"s":""} {Y.ativosNovos===1?"tem":"têm"} menos de 12 meses de carteira: {Y.ativosNovos===1?"ele já entra":"eles já entram"} no custo com o valor cheio, mas ainda não {Y.ativosNovos===1?"teve":"tiveram"} um ciclo completo de pagamento. Não leia como "rende pouco" — leia como "ainda não deu tempo".
+          </p>}
+          {Y.linhas.length===0
+            ?<p style={{fontSize:12,color:D.text3,margin:"8px 0 0"}}>Sem posições de renda variável na carteira.</p>
+            :<div style={{marginTop:10}}>
+              {Y.linhas.map(l=><div key={l.inv.id} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",fontSize:12,padding:"5px 0",borderTop:`1px solid ${D.border}`,gap:8}}>
+                <span style={{color:D.text2,minWidth:0}}>{l.ticker}
+                  <span style={{color:D.text3,fontSize:10}}> · {l.janela}{l.anualizado?"":" (acumulado)"}</span>
+                </span>
+                <span style={{textAlign:"right",flexShrink:0}}>
+                  <b style={{color:l.semProvento?D.text3:D.blue}}>{l.pct==null?"—":`${l.pct.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}%`}</b>
+                  <span style={{color:D.text3,fontSize:10}}> · {fmtM(l.acumulado,currency)}</span>
+                </span>
+              </div>)}
+            </div>}
+          {R.deEncerrados>0&&<p style={{margin:"8px 0 0",fontSize:11,color:D.text3,paddingTop:8,borderTop:`1px solid ${D.border}`}}>
+            + {fmtM(R.deEncerrados,currency)} recebidos de posições já encerradas — entram no total e na série, mas não no yield, que é propriedade de posição que você ainda tem.
+          </p>}
+        </Card>
+
+        {/* 4 · lançamentos do mês */}
+        <p style={{fontSize:13,fontWeight:700,color:D.text}}>Lançamentos de {mesLabel(R.mesCorrente.mes)}</p>
+        {divMes.length===0&&<p style={{fontSize:13,color:D.text3}}>Nenhum provento registrado neste mês. Clique em "💰 Dividendo" para registrar.</p>}
+        {divMes.map(d=>{const erroP=validaProvento(d,{hoje});return <Card key={d.id} style={{border:`1px solid ${erroP?D.gold:D.gold+"33"}`}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+            <div style={{minWidth:0}}>
+              <p style={{margin:0,fontSize:15,fontWeight:700,color:D.text}}>{d.ticker}
+                {/* Selo do provento inválido: entrou por import/restauração/merge,
+                    que não passam pelo saveDiv. Não é cosmético — está somando na
+                    série, na média e no yield. */}
+                {erroP&&<span title={erroP.mensagem} style={{fontSize:9,fontWeight:700,color:D.gold,border:`1px solid ${D.gold}66`,borderRadius:5,padding:"1px 5px",marginLeft:6,cursor:"help"}}>⚠ inválido</span>}
+              </p>
+              {erroP&&<p style={{margin:"3px 0 0",fontSize:10,color:D.gold,lineHeight:1.4}}>{erroP.mensagem}</p>}
+              {/* rótulos corrigidos: até 21/08/2026 dizia "Posição" para o valor
+                  e "Ativo" para o tipo — os dois trocados entre si. */}
+              <p style={{margin:"4px 0 0",fontSize:12,color:D.text3}}>Valor recebido <span style={{color:D.gold,fontWeight:600}}>{fmtM(d.valor,currency)}</span>{Number.isFinite(d.irRetido)&&d.irRetido>0?<span style={{color:D.text3}}> · IR retido {fmtM(d.irRetido,currency)}</span>:null}</p>
+              <p style={{margin:"2px 0 0",fontSize:12,color:D.text3}}>Tipo <span style={{color:D.text,fontWeight:600}}>{d.tipo}</span></p>
+              <p style={{margin:"2px 0 0",fontSize:12,color:D.text3}}>Pago em <span style={{color:D.text}}>{String(d.data||"").split("-").reverse().join("/")}</span></p>
+            </div>
+            <button onClick={()=>setData(dd=>({...dd,dividendos:(dd.dividendos||[]).filter(x=>x.id!==d.id)}))} style={{border:"none",background:"none",cursor:"pointer",color:D.red,fontSize:13,flexShrink:0}}>🗑</button>
+          </div>
+        </Card>;})}
+        </>;})()}
+
       {proxDiv.length>0&&<><p style={{fontSize:13,fontWeight:700,color:D.text,marginTop:8}}>📅 Próximos dividendos</p>{proxDiv.map(inv=><Card key={inv.id} style={{border:`1px solid ${D.green}33`}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div>

@@ -231,9 +231,19 @@ for tz in America/Sao_Paulo America/New_York Australia/Sydney; do TZ=$tz npm tes
 
 Caso real (21/08/2026, Bloco H): o defeito estava em **6 filtros de mês + 1 intervalo de ano fiscal**, atingindo Dashboard, extrato, orçamento, gráfico de evolução, "investido no mês" e o PDF de notas fiscais. Medido nos dados reais: **5 lançamentos do AU sumiam de agosto — R$ 85,00 de receita, R$ 331,52 de despesa, R$ 246,52 de saldo distorcido** quando visto de São Paulo ou Nova York. Em Sydney o Δ era **zero**, o que serviu de controle: se a correção mudasse algo lá, teria quebrado outra coisa.
 
+**Fuso do desenvolvedor não é fuso do usuário.** O bug era **latente** para o Leo (Sydney, UTC+10) e **ativo** para quem abrisse do Brasil: R$ 246,52 sumindo do saldo de agosto no perfil AU. **Dois usuários da mesma conta — Leo e Carol — veriam números diferentes para os mesmos dados, sem nenhuma forma de perceber**, porque cada um veria um total internamente coerente. Não há aviso possível para esse tipo de divergência; só não produzi-la. Por isso o teste com `TZ` explícito não é zelo extra: é a única forma de ver o que o outro usuário vê.
+
 **A lição que dói:** `_ymdC` já existia no `calc.mjs` com comentário explicando exatamente este problema, e `faturaDeCompra` já usava `+"T00:00:00"` pelo mesmo motivo. **A defesa estava escrita, documentada e em uso — e mesmo assim não foi aplicada nos outros 7 lugares.** Documentar não propaga; varrer, sim. Ao achar um defeito de classe, varrer o repo inteiro pela CLASSE antes de dar por corrigido — foi assim que 1 virou 7 aqui, e 4 viraram 24 no Bloco D.
 
 **Conhecidos e ACEITOS (não corrigir):** `calcValorAtualRF` (calc.mjs:62 e :78) e `serieRentabilidadeRF` (:1155) usam `new Date(inv.data)` para calcular DIFERENÇA em dias/anos. Classe diferente: o erro é de horas num divisor de anos, muda o rendimento na terceira casa, e mexer ali alteraria valores de RF sem necessidade. O `Math.min` do seletor de período de RF (App.jsx:2390) compara datas processadas do mesmo jeito nos dois lados, então é internamente consistente.
+
+## Existe helper? Consumir, nunca reescrever inline — REGRA
+
+Quando já existe função para algo — `mesDe`/`mesKeyDe` (mês de uma data), `_ymdC` (data completa), `posicaoRV` (custo de RV), `valorMercado`/`valorAplicado` (valor de um ativo), `soAtivos` (posições vivas), `isRFAtivo` (é renda fixa) — **consumir**. Reescrever a mesma regra inline cria uma segunda definição que diverge da primeira no dia em que uma das duas for corrigida.
+
+Caso constrangedor (21/08/2026): o **Bloco G2 criou uma chave de mês própria** (`mesAtualKey` inline no `divMes`) e o **Bloco H precisou desfazê-la três blocos depois** — dentro de uma série cujo tema explícito é eliminar duplicação de definição, e logo depois de eu ter unificado `isRFAtivo` por exatamente esse motivo. Escrever a regra não impede repeti-la; o hábito é olhar se já existe ANTES de escrever a expressão, não depois de o revisor apontar.
+
+Histórico desta base, todos da mesma família: `isRFAtivo` duplicado em 6 lugares (B3) · duas definições de custo convivendo, `posicaoRV` vs soma crua de `valorInvestido` (B2/B3) · a cadeia `||` repetida em 24 pontos (D) · `mesDe` reescrito inline (G2→H).
 
 ## Número conferido de cabeça é a origem mais comum de falso alarme — REGRA
 
