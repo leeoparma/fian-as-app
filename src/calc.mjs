@@ -223,6 +223,89 @@ export function semFotos(all){
   }
   return out;
 }
+// ── Marca de origem: número sem fonte apurada não se grava ──────────────────
+// Regra nº 4 do CLAUDE.md: "números são SEMPRE calculados em JS, nunca pela IA".
+// Ela foi violada em 3 pontos e ninguém percebeu por meses — o `dy` só apareceu
+// porque a aritmética não fechava na tela; o `preco_atual` vindo do modelo era
+// INDETECTÁVEL, porque R$ 18,60 e R$ 19,40 são igualmente plausíveis, e ele
+// alimentava patrimônio, rentabilidade e o snapshot mensal congelado por 24
+// meses.
+//
+// A defesa não é lembrar de não fazer: é tornar impossível. Todo dado de
+// MERCADO carrega de onde veio, e a trava no salvarComRetry REMOVE o que não
+// tiver fonte reconhecida — mesmo padrão da trava de base64, sanitiza em vez
+// de abortar. Assim um caminho novo que esqueça de marcar é barrado na
+// gravação, não na revisão.
+export const FONTES_OK=["worker","bcb","manual","legado"];
+// Só dado de MERCADO. `precoMedio`, `quantidade` e `valorInvestido` são
+// digitados pelo usuário e não entram aqui.
+export const CAMPOS_MERCADO=["preco_atual","variacao_dia","dy","valor_dividendo","prox_dividendo","ex_dividendo"];
+
+export function temDadoDeMercado(inv){
+  return !!inv&&CAMPOS_MERCADO.some(c=>inv[c]!=null);
+}
+// Devolve {limpo, removidos:[...]}. Preserva identidade quando não há nada a
+// remover, para o chamador poder pular a gravação.
+export function sanitizaFontes(all){
+  const removidos=[];
+  const out={};
+  let mudou=false;
+  for(const k of Object.keys(all||{})){
+    const p=all[k];
+    if(!p||typeof p!=="object"||Array.isArray(p)){out[k]=p;continue;}
+    let mudouPerfil=false;
+    const invs=(p.investimentos||[]).map(i=>{
+      if(!i||!temDadoDeMercado(i))return i;
+      if(FONTES_OK.includes(i.fonteCotacao))return i;
+      const campos=CAMPOS_MERCADO.filter(c=>i[c]!=null);
+      removidos.push({perfil:k,ativo:i.ticker||i.descricao||i.id,campos,fonte:i.fonteCotacao??null});
+      mudouPerfil=true;
+      const limpo={...i};
+      for(const c of campos)delete limpo[c];
+      return limpo;
+    });
+    if(mudouPerfil){mudou=true;out[k]={...p,investimentos:invs};}else out[k]=p;
+  }
+  return {limpo:mudou?out:all,removidos};
+}
+// Marca em massa — usada uma vez, na migração. "legado" é honesto: não sabemos
+// se veio do Worker ou do modelo, e inventar "worker" seria pior que admitir.
+export function marcaFonteLegado(all){
+  const out={};let n=0;
+  for(const k of Object.keys(all||{})){
+    const p=all[k];
+    if(!p||typeof p!=="object"||Array.isArray(p)){out[k]=p;continue;}
+    let mudou=false;
+    const invs=(p.investimentos||[]).map(i=>{
+      if(!i||!temDadoDeMercado(i)||FONTES_OK.includes(i.fonteCotacao))return i;
+      mudou=true;n++;return {...i,fonteCotacao:"legado"};
+    });
+    out[k]=mudou?{...p,investimentos:invs}:p;
+  }
+  return {marcado:n?out:all,n};
+}
+
+// Apaga `dy` que veio de fonte não confiável. NÃO converte ×100: o valor do
+// BR vinha do modelo em FRAÇÃO (0,088 em vez de 8,8%), e multiplicar
+// preservaria um número inventado só porque ele parece plausível. A distinção
+// é a FONTE, não o valor — o NVDA a 0,5 é percentual legítimo e veio do
+// Worker, então fica. Só `fonteCotacao:"worker"` protege.
+export function limpaDyDeFonteDuvidosa(all){
+  const out={};let n=0;
+  for(const k of Object.keys(all||{})){
+    const p=all[k];
+    if(!p||typeof p!=="object"||Array.isArray(p)){out[k]=p;continue;}
+    let mudou=false;
+    const invs=(p.investimentos||[]).map(i=>{
+      if(!i||i.dy==null||i.fonteCotacao==="worker")return i;
+      mudou=true;n++;
+      const {dy,...resto}=i;return resto;
+    });
+    out[k]=mudou?{...p,investimentos:invs}:p;
+  }
+  return {limpo:n?out:all,n};
+}
+
 // ── Trava anti-base64: nada de imagem entra em profiles.data ────────────────
 // Incidente 29/06-11/07/2026: UMA foto de NF de 2,82MB morava dentro de
 // `transacoes[].nfImg` como data-URL, ou seja, dentro da coluna `data` do

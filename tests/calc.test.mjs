@@ -19,6 +19,7 @@ rentabilidadeAcoesDesdeInicio,ganhoAcoesEntreSnapshots,rentabilidadeAcoes,isRFAt
 estaEncerrado,soAtivos,soEncerrados,encerrarInvestimento,casaProvento,proventosDoAtivo,valorMercado,mesclarSnapshot,
 validaInvestimento,corretagemDeCompra,TIPOS_RF,valorAplicado,
 serieProventos,resumoProventos,yieldOnCost,yieldCarteira,validaProvento,mesesEmCarteira,backfillVinculoProvento,mesDe,mesKeyDe,
+sanitizaFontes,marcaFonteLegado,temDadoDeMercado,FONTES_OK,limpaDyDeFonteDuvidosa,
 INDICES_RATE,
 compoeFatorDiario,compoeFatorMensal,calcValorAtualRFHistorico,mesclarIPCAcomPrevia,compoeFatorMensalProRata,
 posicaoRV,
@@ -1529,6 +1530,85 @@ test("mesKeyDe: índice de mês base-0 vira chave base-1", ()=>{
   assert.equal(mesKeyDe(2026,11),"2026-12");
   // casa com mesDe, que é o par que faz a comparação funcionar
   assert.equal(mesDe("2026-08-01"),mesKeyDe(2026,7));
+});
+
+// ── Marca de origem: número sem fonte apurada não se grava (25/08/2026) ─────
+const COM_FONTE={id:"a",tipo:"Ações",ticker:"AAA",preco_atual:18.6,variacao_dia:1.2,dy:8.8,fonteCotacao:"worker"};
+const SEM_FONTE={id:"b",tipo:"Ações",ticker:"BBB",preco_atual:19.4,dy:0.088};   // veio da IA
+test("sanitizaFontes: remove dado de mercado sem fonte reconhecida", ()=>{
+  const {limpo,removidos}=sanitizaFontes({br:{investimentos:[COM_FONTE,SEM_FONTE]}});
+  const [a,b]=limpo.br.investimentos;
+  assert.equal(a.preco_atual,18.6);              // com fonte, intacto
+  assert.equal(b.preco_atual,undefined);         // sem fonte, REMOVIDO
+  assert.equal(b.dy,undefined);
+  assert.equal(b.ticker,"BBB");                  // o ativo continua existindo
+  assert.equal(removidos.length,1);
+  assert.deepEqual(removidos[0].campos,["preco_atual","dy"]);
+  assert.equal(removidos[0].fonte,null);
+});
+test("sanitizaFontes: fonte INVENTADA não passa — só a lista fechada", ()=>{
+  const falso={id:"c",ticker:"CCC",preco_atual:10,fonteCotacao:"ia"};
+  assert.equal(sanitizaFontes({br:{investimentos:[falso]}}).removidos.length,1);
+  for(const f of FONTES_OK)
+    assert.equal(sanitizaFontes({br:{investimentos:[{...falso,fonteCotacao:f}]}}).removidos.length,0);
+});
+test("sanitizaFontes: campo do USUÁRIO não é dado de mercado e não é tocado", ()=>{
+  // precoMedio, quantidade e valorInvestido são digitados — a trava é para
+  // número apurado de fonte externa, não para o que o Leo escreveu.
+  const digitado={id:"d",ticker:"DDD",quantidade:100,precoMedio:20,valorInvestido:2000};
+  const {limpo,removidos}=sanitizaFontes({br:{investimentos:[digitado]}});
+  assert.equal(removidos.length,0);
+  assert.equal(limpo.br.investimentos[0].precoMedio,20);
+  assert.equal(temDadoDeMercado(digitado),false);
+});
+test("sanitizaFontes: preserva identidade quando não há o que remover", ()=>{
+  const all={br:{investimentos:[COM_FONTE]}};
+  assert.equal(sanitizaFontes(all).limpo,all);   // chamador pula a gravação
+  assert.equal(sanitizaFontes(null).limpo,null);
+  assert.deepEqual(sanitizaFontes({br:null,au:"lixo"}).removidos,[]);
+});
+test("marcaFonteLegado: marca o que não tem, respeita o que já tem", ()=>{
+  const {marcado,n}=marcaFonteLegado({br:{investimentos:[COM_FONTE,SEM_FONTE]}});
+  assert.equal(n,1);
+  assert.equal(marcado.br.investimentos[0].fonteCotacao,"worker");  // não sobrescreve
+  assert.equal(marcado.br.investimentos[1].fonteCotacao,"legado");
+  // idempotente, e depois dela nada reprova — é a ordem obrigatória
+  assert.equal(marcaFonteLegado(marcado).n,0);
+  assert.equal(sanitizaFontes(marcado).removidos.length,0);
+});
+test("ORDEM: sem migração antes da trava, TODO ativo perde o preço", ()=>{
+  // Dry-run real de 25/08/2026: 22 de 22 reprovariam sem a migração. Este
+  // teste fixa a dependência de ordem, que é a parte perigosa do desenho.
+  const carteira={br:{investimentos:[{id:"x",ticker:"X",preco_atual:10},{id:"y",ticker:"Y",preco_atual:20}]}};
+  assert.equal(sanitizaFontes(carteira).removidos.length,2);
+  assert.equal(sanitizaFontes(marcaFonteLegado(carteira).marcado).removidos.length,0);
+});
+
+test("limpaDyDeFonteDuvidosa: APAGA, não converte ×100", ()=>{
+  // O dy do BR vinha do modelo em fração (0,088 = 8,8%). Converter preservaria
+  // um número de origem não confiável só porque ele parece plausível.
+  const all={br:{investimentos:[
+    {id:"a",ticker:"BBAS3",dy:0.088},                          // IA, fração
+    {id:"b",ticker:"QBE",dy:4.72,fonteCotacao:"worker"},       // Worker, %
+    {id:"c",ticker:"NVDA",dy:0.5,fonteCotacao:"worker"},       // Worker, 0,5% legítimo
+    {id:"d",ticker:"XXX"},                                     // sem dy
+  ]}};
+  const {limpo,n}=limpaDyDeFonteDuvidosa(all);
+  const [a,b,c,d]=limpo.br.investimentos;
+  assert.equal(n,1);
+  assert.equal(a.dy,undefined);                 // apagado
+  assert.equal(a.ticker,"BBAS3");               // o resto do ativo fica
+  assert.equal(b.dy,4.72);
+  assert.equal(c.dy,0.5);                       // 0,5 do Worker SOBREVIVE — a
+  assert.equal(d.dy,undefined);                 // distinção é a fonte, não o valor
+  // e NUNCA multiplica: se convertesse, a seria 8.8
+  assert.notEqual(a.dy,8.8);
+});
+test("limpaDyDeFonteDuvidosa: idempotente e preserva identidade", ()=>{
+  const ok={br:{investimentos:[{id:"b",dy:4.72,fonteCotacao:"worker"}]}};
+  assert.equal(limpaDyDeFonteDuvidosa(ok).limpo,ok);
+  assert.equal(limpaDyDeFonteDuvidosa(ok).n,0);
+  assert.equal(limpaDyDeFonteDuvidosa(null).n,0);
 });
 test("composicaoAcoes: carteira vazia devolve lista vazia sem dividir por zero", ()=>{
   assert.deepEqual(composicaoAcoes([]),[]);

@@ -11,7 +11,7 @@ import {
   semFotos, mesclarFotos, extraiFotosBase64, projetarFluxo,
   soAtivos, soEncerrados, encerrarInvestimento, casaProvento, proventosDoAtivo, valorMercado, mesclarSnapshot,
   validaInvestimento, corretagemDeCompra, valorAplicado, validaProvento, backfillVinculoProvento, mesDe, mesKeyDe,
-  resumoProventos, yieldCarteira, addDias, marcarDuplicatas, montarAgendaPush,
+  resumoProventos, yieldCarteira, sanitizaFontes, marcaFonteLegado, limpaDyDeFonteDuvidosa, addDias, marcarDuplicatas, montarAgendaPush,
   compraAcao, vendaAcao, pendentesRecorrenciaSW, relatorioMensal, compararMeses, serieGastoAcumulado, extratoComSaldo,
   totalPagoFatura, calcFaturaPagamentos, posicaoRV,
 rentabilidadeRF, serieRentabilidadeRF, composicaoAcoes,
@@ -131,6 +131,15 @@ let _pendenteDeSalvar=false; // true enquanto existir uma gravação que ainda n
 // consegue pôr imagem em `profiles.data`, mesmo um caminho que ainda não
 // existe. A ordem é enfileirar → limpar → gravar: inverter perde a foto.
 async function sanitizarParaNuvem(id,dados){
+  // ⚠️ Segunda trava, mesmo choke point: número de MERCADO sem fonte apurada
+  // não se grava. A regra nº 4 ("números nunca vêm da IA") foi violada em 3
+  // pontos e ninguém percebeu por meses — o preço vindo do modelo era
+  // INDETECTÁVEL, porque qualquer valor plausível passa. Aqui o dado sem
+  // `fonteCotacao` reconhecida é REMOVIDO, não aceito: se um caminho novo
+  // esquecer de marcar, ele é barrado na gravação, não na revisão.
+  const f=sanitizaFontes(dados);
+  if(f.removidos.length)console.warn("[fonte] dado de mercado sem origem apurada, removido:",f.removidos);
+  dados=f.limpo;
   const {limpo,fotos}=extraiFotosBase64(dados);
   if(!fotos.length)return dados;                    // caminho normal, custo zero
   console.warn("[nf] base64 barrado no payload:",fotos.length,"foto(s) — indo para a fila local");
@@ -2181,7 +2190,7 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
       // Série real do BCB quando disponível (mesmo caminho do card) — corrige na ORIGEM
       // o campo inv.valorAtual, em vez de cada tela que o lê ter que saber disso.
       const va=calcValorAtualRFHistorico(inv,seriesBCB,new Date()).valor;
-      setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,valorAtual:va,lucro:posicaoRV({...x,valorAtual:va}).lucro,preco_atual:va/(inv.quantidade||1)}:x)}));
+      setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,fonteCotacao:"bcb",valorAtual:va,lucro:posicaoRV({...x,valorAtual:va}).lucro,preco_atual:va/(inv.quantidade||1)}:x)}));
       return;
     }
     if(!inv.ticker) return;
@@ -2196,29 +2205,33 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
       if(real.prox_dividendo) divUpdate.prox_dividendo=real.prox_dividendo;
       if(real.ex_dividendo) divUpdate.ex_dividendo=real.ex_dividendo;
       if(real.valor_dividendo!=null) divUpdate.valor_dividendo=Math.round(real.valor_dividendo*100)/100;
-      setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,preco_atual:real.preco_atual,variacao_dia:real.variacao_dia,valorAtual:va,lucro,...divUpdate,ultimaAtualizacao:new Date().toLocaleTimeString("pt-BR")}:x)}));
+      setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,fonteCotacao:"worker",preco_atual:real.preco_atual,variacao_dia:real.variacao_dia,valorAtual:va,lucro,...divUpdate,ultimaAtualizacao:new Date().toLocaleTimeString("pt-BR")}:x)}));
       // Só pede ao Claude o que o Yahoo NÃO trouxe (resumo, ou dividendo faltante)
-      if(!real.dy||!real.prox_dividendo){
+      // ⚠️ `dy`, `valor_dividendo` e `preco_atual` NÃO se pedem ao modelo.
+      // Até 25/08/2026 o app pedia os três quando o Worker não trazia, e
+      // gravava cru: o `dy` do BR vinha em FRAÇÃO (0,088 em vez de 8,8%) e
+      // aparecia 100× menor na estimativa de renda; o preço entrava no
+      // patrimônio e no snapshot congelado por 24 meses, sem como detectar.
+      // Só `resumo` (texto) continua vindo daqui. Sem fonte, campo VAZIO —
+      // vazio é informação, número alucinado não é.
+      if(!inv.resumo){
         try{
           const mercado=nomeMercado(profileId);
-          const txt=await askClaude(`Para o ativo ${inv.ticker} na ${mercado} com preço atual de ${real.preco_atual}, retorne APENAS JSON: {${!real.dy?'"dy":number_or_null,':''}${!real.prox_dividendo?'"prox_dividendo":"YYYY-MM-DD or null","valor_dividendo":number_or_null,':''}"resumo":"1 frase sobre perspectiva atual"}. Use a data real do próximo pagamento de dividendo se souber; caso contrário use null.`,300);
+          const txt=await askClaude(`Para o ativo ${inv.ticker} na ${mercado}, retorne APENAS JSON: {"resumo":"1 frase sobre perspectiva atual"}. Não invente números.`,200);
           const extra=JSON.parse(txt);
-          // Não sobrescreve o que o Yahoo já trouxe
           const limpo={};
-          if(!real.dy&&extra.dy!=null) limpo.dy=extra.dy;
-          if(!real.prox_dividendo&&extra.prox_dividendo) limpo.prox_dividendo=extra.prox_dividendo;
-          if(!real.valor_dividendo&&extra.valor_dividendo!=null) limpo.valor_dividendo=extra.valor_dividendo;
-          if(extra.resumo) limpo.resumo=extra.resumo;
+          if(extra.resumo) limpo.resumo=extra.resumo;   // só texto
           if(Object.keys(limpo).length) setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,...limpo}:x)}));
         }catch{}
       }
     }else{
-      try{
-        const mercado=nomeMercado(profileId);
-        const txt=await askClaude(`Preço de fechamento mais recente do ativo ${inv.ticker} na ${mercado}. JSON apenas: {"preco_atual":number}`,150);
-        const obj=JSON.parse(txt);
-        if(obj.preco_atual>0){const va=obj.preco_atual*(inv.quantidade||1);setData(d=>({...d,investimentos:d.investimentos.map(x=>x.id===inv.id?{...x,preco_atual:obj.preco_atual,valorAtual:va,lucro:posicaoRV({...x,valorAtual:va}).lucro,ultimaAtualizacao:new Date().toLocaleTimeString("pt-BR")}:x)}));}
-      }catch{}
+      // ⚠️ REMOVIDO em 25/08/2026: aqui o app pedia o PREÇO de fechamento ao
+      // modelo e gravava em preco_atual, valorAtual e lucro. Um preço alucinado
+      // é INDETECTÁVEL — R$ 18,60 e R$ 19,40 são igualmente plausíveis — e ia
+      // parar no snapshot mensal, congelado por 24 meses, alimentando "No mês"
+      // e "No ano". Sem cotação apurada, o ativo fica SEM preço e a tela avisa,
+      // em vez de mostrar um número que ninguém pode conferir. Regra nº 4.
+      console.warn(`[cotação] ${inv.ticker}: fonte não retornou preço — campo fica vazio (nunca preenchido por IA)`);
     }
     setLoadingId(null);
   }
@@ -5308,6 +5321,31 @@ function AppInner(){
     }
     if(ruins)console.warn(`[proventos] ${ruins} provento(s) inválido(s):`,porPerfilP);
     else console.log("[proventos] auditoria ok — nenhum provento inválido");
+  },[session,allData]);
+
+  // Migração de fonte + limpeza do dy em fração. Roda ANTES de qualquer
+  // gravação: a trava do salvarComRetry remove dado de mercado sem
+  // `fonteCotacao`, e sem esta passada os 22 ativos existentes perderiam preço
+  // (medido no dry-run de 25/08/2026: 22 reprovariam, 0 depois da migração).
+  // "legado" é honesto — não sabemos se veio do Worker ou do modelo.
+  //
+  // Os `dy` em fração NÃO são convertidos ×100: o valor veio de fonte não
+  // confiável, e multiplicar preservaria um número inventado só porque ele
+  // parece plausível. São APAGADOS e voltam da fonte nova quando houver.
+  const migDone=useRef(false);
+  useEffect(()=>{
+    if(!session||migDone.current||!allData||!loadOk.current)return;
+    migDone.current=true;
+    setAllData(all=>{
+      const {marcado,n}=marcaFonteLegado(all);
+      const {limpo,n:limpos}=limpaDyDeFonteDuvidosa(marcado);
+      if(!n&&!limpos)return all;
+      console.log(`[fonte] migração: ${n} ativo(s) marcados como "legado", ${limpos} dy de fonte duvidosa apagado(s)`);
+      const uid=session.user.id;
+      try{lsSet(kAllProfiles(uid),limpo);}catch{}
+      salvarComRetry(uid,limpo).catch(()=>{});
+      return limpo;
+    });
   },[session,allData]);
 
   // Backfill do vínculo provento→ativo (uma vez, idempotente). Registros
