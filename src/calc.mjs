@@ -459,6 +459,13 @@ export const soAtivos=lista=>(lista||[]).filter(i=>i&&!i.encerrado);
 export const soEncerrados=lista=>(lista||[]).filter(i=>i&&i.encerrado);
 export function encerrarInvestimento(inv,{data,venda}={}){
   return {...inv,
+    // Custo da posição NO MOMENTO do encerramento, capturado ANTES de zerar.
+    // Sem ele o custo histórico da posição fechada só seria reconstituível por
+    // engenharia reversa de vendas[].resultado (bruto − corretagem − resultado),
+    // que é frágil. Com ele, o yield de posição encerrada fica calculável — hoje
+    // não é usado, porque yield on cost é propriedade de posição que você TEM
+    // (ver yieldCarteira), mas apuração e retorno total vão precisar.
+    custoEncerramento:posicaoRV(inv).custo,
     quantidade:0,valorInvestido:0,valor:0,valorAtual:0,lucro:0,
     encerrado:true,dataEncerramento:data,
     vendas:[...(inv?.vendas||[]),...(venda?[venda]:[])]};

@@ -846,6 +846,25 @@ test("encerrarInvestimento: venda ANTERIOR sobrevive ao encerramento", ()=>{
   assert.equal(e.precoMedio,20);                     // base de cálculo futura
   assert.equal(ATIVO_VENDIDO.quantidade,100);        // não muta o original
 });
+test("encerrarInvestimento: grava custoEncerramento ANTES de zerar (G4)", ()=>{
+  // 100 un × PM 20 = 2.000. Depois do encerramento tudo vira 0, então este é o
+  // único registro do que a posição custou — e ele tem de ser capturado antes.
+  const e=encerrarInvestimento(ATIVO_VENDIDO,{data:"2026-08-11",venda:VENDA});
+  assert.equal(e.custoEncerramento,2000);
+  assert.equal(e.valorInvestido,0);                  // o resto zerado, como antes
+  assert.equal(posicaoRV(e).custo,0);                // e posicaoRV segue devolvendo 0
+  // continua fora do yield: a captura é para apuração futura, não muda o cálculo
+  assert.equal(yieldCarteira([e],[],{hoje:HJ}).custo,0);
+  assert.equal(yieldCarteira([e],[],{hoje:HJ}).ativosTotal,0);
+});
+test("encerrarInvestimento: custoEncerramento usa qtd×PM, não campo gravado", ()=>{
+  // mesma disciplina do resto da base: o valorInvestido pode estar podre
+  const podre={...ATIVO_VENDIDO,valorInvestido:9999,valor:9999};
+  assert.equal(encerrarInvestimento(podre,{data:"2026-08-11"}).custoEncerramento,2000);
+  // sem PM (ativo legado tipo "Outros"), cai no valor aplicado
+  const semPM={id:"o",tipo:"Outros",valor:450};
+  assert.equal(encerrarInvestimento(semPM,{data:"2026-08-11"}).custoEncerramento,450);
+});
 
 test("soAtivos: exclui encerrado MESMO com valor velho não-zerado (armadilha do ||)", ()=>{
   // Regra do CXSE3: `valorAtual||valorInvestido||valor||0` pula campo zerado,
