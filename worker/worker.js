@@ -74,6 +74,109 @@ async function fetchIndicadoresBrapi(yfTicker, env) {
   }
 }
 
+// ── DY do BR: proventos REAIS do Fundamentus, calculados em JS ───────────────
+// Por que existe: até 25/08/2026 o app pedia o `dy` do BR ao modelo de IA,
+// porque a brapi grátis devolve null e o fallback do Yahoo vinha vazio. O
+// modelo respondia em FRAÇÃO sem declarar unidade (0,088 em vez de 8,8%) e o
+// valor era gravado cru — a estimativa de renda saía 100× menor. Pior: o
+// número era inventado. Para o BBAS3 o modelo dava 8,8%; as fontes reais dão
+// 2,4%. Regra nº 4 do CLAUDE.md: número NUNCA vem da IA.
+//
+// Fonte: fundamentus.com.br/proventos.php — validada em 25/08/2026 contra o
+// informe de rendimentos XP 2025 do Leo: JCP do BBAS3 sobre 148 ações,
+// 0,0719/ação pago em 11/12/2025 (R$ 10,64) e 0,0458/ação pago em 12/12/2025
+// (R$ 6,78). Os dois batem exatamente, por valor, tipo e data de PAGAMENTO.
+// Não usamos o campo "Div. Yield" publicado: o CLAUDE.md já registra que ele
+// não é reproduzível, e o comentário em fetchFundamentus diz o mesmo.
+//
+// ⚠️ A página é ISO-8859-1. Lê-la como UTF-8 corrompe os acentos e quebra a
+// classificação de tipo ("JRS CAP PRÓPRIO" vira lixo).
+const PROVENTOS_CACHE_V = "v1";
+
+// ⚠️ 6 grafias diferentes para a MESMA coisa, medidas no BBAS3 e no ITUB4:
+// "JRS CAP PROPRIO", "JRS CAP PRÓPRIO", "JUROS", "Juros" (JCP, IR 15% na
+// fonte) e "DIVIDENDO", "Dividendo", "DIVIDENDO MENSAL", "Dividendo mensal"
+// (isento). Normaliza acento e caixa antes de decidir — comparar a string
+// crua erraria em ~40% das linhas.
+function _ehJCP(tipo) {
+  const t = String(tipo || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+  return /JRS|JUROS|JCP/.test(t);
+}
+function _dataBRparaISO(s) {
+  const m = String(s || "").match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
+}
+
+// Busca e faz o parse da LISTA de proventos. É a lista que fica em cache (24h),
+// NUNCA o DY: provento muda poucas vezes por ano, preço muda a cada minuto.
+// Cachear o DY faria numerador e denominador virem de instantes diferentes —
+// que é exatamente o defeito que esta função existe para não repetir.
+async function fetchProventos(papel) {
+  const cache = caches.default;
+  const chave = new Request(`https://cache.local/proventos/${PROVENTOS_CACHE_V}/${encodeURIComponent(papel)}`);
+  const hit = await cache.match(chave);
+  if (hit) {
+    const j = await hit.json();
+    return { ...j, doCache: true };
+  }
+  try {
+    const r = await fetch(`https://www.fundamentus.com.br/proventos.php?papel=${encodeURIComponent(papel)}&tipo=2`, {
+      headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)" },
+    });
+    if (!r.ok) { console.error("[proventos] HTTP", r.status, "para", papel); return null; }
+    const html = new TextDecoder("iso-8859-1").decode(await r.arrayBuffer());
+    const linhas = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)]
+      .map(m => [...m[1].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/g)].map(c => c[1].replace(/<[^>]*>/g, "").trim()))
+      .filter(c => c.length >= 4 && /^\d{2}\/\d{2}\/\d{4}$/.test(c[0]));
+    // Sem nenhuma linha = página mudou de forma ou nos bloquearam. Devolve null
+    // para o chamador deixar o dy vazio — nunca zero (regra 3, zero-filler).
+    if (!linhas.length) { console.error("[proventos] 0 linhas para", papel, "— layout mudou ou bloqueio"); return null; }
+    const itens = linhas.map(l => ({
+      pago: _dataBRparaISO(l[3]) || _dataBRparaISO(l[0]),
+      valor: parseFloat(String(l[1]).replace(/\./g, "").replace(",", ".")),
+      jcp: _ehJCP(l[2]),
+    })).filter(x => x.pago && Number.isFinite(x.valor) && x.valor > 0);
+    const corpo = JSON.stringify({ papel, itens, em: new Date().toISOString() });
+    await cache.put(chave, new Response(corpo, {
+      headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "public, max-age=86400" },
+    }));
+    return { papel, itens, em: new Date().toISOString(), doCache: false };
+  } catch (erro) {
+    console.error("[proventos] falha para", papel, ":", erro?.message || erro);
+    return null;
+  }
+}
+
+// DY em PERCENTUAL (8.8 = 8,8%), NUNCA fração — a ambiguidade de unidade foi a
+// causa do bug de 25/08/2026, e o caminho do Yahoo (AU/US) já devolve assim.
+// O preço vem de FORA, da mesma resposta do /quote, para numerador e
+// denominador serem do mesmo instante.
+function calcDY(itens, precoAtual, hojeISO) {
+  if (!Array.isArray(itens) || !itens.length) return null;
+  if (!Number.isFinite(precoAtual) || precoAtual <= 0) return null;
+  const hoje = hojeISO || new Date().toISOString().slice(0, 10);
+  const d = new Date(hoje + "T12:00:00Z"); d.setUTCFullYear(d.getUTCFullYear() - 1);
+  const ini = d.toISOString().slice(0, 10);
+  // Janela de 365 dias por data de PAGAMENTO. Provento com data futura fica de
+  // FORA: foi declarado, não recebido — mesma regra do validaProvento no app.
+  const j12 = itens.filter(x => x.pago > ini && x.pago <= hoje);
+  if (!j12.length) return null;                       // null, jamais 0
+  const bruto = j12.reduce((a, x) => a + x.valor, 0);
+  const jcp = j12.filter(x => x.jcp).reduce((a, x) => a + x.valor, 0);
+  const isento = bruto - jcp;
+  // IR de 15% só sobre JCP — dividendo é isento para PF. Aplicar alíquota única
+  // sobre o total erraria em todo ativo que pague os dois (ITUB4 paga).
+  const liquido = isento + jcp * 0.85;
+  const r2 = n => Math.round(n * 100) / 100;
+  const r4 = n => Math.round(n * 10000) / 10000;
+  return {
+    dy: r2(bruto / precoAtual * 100),                 // % bruto (convenção de mercado)
+    dy_liquido: r2(liquido / precoAtual * 100),       // % líquido de IR
+    proventos_12m: { bruto: r4(bruto), liquido: r4(liquido), jcp: r4(jcp), isento: r4(isento), n: j12.length },
+    dy_janela: { de: ini, ate: hoje },
+  };
+}
+
 // ── Fundamentus (scraping) — complementa brapi para P/VP, ROE, Margem etc ─────
 // Fonte gratuita, sem API oficial. HTML estático = parse por label.
 // FRÁGIL: se o site mudar o layout, retorna null e o app cai pro "—".
@@ -1363,6 +1466,25 @@ export default {
         const ind = await fetchIndicadores(cotacao.ticker || ticker, env);
         if (ind) Object.assign(cotacao, ind);
       }
+      // DY do BR pelos proventos REAIS do Fundamentus. Só entra quando o
+      // indicador não veio de outra fonte apurada (AU/US vêm do Yahoo já em %)
+      // e quando há preço na MESMA resposta — o preço do denominador é este,
+      // não uma segunda busca. `fonte` acompanha o valor porque a trava do
+      // app (salvarComRetry) remove dado de mercado sem origem reconhecida.
+      if (cotacao && full && market === "br" && cotacao.dy == null && cotacao.preco_atual > 0) {
+        const pv = await fetchProventos(ticker);
+        const calc = pv && calcDY(pv.itens, cotacao.preco_atual);
+        if (calc) {
+          Object.assign(cotacao, calc);
+          cotacao.dy_fonte_calculo = "fundamentus/proventos";
+          if (pv.doCache) cotacao.proventos_em = pv.em;   // idade da lista em cache
+        } else {
+          // Sem provento na janela, ou fonte fora do ar: dy fica VAZIO.
+          // Nunca zero (zero-filler, 5 ocorrências neste projeto) e nunca IA.
+          console.warn("[quote] sem DY apurável para", ticker, pv ? "(sem provento na janela)" : "(fonte indisponível)");
+        }
+      }
+      if (cotacao && cotacao.dy != null) cotacao.fonte = "worker";
       return new Response(JSON.stringify(cotacao || { error: "not found" }), {
         status: cotacao ? 200 : 404,
         headers: { "Content-Type": "application/json; charset=utf-8", ...CORS }

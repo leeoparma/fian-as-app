@@ -2179,7 +2179,14 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
   const em7=new Date(hoje.getTime()+7*864e5).toISOString().slice(0,10);
   const agProximos=agFuturos.filter(a=>(a.dataPagamento||"")<=em7);
   // Estimativa de renda passiva pelo DY histórico
-  const estDY=soAtivos(data.investimentos).filter(i=>i.dy>0&&valorMercado(i)>0).map(i=>({ticker:i.ticker||i.descricao||i.tipo,dy:i.dy,anual:valorMercado(i)*i.dy/100})).sort((a,b)=>b.anual-a.anual);
+  // Estimativa em R$ usa o DY LÍQUIDO quando o Worker o calculou; cai no bruto
+  // só para ativo cujo dy veio do Yahoo (AU/US), onde não há retenção na fonte
+  // equivalente. `liquido` diz qual base foi usada, para o rótulo não mentir.
+  const estDY=soAtivos(data.investimentos).filter(i=>i.dy>0&&valorMercado(i)>0).map(i=>{
+    const usaLiq=Number.isFinite(i.dy_liquido);
+    return {ticker:i.ticker||i.descricao||i.tipo,dy:i.dy,liquido:usaLiq,
+            anual:valorMercado(i)*(usaLiq?i.dy_liquido:i.dy)/100};
+  }).sort((a,b)=>b.anual-a.anual);
   const totEstAnual=estDY.reduce((s,x)=>s+x.anual,0);
 
   async function buscarDados(inv){
@@ -2202,6 +2209,12 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
       // Usa dados de dividendo REAIS do Yahoo quando disponíveis
       const divUpdate={};
       if(real.dy!=null) divUpdate.dy=Math.round(real.dy*100)/100;
+      // DY líquido de IR (15% só sobre JCP; dividendo é isento). Vem calculado
+      // do Worker, pelos proventos reais — a estimativa em R$ usa ESTE, para
+      // ficar na mesma base dos proventos recebidos (G2), que também são
+      // líquidos. Bruto e líquido lado a lado em bases diferentes seria a
+      // mesma armadilha das duas definições de custo.
+      if(real.dy_liquido!=null) divUpdate.dy_liquido=Math.round(real.dy_liquido*100)/100;
       if(real.prox_dividendo) divUpdate.prox_dividendo=real.prox_dividendo;
       if(real.ex_dividendo) divUpdate.ex_dividendo=real.ex_dividendo;
       if(real.valor_dividendo!=null) divUpdate.valor_dividendo=Math.round(real.valor_dividendo*100)/100;
@@ -2592,9 +2605,9 @@ function InvestimentosTab({data,setData,currency,profileId,userId}){
 
       {estDY.length>0&&<Card style={{border:`1px solid ${D.blue}33`}}>
         <p style={{margin:0,fontSize:13,fontWeight:700,color:D.text}}>📈 Estimativa de renda passiva</p>
-        <p style={{margin:"2px 0 8px",fontSize:11,color:D.text3}}>Baseada no DY histórico × sua posição. É estimativa, não valor garantido nem a data real.</p>
+        <p style={{margin:"2px 0 8px",fontSize:11,color:D.text3}}>Proventos dos últimos 12 meses × sua posição. {estDY.some(x=>x.liquido)?<b>Valores LÍQUIDOS de IR (15% sobre JCP; dividendo é isento).</b>:null} É estimativa, não valor garantido nem a data real.</p>
         {estDY.map(x=><div key={x.ticker} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderTop:`1px solid ${D.border}`}}>
-          <span style={{color:D.text2}}>{x.ticker} <span style={{color:D.text3,fontSize:10}}>DY {x.dy}%</span></span>
+          <span style={{color:D.text2}}>{x.ticker} <span style={{color:D.text3,fontSize:10}}>DY {x.dy}% bruto{x.liquido?" · líquido":""}</span></span>
           <span style={{color:D.text}}>{fmtM(x.anual,currency)}/ano · <span style={{color:D.text3}}>{fmtM(x.anual/12,currency)}/mês</span></span>
         </div>)}
         <div style={{display:"flex",justifyContent:"space-between",marginTop:8,paddingTop:8,borderTop:`1px solid ${D.border2}`,fontSize:12,fontWeight:700}}>

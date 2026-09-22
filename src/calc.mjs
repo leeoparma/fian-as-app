@@ -239,13 +239,25 @@ export function semFotos(all){
 export const FONTES_OK=["worker","bcb","manual","legado"];
 // Só dado de MERCADO. `precoMedio`, `quantidade` e `valorInvestido` são
 // digitados pelo usuário e não entram aqui.
-export const CAMPOS_MERCADO=["preco_atual","variacao_dia","dy","valor_dividendo","prox_dividendo","ex_dividendo"];
+export const CAMPOS_MERCADO=["preco_atual","variacao_dia","dy","dy_liquido","valor_dividendo","prox_dividendo","ex_dividendo"];
 
 export function temDadoDeMercado(inv){
   return !!inv&&CAMPOS_MERCADO.some(c=>inv[c]!=null);
 }
 // Devolve {limpo, removidos:[...]}. Preserva identidade quando não há nada a
 // remover, para o chamador poder pular a gravação.
+// ⚠️⚠️ DEPENDÊNCIA DE ORDEM — LEIA ANTES DE MEXER ⚠️⚠️
+// `marcaFonteLegado` TEM que rodar ANTES desta função na vida do app.
+// Esta aqui REMOVE todo dado de mercado sem `fonteCotacao` reconhecida; os
+// ativos que já existiam quando a marca foi criada (25/08/2026) não têm
+// nenhuma, e sem a migração perdem preço, DY e dividendos DE UMA VEZ.
+// Medido no dry-run contra o export real: 22 de 22 ativos reprovariam sem a
+// migração; 0 depois dela. No app isso é garantido pelo efeito `migDone`, que
+// roda no boot com o guard `loadOk.current` — ou seja, só depois de a nuvem
+// responder. Se alguém mover a trava para antes do load, ou remover o efeito
+// de migração achando que é código morto, a carteira inteira perde cotação no
+// primeiro save. Há teste fixando essa ordem: "ORDEM: sem migração antes da
+// trava, TODO ativo perde o preço".
 export function sanitizaFontes(all){
   const removidos=[];
   const out={};
