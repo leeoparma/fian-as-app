@@ -239,7 +239,7 @@ export function semFotos(all){
 export const FONTES_OK=["worker","bcb","manual","legado"];
 // Só dado de MERCADO. `precoMedio`, `quantidade` e `valorInvestido` são
 // digitados pelo usuário e não entram aqui.
-export const CAMPOS_MERCADO=["preco_atual","variacao_dia","dy","dy_liquido","valor_dividendo","prox_dividendo","ex_dividendo"];
+export const CAMPOS_MERCADO=["preco_atual","variacao_dia","dy","dy_liquido","ir_jcp","valor_dividendo","prox_dividendo","ex_dividendo"];
 
 export function temDadoDeMercado(inv){
   return !!inv&&CAMPOS_MERCADO.some(c=>inv[c]!=null);

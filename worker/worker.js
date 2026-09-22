@@ -93,6 +93,31 @@ async function fetchIndicadoresBrapi(yfTicker, env) {
 // classificação de tipo ("JRS CAP PRÓPRIO" vira lixo).
 const PROVENTOS_CACHE_V = "v1";
 
+// ── IR sobre JCP: TABELA POR VIGÊNCIA, não constante ────────────────────────
+// A alíquota MUDOU: 15% até 31/12/2025, 17,5% a partir de 01/01/2026 (Lei
+// Complementar 224/2025, publicada em 26/12/2025 — informado pelo Leo em
+// 22/09/2026; não verifiquei a norma).
+//
+// É tabela e não constante justamente porque muda: há menção a 20% em 2028,
+// de fonte única e fraca, deliberadamente NÃO implementada. Quando confirmar,
+// acrescente uma linha aqui e nada mais precisa mudar.
+//
+// ⚠️ FONTE ÚNICA DA ALÍQUOTA. O app NÃO tem cópia disto: o Worker devolve em
+// `ir_jcp` a alíquota que aplicou, e o rótulo da tela lê dali. Duas cópias da
+// mesma regra divergem no dia em que uma das duas for corrigida — foi o que
+// aconteceu com `isRFAtivo` (6 cópias) e com a cadeia `||` (24) neste projeto.
+const IR_JCP = [
+  { desde: "1996-01-01", aliquota: 0.15,  norma: "Lei 9.249/1995" },
+  { desde: "2026-01-01", aliquota: 0.175, norma: "LC 224/2025" },
+];
+// Histórico recebido → alíquota da DATA DE PAGAMENTO.
+// Estimativa futura  → alíquota VIGENTE hoje.
+function aliquotaJCP(dataISO) {
+  let faixa = IR_JCP[0];
+  for (const f of IR_JCP) if (String(dataISO || "") >= f.desde) faixa = f;
+  return faixa;
+}
+
 // ⚠️ 6 grafias diferentes para a MESMA coisa, medidas no BBAS3 e no ITUB4:
 // "JRS CAP PROPRIO", "JRS CAP PRÓPRIO", "JUROS", "Juros" (JCP, IR 15% na
 // fonte) e "DIVIDENDO", "Dividendo", "DIVIDENDO MENSAL", "Dividendo mensal"
@@ -164,15 +189,33 @@ function calcDY(itens, precoAtual, hojeISO) {
   const bruto = j12.reduce((a, x) => a + x.valor, 0);
   const jcp = j12.filter(x => x.jcp).reduce((a, x) => a + x.valor, 0);
   const isento = bruto - jcp;
-  // IR de 15% só sobre JCP — dividendo é isento para PF. Aplicar alíquota única
-  // sobre o total erraria em todo ativo que pague os dois (ITUB4 paga).
-  const liquido = isento + jcp * 0.85;
+  // IR só sobre JCP — dividendo é isento para PF até R$ 50 mil/mês por empresa.
+  // Aplicar alíquota única sobre o total erraria em todo ativo que pague os
+  // dois: o ITUB4 paga, e a diferença mede 0,7 ponto de DY.
+  //
+  // DUAS bases, de propósito:
+  //  · histórico — cada pagamento na alíquota da SUA data (o que de fato caiu
+  //    na conta). O BBAS3 tem pagamentos de dez/2025 a 15% e de 2026 a 17,5%.
+  //  · estimativa — todo o JCP na alíquota VIGENTE HOJE, porque projeta para a
+  //    frente. É esta que alimenta `dy_liquido` e o painel.
+  const hist = j12.reduce((a, x) => a + (x.jcp ? x.valor * (1 - aliquotaJCP(x.pago).aliquota) : x.valor), 0);
+  const faixaHoje = aliquotaJCP(hoje);
+  const liquido = isento + jcp * (1 - faixaHoje.aliquota);
   const r2 = n => Math.round(n * 100) / 100;
   const r4 = n => Math.round(n * 10000) / 10000;
   return {
     dy: r2(bruto / precoAtual * 100),                 // % bruto (convenção de mercado)
-    dy_liquido: r2(liquido / precoAtual * 100),       // % líquido de IR
-    proventos_12m: { bruto: r4(bruto), liquido: r4(liquido), jcp: r4(jcp), isento: r4(isento), n: j12.length },
+    dy_liquido: r2(liquido / precoAtual * 100),       // % líquido, alíquota de hoje
+    // A alíquota viaja JUNTO do número. O rótulo do app lê daqui — não tem
+    // cópia própria, para não divergir quando a lei mudar de novo.
+    ir_jcp: faixaHoje.aliquota,
+    ir_jcp_norma: faixaHoje.norma,
+    ir_jcp_desde: faixaHoje.desde,
+    proventos_12m: {
+      bruto: r4(bruto), jcp: r4(jcp), isento: r4(isento), n: j12.length,
+      liquido: r4(liquido),              // projeção: alíquota de hoje
+      liquido_historico: r4(hist),       // realizado: alíquota de cada data
+    },
     dy_janela: { de: ini, ate: hoje },
   };
 }
